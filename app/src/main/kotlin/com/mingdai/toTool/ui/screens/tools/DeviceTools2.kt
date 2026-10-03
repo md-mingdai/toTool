@@ -56,6 +56,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.AppDialog
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /* ------------------------------ 提取 APK ------------------------------ */
 
@@ -339,6 +349,20 @@ fun VibratorTool(padding: PaddingValues) {
 
 /* ------------------------------ 提取当前壁纸 ------------------------------ */
 
+/**
+ * 能否读取真实壁纸：
+ * - Android 12 及以下：READ_EXTERNAL_STORAGE（普通运行时权限）
+ * - Android 13+：只有“所有文件访问权限”(MANAGE_EXTERNAL_STORAGE) 能读到真实壁纸，
+ *   READ_MEDIA_IMAGES 不算数；没有它时系统返回默认壁纸，或直接抛 SecurityException。
+ */
+private fun hasWallpaperAccess(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
 @Composable
 fun WallpaperExtractorTool(padding: PaddingValues) {
     val context = LocalContext.current
@@ -346,8 +370,46 @@ fun WallpaperExtractorTool(padding: PaddingValues) {
     var busy by remember { mutableStateOf(false) }
     var tick by remember { mutableStateOf(0) }
     var failReason by remember { mutableStateOf<String?>(null) }
+    var granted by remember { mutableStateOf(hasWallpaperAccess(context)) }
 
-    LaunchedEffect(tick) {
+    // Android 12 及以下：弹出系统的存储权限对话框
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted = hasWallpaperAccess(context) }
+
+    // Android 13+：跳到“所有文件访问权限”设置页；用户开完开关返回时，这里会重新检查并自动读取
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = hasWallpaperAccess(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun requestAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val appPage = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}"),
+            )
+            try {
+                context.startActivity(appPage)
+            } catch (e: Exception) {
+                // 个别 ROM 没有按应用的页面，退回到“所有文件访问权限”总列表
+                runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+            }
+        } else {
+            permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    LaunchedEffect(granted, tick) {
+        if (!granted) {
+            bitmap = null
+            failReason = null
+            return@LaunchedEffect
+        }
         busy = true
         failReason = null
         bitmap = withContext(Dispatchers.IO) {
@@ -363,7 +425,7 @@ fun WallpaperExtractorTool(padding: PaddingValues) {
                     pfd.use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor) }
                 }
             } catch (e: SecurityException) {
-                failReason = "系统限制：读取壁纸需要“所有文件访问权限”（Android 13+ 起不再允许普通应用读取）"
+                failReason = "系统拒绝了读取，请确认权限已开启后点「重新读取」"
                 null
             } catch (e: Exception) {
                 failReason = e.message
@@ -381,6 +443,29 @@ fun WallpaperExtractorTool(padding: PaddingValues) {
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
+
+        if (!granted) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(200.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        "Android 13 及以上需要授予「所有文件访问权限」才能读取真实壁纸（没有它时系统只会给出默认壁纸）。点下面的按钮，在设置页打开开关后返回即可。"
+                    else
+                        "读取壁纸需要存储权限，点下面的按钮授权。",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            PrimaryButton(
+                onClick = { requestAccess() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("授予权限")
+            }
+            return@ToolBody
+        }
+
         if (busy) {
             Box(
                 modifier = Modifier.fillMaxWidth().height(260.dp),
