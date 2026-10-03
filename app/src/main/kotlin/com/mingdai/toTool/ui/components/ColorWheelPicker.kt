@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -127,10 +128,15 @@ private fun SliderRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 左右两侧都用固定宽度：「色相」2 个字、「饱和度」3 个字，数值「197°」「34%」也不一样宽，
+        // 之前三根滑杆的起点和终点因此错开了。
         Text(
             text = label,
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(SliderLabelWidth),
         )
         Spacer(Modifier.width(10.dp))
         Slider(
@@ -142,11 +148,21 @@ private fun SliderRow(
         Spacer(Modifier.width(8.dp))
         Text(
             text = displayValue,
-            style = MiuixTheme.textStyles.footnote2,
+            style = MiuixTheme.textStyles.footnote2.tabular(),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(SliderValueWidth),
         )
     }
 }
+
+/** 滑杆左侧标签的固定宽度（能放下 3 个汉字，字体放大时也不换行）。 */
+private val SliderLabelWidth = 56.dp
+
+/** 滑杆右侧数值的固定宽度（最长是「360°」/「100%」）。 */
+private val SliderValueWidth = 48.dp
 
 private fun createHueRingBitmap(size: Int, value: Float): Bitmap {
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
