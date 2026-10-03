@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 窗口背景：与 Miuix 亮色 surface (#F7F7F7) 一致；values-night 中改为纯黑，避免暗色模式白屏闪烁。 -->
+    <color name="window_background">#FFF7F7F7</color>
+    <color name="ic_launcher_background">#FF00897B</color>
+</resources>

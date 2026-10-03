@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">toTool</string>
+    <!-- Common -->
+    <string name="action_back">返回</string>
+    <string name="action_copy">复制</string>
+    <string name="action_clear">清空</string>
+    <string name="action_done">完成</string>
+    <string name="action_settings">设置</string>
+    <string name="action_search">搜索</string>
+    <string name="action_favorite">收藏</string>
+    <string name="action_unfavorite">取消收藏</string>
+    <string name="action_pin_home">添加到主屏幕</string>
+    <string name="action_pin_unsupported">当前启动器不支持添加到主屏幕</string>
+    <string name="action_pin_done">已添加到主屏幕</string>
+    <string name="action_compact">紧凑显示</string>
+    <string name="label_all">全部</string>
+    <string name="label_favorites">收藏</string>
+    <string name="label_home">首页</string>
+    <string name="label_category">分类</string>
+    <string name="label_current_category">当前分类</string>
+    <string name="label_long_press_hint">长按工具可收藏或添加到主屏幕</string>
+    <string name="toast_copied">已复制到剪贴板</string>
+    <string name="placeholder_empty">暂无内容</string>
+    <string name="placeholder_no_result">未找到匹配的工具</string>
+    <!-- Settings -->
+    <string name="settings_title">设置</string>
+    <string name="settings_theme">主题模式</string>
+    <string name="settings_display">显示</string>
+    <string name="settings_compact">紧凑显示</string>
+    <string name="settings_compact_desc">主界面直接以分类卡片显示工具，点击标题可展开或收起</string>
+    <string name="settings_unit_abbr">单位显示字母</string>
+    <string name="settings_unit_abbr_desc">单位换算中使用英文字母缩写代替中文名称</string>
+    <string name="settings_about">关于</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_custom">自选颜色</string>
+    <string name="theme_light">亮色</string>
+    <string name="theme_dark">暗色</string>
+    <string name="theme_dynamic">动态取色</string>
+    <string name="pick_color">选择颜色</string>
+    <string name="about_version">版本</string>
+    <string name="about_developer">开发者</string>
+    <!-- Format conversion -->
+    <string name="label_format">格式转换</string>
+    <string name="format_pick_file">选择文件…</string>
+    <string name="format_no_file">请选择要转换的文件</string>
+    <string name="format_start">开始转换</string>
+    <string name="format_converting">转换中…</string>
+    <string name="format_done">转换完成</string>
+    <string name="format_error">转换失败</string>
+    <string name="format_output">输出路径</string>
+    <string name="format_type_video">视频</string>
+    <string name="format_type_audio">音频</string>
+    <string name="format_type_other">其他</string>
+    <string name="format_select_format">选择目标格式</string>
+    <string name="format_min_api">需要 Android 9 (API 28) 或更高版本</string>
+    <string name="format_extract_fail">FFmpeg 初始化失败</string>
+    <string name="format_unsupported_abi">此设备不支持内置 FFmpeg（目前只打包了 arm64-v8a 版本）</string>
+    <string name="format_saved_to">已保存到：%s</string>
+    <string name="format_copy_fail">无法读取输入文件</string>
+    <string name="format_exit_code">退出代码：%d</string>
+    <!-- Compass -->
+    <string name="north">北</string>
+    <string name="northeast">东北</string>
+    <string name="east">东</string>
+    <string name="southeast">东南</string>
+    <string name="south">南</string>
+    <string name="southwest">西南</string>
+    <string name="west">西</string>
+    <string name="northwest">西北</string>
+    <string name="compass_rose">罗盘刻度盘</string>
+    <string name="rotation_sensor_not_available">旋转矢量传感器不可用</string>
+</resources>

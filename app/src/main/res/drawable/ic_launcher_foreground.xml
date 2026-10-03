@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tool kit vector (sourced from the tool kit SVG) on a transparent field,
+     scaled down and centered with generous padding so it does not dominate the
+     plate. Solid grass green fill, no gradient. The launcher background
+     supplies the pure white plate. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group
+        android:scaleX="1.3" android:scaleY="1.3"
+        android:translateX="33.2" android:translateY="33.2">
+        <!-- wrench head / socket piece -->
+        <path android:fillColor="#FF689F38"
+            android:pathData="m8.914,24.5 l4.257,-4.257 l-1.414,-1.414 L7.5,23.086 l-0.793,-0.793 a1,1 0 0 0 -1.414,0 l-4,4 a1,1 0 0 0 0,1.414 l3,3 a1,1 0 0 0 1.414,0 l4,-4 a1,1 0 0 0 0,-1.414 Z M5,28.586 L3.414,27 L6,24.414 L7.586,26 Z" />
+        <!-- crossed wrench body -->
+        <path android:fillColor="#FF689F38"
+            android:pathData="M24,30 a6.007,6.007 0 0 1 -6,-6 a5.8,5.8 0 0 1 0.21,-1.547 L9.548,13.79 A6,6 0 0 1 8,14 a5.976,5.976 0 0 1 -5.577,-8.184 l0.558,-1.421 l3.312,3.312 a1.023,1.023 0 0 0 1.414,0 a1,1 0 0 0 0,-1.414 L4.393,2.979 l1.423,-0.557 A5.977,5.977 0 0 1 14,8 a5.8,5.8 0 0 1 -0.21,1.547 l8.663,8.663 A6,6 0 0 1 24,18 a5.976,5.976 0 0 1 5.577,8.184 l-0.557,1.421 l-3.313,-3.312 a1.023,1.023 0 0 0 -1.413,0 a1,1 0 0 0 -0.001,1.414 l3.313,3.313 l-1.422,0.558 A6,6 0 0 1 24,30 M10.063,11.476 l10.46,10.462 l-0.239,0.609 a3.975,3.975 0 0 0 3.466,5.445 l-0.871,-0.87 a3,3 0 0 1 0,-4.243 a3.07,3.07 0 0 1 4.243,0 l0.87,0.871 a3.976,3.976 0 0 0 -5.446,-3.466 l-0.609,0.239 l-10.46,-10.46 l0.24,-0.61 A3.976,3.976 0 0 0 8.25,4.008 l0.87,0.87 a3,3 0 0 1 0,4.243 a3.07,3.07 0 0 1 -4.243,0 l-0.87,-0.871 a3.975,3.975 0 0 0 5.445,3.466 Z" />
+        <!-- small wrench (upper right) -->
+        <path android:fillColor="#FF689F38"
+            android:pathData="M29.123,2.85 a3.07,3.07 0 0 0 -4.243,0 l-7.48,7.48 l1.414,1.414 l7.48,-7.48 a1.024,1.024 0 0 1 1.414,0 a1,1 0 0 1 0,1.414 l-7.48,7.48 l1.414,1.415 l7.48,-7.48 a3.003,3.003 0 0 0 0,-4.243" />
+    </group>
+</vector>
