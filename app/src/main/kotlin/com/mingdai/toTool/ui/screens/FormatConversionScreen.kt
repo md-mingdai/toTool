@@ -2,6 +2,9 @@ package com.mingdai.toTool.ui.screens
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.runtime.Composable
@@ -45,7 +49,11 @@ import com.mingdai.toTool.R
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SelectChip
+import com.mingdai.toTool.ui.screens.tools.ImageOps
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Locale
 import java.util.regex.Pattern
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +67,7 @@ import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private enum class FileKind { VIDEO, AUDIO, UNKNOWN }
+private enum class FileKind { VIDEO, AUDIO, IMAGE, UNKNOWN }
 
 private val DURATION_PATTERN = Pattern.compile("Duration:\\s*(\\d+):(\\d+):(\\d+)\\.(\\d+)")
 private val TIME_PATTERN = Pattern.compile("time=\\s*(\\d+):(\\d+):(\\d+)\\.(\\d+)")
@@ -91,6 +99,9 @@ private val FORMAT_SPECS: Map<String, FormatSpec> = mapOf(
     "AVI" to FormatSpec(false, listOf("mpeg4"), listOf("libmp3lame", "ac3", "aac"), "video/x-msvideo"),
     "WEBM" to FormatSpec(false, listOf("libvpx-vp9", "libvpx"), listOf("libopus", "libvorbis"), "video/webm"),
 )
+
+/** 图片格式交给系统自带的编解码器处理（不依赖 ffmpeg，所有设备都能用）。 */
+private val IMAGE_FORMATS = listOf("JPG", "PNG", "WEBP", "BMP")
 
 /** 这些容器之间互转时，手机拍的 H.264/AAC 视频可以直接“换壳”，不必重新编码。 */
 private val REMUX_FRIENDLY = setOf("mp4", "m4v", "mov", "mkv")
@@ -169,10 +180,11 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
     val genericFormats = listOf("MP4", "MKV", "MP3", "WAV", "M4A", "AAC")
 
     val formatOptions: List<String> = when (fileType) {
-        FileKind.VIDEO -> videoFormats
-        FileKind.AUDIO -> audioFormats
-        else -> genericFormats
-    }.filter { isFormatSupported(it, encoders) }
+        FileKind.IMAGE -> IMAGE_FORMATS
+        FileKind.VIDEO -> videoFormats.filter { isFormatSupported(it, encoders) }
+        FileKind.AUDIO -> audioFormats.filter { isFormatSupported(it, encoders) }
+        FileKind.UNKNOWN -> genericFormats.filter { isFormatSupported(it, encoders) }
+    }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -180,7 +192,7 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
         if (uri != null) {
             inputUri = uri
             inputName = queryFileName(context, uri)
-            fileType = detectFileKind(inputName)
+            fileType = detectFileKind(inputName, context.contentResolver.getType(uri))
             targetFormat = null
             resultMsg = null
             errorMsg = null
@@ -189,11 +201,34 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
     }
 
     val sourceExt = (inputName ?: "").substringAfterLast('.', "").lowercase(Locale.ROOT)
+        .let { if (it == "jpeg") "jpg" else it } // jpeg 和 jpg 是同一种格式
 
     fun startConversion() {
         val uri = inputUri ?: return
         val fmt = targetFormat ?: return
         if (isRunning) return
+
+        // 图片：用系统编解码器转换，不需要 ffmpeg
+        if (fileType == FileKind.IMAGE) {
+            val imageBase = (inputName ?: "image").substringBeforeLast('.')
+            isRunning = true
+            resultMsg = null
+            errorMsg = null
+            progress = null // 图片转换很快，用不确定进度条即可
+            scope.launch {
+                try {
+                    val where = withContext(Dispatchers.IO) { convertImage(context, uri, fmt, imageBase) }
+                    resultMsg = context.getString(R.string.format_saved_to, where)
+                } catch (e: OutOfMemoryError) {
+                    errorMsg = "内存不足：这张图片太大了"
+                } catch (e: Exception) {
+                    errorMsg = e.message ?: e.javaClass.simpleName
+                } finally {
+                    isRunning = false
+                }
+            }
+            return
+        }
 
         val ffmpeg = ffmpegBinary(context)
         if (ffmpeg == null) {
@@ -283,6 +318,7 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
                         imageVector = when (fileType) {
                             FileKind.VIDEO -> Icons.Filled.VideoLibrary
                             FileKind.AUDIO -> Icons.Filled.AudioFile
+                            FileKind.IMAGE -> Icons.Filled.Image
                             else -> Icons.AutoMirrored.Filled.InsertDriveFile
                         },
                         contentDescription = null,
@@ -299,6 +335,7 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
                             text = when (fileType) {
                                 FileKind.VIDEO -> stringResource(R.string.format_type_video)
                                 FileKind.AUDIO -> stringResource(R.string.format_type_audio)
+                                FileKind.IMAGE -> "图片"
                                 else -> stringResource(R.string.format_type_other)
                             },
                             style = MiuixTheme.textStyles.footnote1,
@@ -526,12 +563,128 @@ private fun copyUriToTemp(context: Context, uri: Uri): File? {
     }
 }
 
-private fun detectFileKind(name: String?): FileKind {
+private fun detectFileKind(name: String?, mime: String? = null): FileKind {
     val ext = (name ?: "").substringAfterLast('.', "").lowercase(Locale.ROOT)
-    return when (ext) {
+    val byExt = when (ext) {
         "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m4v", "3gp" -> FileKind.VIDEO
         "mp3", "wav", "aac", "m4a", "flac", "ogg", "wma", "opus", "aiff" -> FileKind.AUDIO
+        // 原来没有图片分类，jpg/png 等都被归到“其他”
+        "jpg", "jpeg", "jpe", "jfif", "png", "webp", "bmp", "gif", "heic", "heif", "avif" -> FileKind.IMAGE
         else -> FileKind.UNKNOWN
+    }
+    if (byExt != FileKind.UNKNOWN) return byExt
+    // 文件名没有扩展名（或扩展名不常见）时，退回用系统给出的 MIME 类型判断
+    val m = (mime ?: "").lowercase(Locale.ROOT)
+    return when {
+        m.startsWith("image/") -> FileKind.IMAGE
+        m.startsWith("video/") -> FileKind.VIDEO
+        m.startsWith("audio/") -> FileKind.AUDIO
+        else -> FileKind.UNKNOWN
+    }
+}
+
+/* --------------------------------- 图片转换 --------------------------------- */
+
+private fun imageMime(fmt: String): String = when (fmt) {
+    "JPG" -> "image/jpeg"
+    "PNG" -> "image/png"
+    "WEBP" -> "image/webp"
+    "BMP" -> "image/bmp"
+    else -> "application/octet-stream"
+}
+
+/** 解码整张图（ImageDecoder 会自动应用 EXIF 旋转）；内存不够时逐级降采样重试。 */
+private fun decodeImage(context: Context, uri: Uri): Bitmap {
+    var sample = 1
+    while (true) {
+        try {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            return ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                if (sample > 1) decoder.setTargetSampleSize(sample)
+            }
+        } catch (e: OutOfMemoryError) {
+            if (sample >= 8) throw e
+            sample *= 2
+        } catch (e: java.io.IOException) {
+            throw IllegalStateException("无法解码这张图片（格式不受支持或文件已损坏）")
+        }
+    }
+}
+
+/** JPEG / BMP 不支持透明：把透明区域铺在白底上，否则会变成黑色。 */
+private fun flattenOnWhite(src: Bitmap): Bitmap {
+    if (!src.hasAlpha()) return src
+    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    canvas.drawBitmap(src, 0f, 0f, null)
+    return out
+}
+
+/** 24 位无压缩 BMP（Android 的 Bitmap.compress 不支持 BMP，这里手写）。 */
+private fun encodeBmp(src: Bitmap): ByteArray {
+    val bmp = flattenOnWhite(src)
+    val w = bmp.width
+    val h = bmp.height
+    val rowSize = (w * 3 + 3) / 4 * 4
+    val dataSize = rowSize * h
+    val fileSize = 54 + dataSize
+    val buf = ByteBuffer.allocate(fileSize).order(ByteOrder.LITTLE_ENDIAN)
+    buf.put('B'.code.toByte()).put('M'.code.toByte())
+    buf.putInt(fileSize).putInt(0).putInt(54)
+    buf.putInt(40).putInt(w).putInt(h).putShort(1).putShort(24)
+    buf.putInt(0).putInt(dataSize).putInt(2835).putInt(2835).putInt(0).putInt(0)
+    val pixels = IntArray(w)
+    val pad = ByteArray(rowSize - w * 3)
+    for (y in h - 1 downTo 0) { // BMP 从最后一行开始存
+        bmp.getPixels(pixels, 0, w, 0, y, w, 1)
+        for (x in 0 until w) {
+            val c = pixels[x]
+            buf.put(c.toByte())            // B
+            buf.put((c shr 8).toByte())    // G
+            buf.put((c shr 16).toByte())   // R
+        }
+        buf.put(pad)
+    }
+    if (bmp !== src) bmp.recycle()
+    return buf.array()
+}
+
+private fun encodeImage(bitmap: Bitmap, fmt: String): ByteArray {
+    if (fmt == "BMP") return encodeBmp(bitmap)
+    val out = ByteArrayOutputStream()
+    val ok = when (fmt) {
+        "JPG" -> {
+            val flat = flattenOnWhite(bitmap)
+            val r = flat.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            if (flat !== bitmap) flat.recycle()
+            r
+        }
+        "PNG" -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        "WEBP" -> {
+            @Suppress("DEPRECATION")
+            val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY
+                         else Bitmap.CompressFormat.WEBP
+            bitmap.compress(format, 95, out)
+        }
+        else -> false
+    }
+    if (!ok) throw IllegalStateException("编码 $fmt 失败")
+    return out.toByteArray()
+}
+
+/** 转换一张图片并保存到相册（Pictures/toTool），返回给用户看的保存位置。 */
+private fun convertImage(context: Context, uri: Uri, fmt: String, baseName: String): String {
+    val bitmap = decodeImage(context, uri)
+    try {
+        val bytes = encodeImage(bitmap, fmt)
+        val displayName = "$baseName.${fmt.lowercase(Locale.ROOT)}"
+        ImageOps.saveBytesToGallery(context, bytes, imageMime(fmt), displayName)
+            ?: throw IllegalStateException("保存到相册失败")
+        return "Pictures/toTool/$displayName（${ImageOps.sizeLabel(bytes.size.toLong())}）"
+    } finally {
+        bitmap.recycle()
     }
 }
 
