@@ -43,11 +43,17 @@ val FavoriteStarColor = Color(0xFFFFB300)
 /** 提示 / 未对准等“警示”状态用的橙色。 */
 val WarnColor = Color(0xFFFF9800)
 
-/** 大号数字（秒表、罗盘读数、记分牌等）：以 Miuix 的 title1 为基础放大字号。 */
+/**
+ * 让数字等宽（OpenType tnum）。Onest 默认是比例数字，“1”比“0”窄很多，
+ * 秒表、时钟、分贝仪这类每秒都在变的数字会左右抖动，所以统一打开等宽数字。
+ */
+fun TextStyle.tabular(): TextStyle = copy(fontFeatureSettings = "tnum")
+
+/** 大号数字（秒表、罗盘读数、记分牌等）：以 Miuix 的 title1 为基础放大字号，并使用等宽数字。 */
 @Composable
 @ReadOnlyComposable
 fun displayStyle(size: TextUnit): TextStyle =
-    MiuixTheme.textStyles.title1.copy(fontSize = size, lineHeight = size * 1.15f)
+    MiuixTheme.textStyles.title1.copy(fontSize = size, lineHeight = size * 1.15f).tabular()
 
 /** 主按钮：主题色填充（对应原来的 Material `Button`）。 */
 @Composable

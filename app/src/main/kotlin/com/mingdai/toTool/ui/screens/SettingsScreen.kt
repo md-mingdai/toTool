@@ -132,6 +132,7 @@ fun SettingsScreen(navController: NavHostController) {
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 AboutRow(stringResource(R.string.about_developer), "mingdai")
                 AboutRow(stringResource(R.string.about_version), version)
+                AboutRow("字体", "Onest · OFL 1.1")
             }
             // 给底部手势条留出空间
             Column(modifier = Modifier.padding(bottom = 24.dp)) {}

@@ -363,7 +363,7 @@ fun WallpaperExtractorTool(padding: PaddingValues) {
                     pfd.use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor) }
                 }
             } catch (e: SecurityException) {
-                failReason = "系统限制：读取壁纸需要「所有文件访问权限」（Android 13+ 起不再允许普通应用读取）"
+                failReason = "系统限制：读取壁纸需要“所有文件访问权限”（Android 13+ 起不再允许普通应用读取）"
                 null
             } catch (e: Exception) {
                 failReason = e.message

@@ -1,0 +1,11 @@
+Fonts bundled with toTool
+=========================
+
+Onest
+  Copyright 2021 The Onest Project Authors (https://github.com/googlefonts/onest)
+  Licensed under the SIL Open Font License, Version 1.1 (full text: Onest-OFL.txt).
+
+  res/font/onest_regular.ttf, onest_medium.ttf, onest_semibold.ttf, onest_bold.ttf are static
+  instances (wght 440 / 530 / 630 / 730) generated from the upstream variable font
+  "Onest[wght].ttf" with fontTools' varLib.instancer. The glyph outlines are the upstream ones;
+  only the weight-axis position was fixed. The font has no Reserved Font Name.

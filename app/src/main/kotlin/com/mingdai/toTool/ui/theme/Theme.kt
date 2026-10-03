@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.view.WindowCompat
 import com.mingdai.toTool.R
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -29,15 +30,27 @@ import top.yukonga.miuix.kmp.theme.defaultTextStyles
  */
 enum class ThemeMode { SYSTEM, CUSTOM, LIGHT, DARK, DYNAMIC }
 
-/** 设为 false 即可改用系统默认字体（Xiaomi 机型上为 MiSans），获得更原汁原味的 HyperOS 观感。 */
-private const val USE_MONO_FONT = true
+/** 设为 false 即可改用系统默认字体（Xiaomi 机型上为 MiSans）。 */
+private const val USE_CUSTOM_FONT = true
 
-private val MonoFontFamily = FontFamily(Font(R.font.jetbrains_mono_medium))
+/**
+ * 应用字体：Onest（SIL Open Font License 1.1，可免费商用、随 App 分发，授权文本见 assets/licenses）。
+ * res/font 里是从官方可变字体生成的 4 个静态字重：Regular 对应 wght 440（比标准 400 略粗，正文更扎实），
+ * Medium 530 / SemiBold 630 / Bold 730，所以标题和按钮的粗体是真粗体，不再靠系统合成。
+ * 字体里没有的字符（汉字、中文标点、℃ 等）会自动回退到系统字体，不会显示成方块。
+ */
+val AppFontFamily: FontFamily =
+    if (USE_CUSTOM_FONT) FontFamily(
+        Font(R.font.onest_regular, FontWeight.Normal),
+        Font(R.font.onest_medium, FontWeight.Medium),
+        Font(R.font.onest_semibold, FontWeight.SemiBold),
+        Font(R.font.onest_bold, FontWeight.Bold),
+    ) else FontFamily.Default
 
 private fun buildTextStyles(): TextStyles {
     val base = defaultTextStyles()
-    if (!USE_MONO_FONT) return base
-    val f = MonoFontFamily
+    if (!USE_CUSTOM_FONT) return base
+    val f = AppFontFamily
     return defaultTextStyles(
         main = base.main.copy(fontFamily = f),
         paragraph = base.paragraph.copy(fontFamily = f),

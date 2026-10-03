@@ -42,7 +42,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
@@ -62,6 +61,7 @@ import top.yukonga.miuix.kmp.basic.TextField
 import com.mingdai.toTool.ui.components.PrimaryButton
 import androidx.compose.ui.unit.sp
 import com.mingdai.toTool.ui.components.displayStyle
+import com.mingdai.toTool.ui.components.tabular
 
 /* ------------------------------- 19. 二维码生成 ----------------------------- */
 
@@ -215,7 +215,6 @@ fun StopwatchTool(padding: PaddingValues) {
             text = formatElapsed(elapsed),
             style = displayStyle(36.sp),
             color = MiuixTheme.colorScheme.primary,
-            fontFamily = FontFamily.Monospace,
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -243,8 +242,7 @@ fun StopwatchTool(padding: PaddingValues) {
             laps.reversed().forEachIndexed { i, lap ->
                 Text(
                     "#${laps.size - i}  ${formatElapsed(lap)}",
-                    style = MiuixTheme.textStyles.body2,
-                    fontFamily = FontFamily.Monospace,
+                    style = MiuixTheme.textStyles.body2.tabular(),
                 )
             }
         }

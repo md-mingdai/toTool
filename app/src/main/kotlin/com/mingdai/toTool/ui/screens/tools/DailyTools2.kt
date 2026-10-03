@@ -68,7 +68,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,6 +97,7 @@ import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.displayStyle
+import com.mingdai.toTool.ui.components.tabular
 
 private suspend fun PointerInputScope.onDrag(
     onPosition: (Offset) -> Unit,
@@ -239,7 +239,6 @@ fun DecibelTool(padding: PaddingValues) {
                     text = readingStr,
                     style = displayStyle(45.sp),
                     color = MiuixTheme.colorScheme.primary,
-                    fontFamily = FontFamily.Monospace,
                 )
                 Spacer(Modifier.height(12.dp))
                 Row {
@@ -288,13 +287,11 @@ fun DecibelTool(padding: PaddingValues) {
                 ) {
                     Text(
                         text = minStr,
-                        style = MiuixTheme.textStyles.body2,
-                        fontFamily = FontFamily.Monospace,
+                        style = MiuixTheme.textStyles.body2.tabular(),
                     )
                     Text(
                         text = maxStr,
-                        style = MiuixTheme.textStyles.body2,
-                        fontFamily = FontFamily.Monospace,
+                        style = MiuixTheme.textStyles.body2.tabular(),
                     )
                 }
             }
@@ -707,7 +704,6 @@ fun ClockScreenFullscreen(navController: NavHostController) {
                 text = timeStr,
                 style = displayStyle(57.sp),
                 color = primaryText,
-                fontFamily = FontFamily.Monospace,
             )
             Spacer(Modifier.height(16f.dp))
             Text(text = dateStr, style = MiuixTheme.textStyles.body1, color = primaryText)
@@ -796,7 +792,6 @@ private fun ScoreColumn(label: String, score: Int, onSet: (Int) -> Unit) {
         Text(
             score.toString(),
             style = displayStyle(57.sp),
-            fontFamily = FontFamily.Monospace,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(4f.dp)) {
             PrimaryButton(onClick = { onSet(score - 1) }) { Text("-") }

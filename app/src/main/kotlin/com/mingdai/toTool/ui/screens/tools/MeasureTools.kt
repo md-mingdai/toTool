@@ -44,6 +44,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.mingdai.toTool.ui.theme.AppFontFamily
 import com.mingdai.toTool.ui.components.SectionLabel
 import com.mingdai.toTool.ui.components.ToolBody
 import java.util.Locale
@@ -130,6 +131,7 @@ fun RulerTool(padding: PaddingValues) {
                         if (isCm) {
                             val label = (mm / 10).toString()
                             val labelStyle = TextStyle(
+                                fontFamily = AppFontFamily,
                                 fontSize = 13.sp,
                                 color = Color(accent),
                                 fontWeight = FontWeight.Bold,
@@ -153,7 +155,7 @@ fun RulerTool(padding: PaddingValues) {
                         textMeasurer,
                         "cm",
                         topLeft = Offset(6f, baseY - 52f),
-                        style = TextStyle(fontSize = 11.sp, color = Color(ink)),
+                        style = TextStyle(fontFamily = AppFontFamily, fontSize = 11.sp, color = Color(ink)),
                     )
                 }
             }
@@ -224,7 +226,7 @@ fun ProtractorTool(padding: PaddingValues) {
                     )
                     if (isMajor) {
                         val lr = r - 46f
-                        val labelStyle = TextStyle(fontSize = 12.sp, color = Color(ink))
+                        val labelStyle = TextStyle(fontFamily = AppFontFamily, fontSize = 12.sp, color = Color(ink))
                         val layout = textMeasurer.measure(deg.toString(), style = labelStyle)
                         val labelTopLeft = Offset(
                             (cx + dx * lr - layout.size.width / 2f)
