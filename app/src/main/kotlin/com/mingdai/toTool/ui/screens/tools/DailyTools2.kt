@@ -22,7 +22,6 @@ import android.os.Build
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -513,8 +512,6 @@ fun WhiteboardTool(padding: PaddingValues) {
 
 @Composable
 fun WhiteboardFullscreen(navController: NavHostController) {
-    BackHandler { navController.popBackStack() }
-
     val view = LocalView.current
     DisposableEffect(Unit) {
         val activity = view.context as? Activity
@@ -670,8 +667,6 @@ fun ClockScreenFullscreen(navController: NavHostController) {
     var bgIdx by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     val bgColor = ClockBgColors[bgIdx]
-
-    BackHandler { navController.popBackStack() }
 
     val view = LocalView.current
     DisposableEffect(Unit) {

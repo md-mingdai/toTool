@@ -3,7 +3,6 @@ package com.mingdai.toTool.ui.screens.tools
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -295,8 +294,6 @@ private val PixelCheckModes = listOf(
 @Composable
 fun PixelCheckFullscreen(navController: NavHostController) {
     var mode by remember { mutableStateOf(0) }
-
-    BackHandler { navController.popBackStack() }
 
     val isGrid = mode == PixelCheckModes.size
 

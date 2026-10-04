@@ -77,6 +77,10 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import com.mingdai.toTool.ui.components.CollapsingBarState
+import com.mingdai.toTool.ui.components.collapsingBar
 
 @Composable
 fun HomeScreen(navController: NavHostController) {
@@ -101,6 +105,11 @@ fun HomeScreen(navController: NavHostController) {
     }
 
     val scrollBehavior = MiuixScrollBehavior()
+
+    // 搜索栏跟随列表滚动：往下翻内容时上浮收起，往回滑立刻出现
+    val searchBar = remember { CollapsingBarState() }
+    SideEffect { searchBar.enabled = tab != 2 } // “格式转换”页没有搜索栏，不能吃掉它的滚动量
+    LaunchedEffect(viewTag) { searchBar.reset() } // 切换视图后让搜索栏重新显示
 
     Scaffold(
         topBar = {
@@ -157,40 +166,43 @@ fun HomeScreen(navController: NavHostController) {
             modifier = Modifier
                 .padding(inner)
                 .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection),
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .nestedScroll(searchBar.connection),
         ) {
             if (tab != 2) {
-                TextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = "搜索工具…",
-                    useLabelAsPlaceholder = true,
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(start = 12.dp).size(20.dp),
-                        )
-                    },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = "清除",
-                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    modifier = Modifier.size(20.dp),
-                                )
+                Box(modifier = Modifier.fillMaxWidth().collapsingBar(searchBar)) {
+                    TextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = "搜索工具…",
+                        useLabelAsPlaceholder = true,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(start = 12.dp).size(20.dp),
+                            )
+                        },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { query = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = "清除",
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
-                        }
-                    },
-                    singleLine = true,
-                    cornerRadius = 24.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                        },
+                        singleLine = true,
+                        cornerRadius = 24.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
             }
 
             AnimatedContent(
