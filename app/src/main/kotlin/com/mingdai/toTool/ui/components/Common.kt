@@ -56,11 +56,25 @@ import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
+/**
+ * 剪贴板走 Binder，单次传输上限约 1 MB；内容再大会抛 TransactionTooLargeException 直接闪退。
+ * 超过 [CLIPBOARD_MAX_CHARS] 个字符就不复制，改为提示。
+ */
+private const val CLIPBOARD_MAX_CHARS = 300_000
+
 /** Copy [text] to the system clipboard and show a confirmation toast. */
 fun copyText(context: Context, text: String) {
+    if (text.length > CLIPBOARD_MAX_CHARS) {
+        Toast.makeText(context, "内容太长（超过 ${CLIPBOARD_MAX_CHARS / 10_000} 万字符），剪贴板放不下", Toast.LENGTH_LONG).show()
+        return
+    }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("toTool", text))
-    Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
+    try {
+        clipboard.setPrimaryClip(ClipData.newPlainText("toTool", text))
+        Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
+    } catch (e: RuntimeException) {
+        Toast.makeText(context, "复制失败：内容太大", Toast.LENGTH_SHORT).show()
+    }
 }
 
 /**
@@ -257,6 +271,14 @@ fun ToolCard(
     }
 }
 
+/** 结果框最多排版这么多字符；整段几 MB 的文本交给 Text 排版会把内存和主线程拖垮。 */
+private const val RESULT_DISPLAY_CHARS = 20_000
+
+private fun clipForDisplay(text: String): String =
+    if (text.length <= RESULT_DISPLAY_CHARS) text
+    else text.substring(0, RESULT_DISPLAY_CHARS) +
+        "\n…（共 ${text.length} 个字符，这里只显示前 $RESULT_DISPLAY_CHARS 个）"
+
 /** A boxed output row with a copy button. Used by text/conversion tools. */
 @Composable
 fun ResultBox(
@@ -284,7 +306,7 @@ fun ResultBox(
         }
         Row(verticalAlignment = Alignment.Top) {
             Text(
-                text = text.ifEmpty { context.getString(R.string.placeholder_empty) },
+                text = if (text.isEmpty()) context.getString(R.string.placeholder_empty) else clipForDisplay(text),
                 style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSecondaryContainer,
                 fontFamily = if (monospace) FontFamily.Monospace else null,

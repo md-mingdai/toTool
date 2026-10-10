@@ -422,7 +422,16 @@ fun WallpaperExtractorTool(padding: PaddingValues) {
                     failReason = "当前是动态壁纸或系统未提供静态画面"
                     null
                 } else {
-                    pfd.use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor) }
+                    pfd.use { p ->
+                        // 先只读尺寸，按内存预算算出降采样倍数（全景壁纸可能有上千万像素），再真正解码
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFileDescriptor(p.fileDescriptor, null, bounds)
+                        val maxPixels = MemoryBudget.maxPixels(context, 5.5) // 解码 + 编码 PNG
+                        var sample = 1
+                        while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > maxPixels) sample *= 2
+                        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                        BitmapFactory.decodeFileDescriptor(p.fileDescriptor, null, opts)
+                    }
                 }
             } catch (e: SecurityException) {
                 failReason = "系统拒绝了读取，请确认权限已开启后点「重新读取」"

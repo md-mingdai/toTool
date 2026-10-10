@@ -31,16 +31,24 @@ object ImageOps {
      * - 最长边超过 [maxSide] 时按比例缩小，避免 1200 万像素原图在模糊/像素化时 OOM 闪退。
      */
     fun uriToBitmap(context: Context, uri: Uri, maxSide: Int = 4096): Bitmap? {
+        // 同时受“最长边”和“内存预算”两道限制。最重的处理（高斯模糊）每像素峰值约 12 字节，
+        // 所以按 12 字节/像素估算；内存紧张的机器上会自动取更小的值，而不是等 OOM。
+        val maxPixels = minOf(MemoryBudget.maxPixels(context, 12.0), maxSide.toLong() * maxSide)
         val viaDecoder = runCatching {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val longest = maxOf(info.size.width, info.size.height)
-                if (longest > maxSide) {
-                    val f = maxSide.toFloat() / longest
+                val w = info.size.width
+                val h = info.size.height
+                var f = 1.0
+                val longest = maxOf(w, h)
+                if (longest > maxSide) f = maxSide.toDouble() / longest
+                val px = w.toDouble() * h * f * f
+                if (px > maxPixels) f *= Math.sqrt(maxPixels / px)
+                if (f < 1.0) {
                     decoder.setTargetSize(
-                        (info.size.width * f).toInt().coerceAtLeast(1),
-                        (info.size.height * f).toInt().coerceAtLeast(1),
+                        (w * f).toInt().coerceAtLeast(1),
+                        (h * f).toInt().coerceAtLeast(1),
                     )
                 }
             }
@@ -52,7 +60,10 @@ object ImageOps {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it, null, bounds) }
             var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
+            while (
+                maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide ||
+                (bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > maxPixels
+            ) sample *= 2
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             context.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it, null, opts) }
         }.getOrNull()
@@ -264,12 +275,11 @@ object ImageOps {
         return baos.toByteArray()
     }
 
-    /** Write a PNG to the shared Pictures library and return its uri. */
-    fun savePngToGallery(context: Context, src: Bitmap, displayName: String): Uri? {
-        val baos = java.io.ByteArrayOutputStream()
-        src.compress(Bitmap.CompressFormat.PNG, 100, baos)
-        return saveBytesToGallery(context, baos.toByteArray(), "image/png", displayName)
-    }
+    /** Write a PNG to the shared Pictures library and return its uri. 边编码边写入，不在内存里攒整个 PNG 字节数组。 */
+    fun savePngToGallery(context: Context, src: Bitmap, displayName: String): Uri? =
+        saveStreamToGallery(context, displayName, "image/png") { out ->
+            if (!src.compress(Bitmap.CompressFormat.PNG, 100, out)) throw java.io.IOException("PNG 编码失败")
+        }
 
     /** Write pre-encoded bytes to the shared Pictures library and return its uri. */
     fun saveBytesToGallery(
@@ -277,36 +287,54 @@ object ImageOps {
         data: ByteArray,
         mimeType: String,
         displayName: String,
-    ): Uri? = runCatching {
-        // "image/jpg" 不是合法的 MIME 类型（应为 image/jpeg），MediaStore 会按未知类型处理
-        val mime = if (mimeType.equals("image/jpg", ignoreCase = true)) "image/jpeg" else mimeType
+    ): Uri? = saveStreamToGallery(context, displayName, mimeType) { it.write(data) }
+
+    /**
+     * 通用的“流式写入相册”：[writer] 直接往目标文件的输出流里写，
+     * 大图编码后的字节不必先在内存里攒成 ByteArray（PNG / BMP 动辄几十上百 MB）。
+     * 失败时删除写到一半的条目，并在主线程弹 Toast。
+     */
+    fun saveStreamToGallery(
+        context: Context,
+        displayName: String,
+        mimeType: String,
+        writer: (java.io.OutputStream) -> Unit,
+    ): Uri? {
         val resolver = context.contentResolver
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        else
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
-            put(MediaStore.Images.Media.MIME_TYPE, mime)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/toTool")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
+        var created: Uri? = null
+        return runCatching {
+            // "image/jpg" 不是合法的 MIME 类型（应为 image/jpeg），MediaStore 会按未知类型处理
+            val mime = if (mimeType.equals("image/jpg", ignoreCase = true)) "image/jpeg" else mimeType
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            else
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, mime)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/toTool")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
             }
-        }
-        val uri = resolver.insert(collection, values) ?: error("insert failed")
-        resolver.openOutputStream(uri)?.use { it.write(data) } ?: error("openOutputStream failed")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-        }
-        uri
-    }.onFailure {
-        // 可能在后台线程被调用，Toast 必须回到主线程弹出
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            Toast.makeText(context, "保存失败：${it.message}", Toast.LENGTH_SHORT).show()
-        }
-    }.getOrNull()
+            val uri = resolver.insert(collection, values) ?: error("insert failed")
+            created = uri
+            val raw = resolver.openOutputStream(uri) ?: error("openOutputStream failed")
+            java.io.BufferedOutputStream(raw, 1 shl 16).use { writer(it) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            uri
+        }.onFailure {
+            created?.let { u -> runCatching { resolver.delete(u, null, null) } } // 不留半截文件
+            // 可能在后台线程被调用，Toast 必须回到主线程弹出
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(context, "保存失败：${it.message}", Toast.LENGTH_SHORT).show()
+            }
+        }.getOrNull()
+    }
 
     /** Human readable file size, e.g. 2.31 MB. */
     fun sizeLabel(bytes: Long): String = when {
