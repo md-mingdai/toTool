@@ -10,7 +10,6 @@ import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.net.Uri
@@ -201,7 +200,15 @@ object ImageOps {
         }
     }
 
-    /** Tile [text] diagonally across the image. [dx]/[dy] are the spacings. */
+    /**
+     * 把 [text] 平铺满整张图。
+     *
+     * [dx] / [dy] 是文字格子的横向 / 纵向间距；[slope] 是文字基线的斜率（k = tan θ，与数学里一致：
+     * 正值向右上倾斜，负值向右下倾斜，0 为水平）。
+     *
+     * 做法：把画布绕图片中心旋转 -θ，再在旋转后的坐标系里按水平方向平铺。
+     * 为了让旋转后四个角仍然被铺满，平铺范围取以图片对角线为边长的正方形。
+     */
     fun watermark(
         src: Bitmap,
         text: String,
@@ -209,6 +216,7 @@ object ImageOps {
         opacity: Float,
         dx: Float,
         dy: Float,
+        slope: Float = 0f,
     ): Bitmap {
         if (text.isBlank() || dx <= 0f || dy <= 0f) return src
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
@@ -218,18 +226,29 @@ object ImageOps {
             this.textSize = textSize
             textAlign = Paint.Align.CENTER
         }
-        val topOffset = -paint.fontMetrics.ascent
-        var y = dy
+        val w = out.width.toFloat()
+        val h = out.height.toFloat()
+        val k = if (slope.isNaN() || slope.isInfinite()) 0f else slope
+        // 屏幕坐标 y 向下，所以“向右上倾斜”要把画布逆时针转，即传入负角度
+        val angle = Math.toDegrees(Math.atan(k.toDouble())).toFloat()
+        val diagonal = Math.hypot(w.toDouble(), h.toDouble()).toFloat()
+        val left = w / 2f - diagonal / 2f
+        val top = h / 2f - diagonal / 2f
+
+        c.save()
+        c.rotate(-angle, w / 2f, h / 2f)
+        var y = top + dy
         var row = 0
-        while (y < out.height + topOffset) {
-            var x = if (row % 2 == 0) dx else dx + dx / 2f
-            while (x < out.width + out.width / 2f) {
+        while (y < top + diagonal + dy) {
+            var x = left + if (row % 2 == 0) dx / 2f else dx
+            while (x < left + diagonal + dx) {
                 c.drawText(text, x, y, paint)
                 x += dx
             }
             y += dy
             row++
         }
+        c.restore()
         return out
     }
 

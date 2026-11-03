@@ -14,8 +14,8 @@ android {
         applicationId = "com.mingdai.toTool"
         minSdk = 28
         targetSdk = 36
-        versionCode = 40
-        versionName = "1.1.0"
+        versionCode = 41
+        versionName = "1.1.1"
     }
 
     // 签名：CI（GitHub Actions）通过环境变量传入固定的 release 密钥，

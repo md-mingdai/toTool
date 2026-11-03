@@ -1,19 +1,15 @@
 package com.mingdai.toTool.ui.screens.tools
 
 import android.Manifest
-import android.app.Activity
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Paint
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -66,9 +62,6 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -85,8 +78,6 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Slider
@@ -512,13 +503,6 @@ fun WhiteboardTool(padding: PaddingValues) {
 
 @Composable
 fun WhiteboardFullscreen(navController: NavHostController) {
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val activity = view.context as? Activity
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-    }
-
     val palette = listOf(
         Color.Black, Color.White, Color.Red, Color(0xFF689F38),
         Color.Blue, Color.Yellow, Color(0xFFFF5722), Color.Magenta,
@@ -668,13 +652,6 @@ fun ClockScreenFullscreen(navController: NavHostController) {
     var showSettings by remember { mutableStateOf(false) }
     val bgColor = ClockBgColors[bgIdx]
 
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val activity = view.context as? Activity
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-    }
-
     LaunchedEffect(Unit) {
         while (true) {
             now = System.currentTimeMillis()
@@ -795,132 +772,6 @@ private fun ScoreColumn(label: String, score: Int, onSet: (Int) -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(4f.dp)) {
             SecondaryButton(onClick = { onSet(score - 10) }) { Text("-10") }
             SecondaryButton(onClick = { onSet(score + 10) }) { Text("+10") }
-        }
-    }
-}
-
-/* ------------------------------ 5. SOS 手电筒 ------------------------------ */
-
-private fun findSOSFlashCameraId(cm: CameraManager): String? = runCatching {
-    cm.cameraIdList.firstOrNull { id ->
-        cm.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-    }
-}.getOrNull()
-
-@Composable
-fun SosFlashTool(padding: PaddingValues) {
-    val context = LocalContext.current
-    val cameraManager: CameraManager = remember {
-        context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-    }
-    val cameraId = remember { findSOSFlashCameraId(cameraManager) }
-    var active by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted && cameraId != null) active = true
-    }
-
-    fun toggle(desired: Boolean) {
-        val id = cameraId
-        if (id == null) return
-        if (desired) {
-            val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED
-            if (granted) {
-                active = true
-            } else {
-                permissionLauncher.launch(Manifest.permission.CAMERA)
-            }
-        } else {
-            active = false
-        }
-    }
-
-    LaunchedEffect(active, cameraId) {
-        if (!active) {
-            cameraId?.let { id -> runCatching { cameraManager.setTorchMode(id, false) } }
-            return@LaunchedEffect
-        }
-        val id = cameraId ?: return@LaunchedEffect
-        while (active) {
-            // SOS: ... --- ...
-            repeat(3) {
-                runCatching { cameraManager.setTorchMode(id, true) }
-                delay(150)
-                runCatching { cameraManager.setTorchMode(id, false) }
-                delay(150)
-            }
-            delay(200)
-            repeat(3) {
-                runCatching { cameraManager.setTorchMode(id, true) }
-                delay(400)
-                runCatching { cameraManager.setTorchMode(id, false) }
-                delay(150)
-            }
-            delay(200)
-            repeat(3) {
-                runCatching { cameraManager.setTorchMode(id, true) }
-                delay(150)
-                runCatching { cameraManager.setTorchMode(id, false) }
-                delay(150)
-            }
-            delay(1400)
-        }
-        runCatching { cameraManager.setTorchMode(id, false) }
-    }
-
-    DisposableEffect(cameraId) {
-        onDispose {
-            active = false
-            cameraId?.let { id -> runCatching { cameraManager.setTorchMode(id, false) } }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .padding(padding)
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(180f.dp)
-                    .background(
-                        color = if (active) Color(0xFFFF1744) else Color(0xFF333333),
-                        shape = CircleShape,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (active) "SOS" else "关",
-                    color = Color.White,
-                    fontSize = if (active) 44f.sp else 32f.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Spacer(Modifier.height(24f.dp))
-            PrimaryButton(
-                onClick = { toggle(!active) },
-                enabled = cameraId != null,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 32f.dp),
-            ) {
-                Text(if (active) "停止" else "开始 SOS 闪烁")
-            }
-            Spacer(Modifier.height(12f.dp))
-            Text(
-                text = when {
-                    cameraId == null -> "设备没有可用的闪光灯"
-                    active -> "紧急求救模式已开启"
-                    else -> "紧急求救模式已关闭"
-                },
-                color = if (active) Color(0xFFFF8A80) else Color(0xFFAAAAAA),
-                style = MiuixTheme.textStyles.body2,
-            )
         }
     }
 }

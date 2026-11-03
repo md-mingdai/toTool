@@ -81,6 +81,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import com.mingdai.toTool.ui.components.CollapsingBarState
 import com.mingdai.toTool.ui.components.collapsingBar
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.mingdai.toTool.data.LocalBehaviorState
+import com.mingdai.toTool.ui.components.FavoriteStarColor
+import com.mingdai.toTool.ui.components.ToolActionMenu
+import com.mingdai.toTool.ui.components.rememberEdgeHaptics
+import com.mingdai.toTool.ui.components.rememberHaptics
 
 @Composable
 fun HomeScreen(navController: NavHostController) {
@@ -110,6 +120,10 @@ fun HomeScreen(navController: NavHostController) {
     val searchBar = remember { CollapsingBarState() }
     SideEffect { searchBar.enabled = tab != 2 } // “格式转换”页没有搜索栏，不能吃掉它的滚动量
     LaunchedEffect(viewTag) { searchBar.reset() } // 切换视图后让搜索栏重新显示
+
+    // 列表被拉过顶部 / 底部一定距离（或用力甩到边缘）时给一次触感反馈。
+    // “格式转换”页里是表单，不需要这个效果。
+    val edgeHaptics = rememberEdgeHaptics(enabled = tab != 2)
 
     Scaffold(
         topBar = {
@@ -166,6 +180,8 @@ fun HomeScreen(navController: NavHostController) {
             modifier = Modifier
                 .padding(inner)
                 .fillMaxSize()
+                // 顺序很重要：写在最前 = 最外层，它拿到的是标题栏折叠、搜索栏收起、列表滚动都用完之后“剩下”的量
+                .nestedScroll(edgeHaptics)
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .nestedScroll(searchBar.connection),
         ) {
@@ -236,7 +252,9 @@ fun HomeScreen(navController: NavHostController) {
                             ToolRegistry.search(query).filter { favorites.isFavorite(it.id) }
                         },
                         onClick = onToolClick,
+                        emptyIcon = Icons.Filled.FavoriteBorder,
                         emptyText = "还没有收藏的工具",
+                        emptyHint = stringResource(R.string.label_long_press_hint),
                         modifier = Modifier.fillMaxSize(),
                     )
 
@@ -246,7 +264,9 @@ fun HomeScreen(navController: NavHostController) {
                         },
                         compact = false,
                         onClick = onToolClick,
+                        emptyIcon = Icons.Filled.FavoriteBorder,
                         emptyText = "还没有收藏的工具",
+                        emptyHint = stringResource(R.string.label_long_press_hint),
                         modifier = Modifier.fillMaxSize(),
                     )
 
@@ -258,6 +278,7 @@ fun HomeScreen(navController: NavHostController) {
                     "compactSearch" -> PillGrid(
                         tools = remember(query) { ToolRegistry.search(query) },
                         onClick = onToolClick,
+                        emptyIcon = Icons.Filled.Search,
                         emptyText = "未找到匹配的工具",
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -275,6 +296,7 @@ fun HomeScreen(navController: NavHostController) {
                             },
                             compact = false,
                             onClick = onToolClick,
+                            emptyIcon = Icons.Filled.Search,
                             emptyText = "未找到匹配的工具",
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
@@ -294,25 +316,27 @@ private fun CompactCategoryList(
     onToolClick: (Tool) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var expandedCategories by remember {
-        mutableStateOf(ToolCategory.entries.toSet()) // 默认全部展开
+    // 默认展开还是收起由“设置”决定；设置改变时按新的默认值重来。
+    // 用 rememberSaveable：进入工具再返回时，用户手动展开 / 收起的状态不会丢。
+    val behavior = LocalBehaviorState.current
+    var expandedKeys by rememberSaveable(behavior.expandCategories) {
+        mutableStateOf(if (behavior.expandCategories) ToolCategory.entries.map { it.name } else emptyList())
     }
 
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         ToolCategory.entries.forEach { cat ->
-            val isExpanded = cat in expandedCategories
+            val isExpanded = cat.name in expandedKeys
             CategoryGroup(
                 category = cat,
                 tools = ToolRegistry.byCategory(cat),
                 isExpanded = isExpanded,
                 onHeaderClick = {
-                    expandedCategories =
-                        if (isExpanded) expandedCategories - cat else expandedCategories + cat
+                    expandedKeys = if (isExpanded) expandedKeys - cat.name else expandedKeys + cat.name
                 },
                 onToolClick = onToolClick,
             )
@@ -348,10 +372,10 @@ private fun CategoryGroup(
                     .size(44.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(
-                        Brush.sweepGradient(
+                        Brush.linearGradient(
                             colors = listOf(
-                                MiuixTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                MiuixTheme.colorScheme.primary.copy(alpha = 0.30f),
+                                MiuixTheme.colorScheme.primary.copy(alpha = 0.26f),
+                                MiuixTheme.colorScheme.primary.copy(alpha = 0.10f),
                             )
                         )
                     ),
@@ -377,6 +401,17 @@ private fun CategoryGroup(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
+            // 该分类下的工具数量
+            Text(
+                text = tools.size.toString(),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .padding(horizontal = 9.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.width(6.dp))
             Icon(
                 imageVector = Icons.Filled.ExpandMore,
                 contentDescription = null,
@@ -409,33 +444,94 @@ private fun CategoryGroup(
     }
 }
 
-/** Pill-shaped, content-sized button — never fixed width, so names show in full. */
+/**
+ * Pill-shaped, content-sized button — never fixed width, so names show in full.
+ * 长按弹出和卡片一样的菜单（收藏 / 添加到主屏幕）；已收藏的药丸末尾带一颗小星星。
+ */
 @Composable
 private fun ToolPill(
     tool: Tool,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(MiuixTheme.colorScheme.secondaryContainer)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val haptics = rememberHaptics()
+    val isFavorite = LocalFavorites.current.isFavorite(tool.id)
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(MiuixTheme.colorScheme.secondaryContainer)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        haptics.confirm()
+                        menuOpen = true
+                    },
+                )
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = tool.icon,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = tool.name,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            if (isFavorite) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = null,
+                    tint = FavoriteStarColor,
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+        }
+        ToolActionMenu(show = menuOpen, tool = tool, onDismiss = { menuOpen = false })
+    }
+}
+
+/** 空状态：一个淡色图标 + 一行说明（+ 可选的小提示）。 */
+@Composable
+private fun EmptyState(
+    icon: ImageVector,
+    text: String,
+    modifier: Modifier = Modifier,
+    hint: String? = null,
+) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            imageVector = tool.icon,
+            imageVector = icon,
             contentDescription = null,
-            tint = MiuixTheme.colorScheme.primary,
-            modifier = Modifier.size(16.dp),
+            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.55f),
+            modifier = Modifier.size(48.dp),
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
-            text = tool.name,
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurface,
+            text = text,
+            style = MiuixTheme.textStyles.body1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
+        if (hint != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = hint,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.8f),
+            )
+        }
     }
 }
 
@@ -447,21 +543,18 @@ private fun ToolPill(
 private fun PillGrid(
     tools: List<Tool>,
     onClick: (Tool) -> Unit,
+    emptyIcon: ImageVector,
     emptyText: String,
     modifier: Modifier = Modifier,
+    emptyHint: String? = null,
 ) {
     if (tools.isEmpty()) {
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Text(
-                text = emptyText,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        }
+        EmptyState(icon = emptyIcon, text = emptyText, hint = emptyHint, modifier = modifier)
     } else {
         Column(
             modifier = modifier
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 20.dp),
         ) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -484,16 +577,13 @@ private fun ToolGrid(
     tools: List<Tool>,
     compact: Boolean,
     onClick: (Tool) -> Unit,
+    emptyIcon: ImageVector,
     emptyText: String,
     modifier: Modifier = Modifier,
+    emptyHint: String? = null,
 ) {
     if (tools.isEmpty()) {
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Text(
-                text = emptyText,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        }
+        EmptyState(icon = emptyIcon, text = emptyText, hint = emptyHint, modifier = modifier)
     } else {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(if (compact) 96.dp else 168.dp),

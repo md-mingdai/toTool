@@ -14,7 +14,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.ui.components.ResultBox
@@ -22,7 +21,6 @@ import com.mingdai.toTool.ui.components.ToolBody
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
-import java.util.Collections
 import java.util.UUID
 import java.net.URLEncoder
 import java.net.URLDecoder
@@ -36,6 +34,35 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.mingdai.toTool.ui.components.AppCheckbox
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SelectChip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
+import com.mingdai.toTool.ui.components.SectionLabel
+import com.mingdai.toTool.ui.components.WarnColor
+import com.mingdai.toTool.ui.components.displayStyle
+import java.util.Locale
+import kotlin.math.log2
+import kotlin.math.pow
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
+import top.yukonga.miuix.kmp.basic.Switch
+
+/**
+ * 文字类工具的输入框 / 输出框尺寸。比默认大得多：贴一大段 JSON 或 URL 进来不用一直滚动，
+ * 输出框也和输入框一样宽敞，而不是缩成一小条。
+ */
+private const val BigInputLines = 9
+private const val MidInputLines = 6
+private val BigOutputHeight = 240.dp
+private val MidOutputHeight = 160.dp
 
 /* ------------------------------- 1. 字符统计 -------------------------------- */
 
@@ -110,7 +137,7 @@ fun CharCountTool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "输入文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
+            minLines = MidInputLines,
         )
         ResultBox(
             text = buildString {
@@ -121,6 +148,7 @@ fun CharCountTool(padding: PaddingValues) {
                 append("字节数（UTF-8）：${stats.bytes}")
             },
             label = "统计结果",
+            minHeight = 150.dp,
         )
     }
 }
@@ -158,7 +186,7 @@ fun CaseTool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
+            minLines = MidInputLines,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None),
         )
         FlowRow(
@@ -171,85 +199,251 @@ fun CaseTool(padding: PaddingValues) {
             PrimaryButton(onClick = { output = sentenceCase(input) }) { Text("句首") }
             PrimaryButton(onClick = { output = input.reversed() }) { Text("反转") }
         }
-        ResultBox(output, label = "结果")
+        ResultBox(output, label = "结果", minHeight = MidOutputHeight)
     }
 }
 
 /* ------------------------------- 3. 密码生成 -------------------------------- */
 
+private const val UPPERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+private const val LOWERS = "abcdefghijklmnopqrstuvwxyz"
+private const val DIGITS = "0123456789"
 private const val SYMBOLS = "!@#\$%^&*()-_=+[]{};:,.?/"
 
-private fun genPassword(length: Int, upper: Boolean, lower: Boolean, digits: Boolean, symbols: Boolean): String {
+/**
+ * 生成密码。采用“拒绝采样”：每一位都从整个字符池里等概率抽取，
+ * 如果某个勾选的类别一个都没抽到，就整个重来。
+ * 这样结果在所有“每类至少出现一次”的密码上是完全均匀的，下面的熵值公式才是准确的。
+ */
+private fun genPassword(length: Int, sets: List<String>): String {
+    val pool = sets.joinToString("")
+    if (pool.isEmpty()) return ""
     val rng = SecureRandom()
-    val up = ('A'..'Z').toList()
-    val lo = ('a'..'z').toList()
-    val di = ('0'..'9').toList()
-    val sy = SYMBOLS.toList()
-    val required = mutableListOf<Char>()
-    val pool = mutableListOf<Char>()
-    if (upper) { pool.addAll(up); required.add(up[rng.nextInt(up.size)]) }
-    if (lower) { pool.addAll(lo); required.add(lo[rng.nextInt(lo.size)]) }
-    if (digits) { pool.addAll(di); required.add(di[rng.nextInt(di.size)]) }
-    if (symbols) { pool.addAll(sy); required.add(sy[rng.nextInt(sy.size)]) }
-    if (pool.isEmpty()) pool.addAll(lo) // always have something
-    val n = length.coerceAtLeast(required.size)
-    while (required.size < n) required.add(pool[rng.nextInt(pool.size)])
-    Collections.shuffle(required, rng)
-    return String(required.toCharArray())
+    val len = maxOf(length, sets.size)
+    val chars = CharArray(len)
+    repeat(10_000) {
+        for (i in 0 until len) chars[i] = pool[rng.nextInt(pool.length)]
+        if (sets.all { set -> chars.any { c -> set.indexOf(c) >= 0 } }) return String(chars)
+    }
+    // 概率上不可能走到这里（每一轮被接受的概率都不低于 7%）；兜底：直接给前几位指定类别
+    sets.forEachIndexed { i, set -> chars[i] = set[rng.nextInt(set.length)] }
+    return String(chars)
 }
 
-private fun passwordStrength(length: Int, sets: Int): String = when {
-    length >= 14 && sets >= 3 -> "强"
-    length >= 8 && sets >= 2 -> "中"
-    else -> "弱"
+/**
+ * 熵值（比特）：H = log₂(合法密码的总数)。
+ * 合法 = 长度为 L、字符取自 N 个字符的池、每个勾选的类别至少出现一次。
+ * 总数用容斥原理：Σ over 子集 S 的 (-1)^|S| · (N − 被排除类别的字符数)^L。
+ * 只勾一类时就是熟悉的 H = L × log₂N。
+ */
+private fun passwordEntropyBits(length: Int, sizes: List<Int>): Double {
+    val total = sizes.sum()
+    if (length <= 0 || total <= 0) return 0.0
+    var valid = 0.0
+    for (mask in 0 until (1 shl sizes.size)) {
+        var excluded = 0
+        var picked = 0
+        for (i in sizes.indices) {
+            if (mask and (1 shl i) != 0) {
+                excluded += sizes[i]
+                picked++
+            }
+        }
+        val term = (total - excluded).toDouble().pow(length)
+        valid += if (picked % 2 == 0) term else -term
+    }
+    return if (valid <= 0.0) 0.0 else log2(valid)
+}
+
+/** 强度档位：0 极弱 · 1 弱 · 2 一般 · 3 强 · 4 极强（常见的熵值分档）。 */
+private fun strengthIndex(bits: Double): Int = when {
+    bits < 28.0 -> 0
+    bits < 36.0 -> 1
+    bits < 60.0 -> 2
+    bits < 80.0 -> 3
+    else -> 4
+}
+
+private val StrengthLabels = listOf("极弱", "弱", "一般", "强", "极强")
+private val StrengthBad = Color(0xFFE5484D)
+private val StrengthGood = Color(0xFF2EAD4F)
+
+/** 数值显示：10 以上取整，10 以下留一位小数（1.8 年、54 秒）。 */
+private fun roughNumber(v: Double): String =
+    if (v >= 10.0) String.format(Locale.US, "%.0f", v) else String.format(Locale.US, "%.1f", v)
+
+/** 暴力穷举的平均耗时（假设每秒 100 亿次猜测，相当于离线破解快速哈希的量级）。 */
+private fun crackTimeLabel(bits: Double): String {
+    val seconds = 2.0.pow(bits - 1.0) / 1e10 // 平均要试掉一半的空间
+    val minute = 60.0
+    val hour = 3600.0
+    val day = 86400.0
+    val year = 31_557_600.0
+    return when {
+        seconds < 1.0 -> "不到 1 秒"
+        seconds < minute -> "约 ${roughNumber(seconds)} 秒"
+        seconds < hour -> "约 ${roughNumber(seconds / minute)} 分钟"
+        seconds < day -> "约 ${roughNumber(seconds / hour)} 小时"
+        seconds < year -> "约 ${roughNumber(seconds / day)} 天"
+        seconds < year * 1e4 -> "约 ${roughNumber(seconds / year)} 年"
+        seconds < year * 1e8 -> "约 ${roughNumber(seconds / year / 1e4)} 万年"
+        seconds < year * 1.38e10 -> "约 ${roughNumber(seconds / year / 1e8)} 亿年"
+        else -> "远超宇宙的年龄（约 138 亿年）"
+    }
+}
+
+@Composable
+private fun CharSetRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MiuixTheme.textStyles.body1)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                detail,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+@Composable
+private fun EntropyCard(bits: Double, length: Int, poolSize: Int) {
+    val colors = MiuixTheme.colorScheme
+    val level = strengthIndex(bits)
+    val tint = when (level) {
+        0, 1 -> StrengthBad
+        2 -> WarnColor
+        3 -> StrengthGood
+        else -> colors.primary
+    }
+    val basic = length * log2(poolSize.toDouble())
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(String.format(Locale.US, "%.1f", bits), style = displayStyle(38.sp), color = tint)
+                Text(
+                    " bit",
+                    style = MiuixTheme.textStyles.headline2,
+                    color = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    StrengthLabels[level],
+                    style = MiuixTheme.textStyles.headline2,
+                    color = tint,
+                    modifier = Modifier
+                        .background(tint.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            LinearProgressIndicator(
+                progress = (bits / 128.0).toFloat().coerceIn(0f, 1f),
+                colors = ProgressIndicatorDefaults.progressIndicatorColors(foregroundColor = tint),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "熵值 H = log₂(合法密码的总数)。字符池 N = $poolSize，长度 L = $length，" +
+                    "基础公式 L × log₂N = ${String.format(Locale.US, "%.1f", basic)} bit；" +
+                    "再扣除“每类至少出现一次”带来的限制，就是上面的精确值。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Text(
+                "暴力穷举平均耗时：${crackTimeLabel(bits)}（按每秒 100 亿次猜测估算）",
+                style = MiuixTheme.textStyles.footnote1,
+                color = colors.onSurfaceVariantSummary,
+            )
+        }
+    }
 }
 
 @Composable
 fun PasswordTool(padding: PaddingValues) {
+    val colors = MiuixTheme.colorScheme
     var length by remember { mutableStateOf(16) }
     var upper by remember { mutableStateOf(true) }
     var lower by remember { mutableStateOf(true) }
     var digits by remember { mutableStateOf(true) }
     var symbols by remember { mutableStateOf(true) }
-    var output by remember { mutableStateOf("") }
-    val setCount = remember(upper, lower, digits, symbols) {
-        listOf(upper, lower, digits, symbols).count { it }
+
+    val sets = remember(upper, lower, digits, symbols) {
+        buildList {
+            if (upper) add(UPPERS)
+            if (lower) add(LOWERS)
+            if (digits) add(DIGITS)
+            if (symbols) add(SYMBOLS)
+        }
     }
+    val poolSize = sets.sumOf { it.length }
+    val bits = remember(length, sets) { passwordEntropyBits(length, sets.map { it.length }) }
+
+    // 选项一变就重新生成，这样下面显示的密码、熵值永远对应当前的设置；按钮用来“再来一个”
+    var output by remember { mutableStateOf("") }
+    LaunchedEffect(length, sets) { output = genPassword(length, sets) }
+
     ToolBody(padding) {
-        Text("长度：$length 位", style = MiuixTheme.textStyles.body2)
-        Slider(
-            value = length.toFloat(),
-            onValueChange = { length = it.toInt().coerceIn(4, 32) },
-            valueRange = 4f..32f,
-            steps = 27,
-        )
-        Column {
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                AppCheckbox(checked = upper, onCheckedChange = { upper = it })
-                Text("大写字母 A-Z")
-            }
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                AppCheckbox(checked = lower, onCheckedChange = { lower = it })
-                Text("小写字母 a-z")
-            }
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                AppCheckbox(checked = digits, onCheckedChange = { digits = it })
-                Text("数字 0-9")
-            }
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                AppCheckbox(checked = symbols, onCheckedChange = { symbols = it })
-                Text("特殊符号")
+        SectionLabel("长度")
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("密码长度", style = MiuixTheme.textStyles.body1, modifier = Modifier.weight(1f))
+                    Text("$length 位", style = MiuixTheme.textStyles.headline2, color = colors.primary)
+                }
+                Spacer(Modifier.height(6.dp))
+                Slider(
+                    value = length.toFloat(),
+                    onValueChange = { length = it.toInt().coerceIn(4, 32) },
+                    valueRange = 4f..32f,
+                    steps = 27,
+                )
             }
         }
-        PrimaryButton(onClick = { output = genPassword(length, upper, lower, digits, symbols) }) {
-            Text("生成密码")
+
+        Spacer(Modifier.height(4.dp))
+        SectionLabel("字符类型")
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                // 至少保留一类：只剩一类时，它的开关不让关
+                val canTurnOff = sets.size > 1
+                CharSetRow("大写字母", "A–Z · ${UPPERS.length} 个字符", upper, enabled = !upper || canTurnOff) { upper = it }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.dividerLine))
+                CharSetRow("小写字母", "a–z · ${LOWERS.length} 个字符", lower, enabled = !lower || canTurnOff) { lower = it }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.dividerLine))
+                CharSetRow("数字", "0–9 · ${DIGITS.length} 个字符", digits, enabled = !digits || canTurnOff) { digits = it }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.dividerLine))
+                CharSetRow("特殊符号", "$SYMBOLS · ${SYMBOLS.length} 个字符", symbols, enabled = !symbols || canTurnOff) { symbols = it }
+            }
         }
-        ResultBox(output, label = "密码", monospace = true)
-        Text(
-            "强度：${passwordStrength(length, setCount)}",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
+
+        Spacer(Modifier.height(4.dp))
+        PrimaryButton(
+            onClick = { output = genPassword(length, sets) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("重新生成")
+        }
+        ResultBox(output, label = "密码", monospace = true, minHeight = 72.dp)
+
+        SectionLabel("强度评估")
+        EntropyCard(bits = bits, length = length, poolSize = poolSize)
     }
 }
 
@@ -291,14 +485,14 @@ fun Base64Tool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
+            minLines = MidInputLines,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton(onClick = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 output = Base64.getEncoder().encodeToString(input.toByteArray(Charsets.UTF_8))
                 error = null
             }) { Text("编码") }
-            PrimaryButton(onClick = {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 try {
                     output = String(Base64.getDecoder().decode(input.trim()), Charsets.UTF_8)
                     error = null
@@ -310,7 +504,7 @@ fun Base64Tool(padding: PaddingValues) {
         error?.let {
             Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
         }
-        ResultBox(output, label = "结果", monospace = true)
+        ResultBox(output, label = "结果", monospace = true, minHeight = MidOutputHeight)
     }
 }
 
@@ -334,7 +528,7 @@ fun HashTool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "待哈希文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
+            minLines = MidInputLines,
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             algos.forEach { a ->
@@ -345,7 +539,7 @@ fun HashTool(padding: PaddingValues) {
                 )
             }
         }
-        ResultBox(output, label = algo, monospace = true)
+        ResultBox(output, label = algo, monospace = true, minHeight = 120.dp)
     }
 }
 
@@ -372,10 +566,10 @@ fun JsonTool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "JSON 文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 4,
+            minLines = BigInputLines,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton(onClick = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 try {
                     output = prettyJson(input)
                     error = null
@@ -383,7 +577,7 @@ fun JsonTool(padding: PaddingValues) {
                     error = "解析失败：${e.message}"
                 }
             }) { Text("格式化") }
-            PrimaryButton(onClick = {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 try {
                     output = minifyJson(input)
                     error = null
@@ -395,7 +589,7 @@ fun JsonTool(padding: PaddingValues) {
         error?.let {
             Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
         }
-        ResultBox(output, label = "结果", monospace = true)
+        ResultBox(output, label = "结果", monospace = true, minHeight = BigOutputHeight)
     }
 }
 
@@ -412,14 +606,14 @@ fun UrlTool(padding: PaddingValues) {
             onValueChange = { input = it },
             label = "文本",
             modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
+            minLines = BigInputLines,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton(onClick = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 output = URLEncoder.encode(input, "UTF-8")
                 error = null
             }) { Text("编码") }
-            PrimaryButton(onClick = {
+            PrimaryButton(modifier = Modifier.weight(1f), onClick = {
                 try {
                     output = URLDecoder.decode(input, "UTF-8")
                     error = null
@@ -431,6 +625,6 @@ fun UrlTool(padding: PaddingValues) {
         error?.let {
             Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
         }
-        ResultBox(output, label = "结果", monospace = true)
+        ResultBox(output, label = "结果", monospace = true, minHeight = BigOutputHeight)
     }
 }

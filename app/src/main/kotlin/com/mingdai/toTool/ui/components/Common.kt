@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,7 +35,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
@@ -62,8 +66,11 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 private const val CLIPBOARD_MAX_CHARS = 300_000
 
-/** Copy [text] to the system clipboard and show a confirmation toast. */
-fun copyText(context: Context, text: String) {
+/**
+ * Copy [text] to the system clipboard and show a confirmation toast.
+ * 传入 [what]（例如条目名称）时，提示会写成“已复制「型号」”，比泛泛的“已复制”更清楚。
+ */
+fun copyText(context: Context, text: String, what: String? = null) {
     if (text.length > CLIPBOARD_MAX_CHARS) {
         Toast.makeText(context, "内容太长（超过 ${CLIPBOARD_MAX_CHARS / 10_000} 万字符），剪贴板放不下", Toast.LENGTH_LONG).show()
         return
@@ -71,7 +78,8 @@ fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     try {
         clipboard.setPrimaryClip(ClipData.newPlainText("toTool", text))
-        Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
+        val msg = if (what.isNullOrBlank()) context.getString(R.string.toast_copied) else "已复制「$what」"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     } catch (e: RuntimeException) {
         Toast.makeText(context, "复制失败：内容太大", Toast.LENGTH_SHORT).show()
     }
@@ -171,12 +179,10 @@ fun ToolCard(
     compact: Boolean = false,
 ) {
     val favorites = LocalFavorites.current
-    val context = LocalContext.current
     val isFavorite = favorites.isFavorite(tool.id)
     var menuOpen by remember { mutableStateOf(false) }
     val favoriteLabel = if (isFavorite) stringResource(R.string.action_unfavorite)
                         else stringResource(R.string.action_favorite)
-    val pinLabel = stringResource(R.string.action_pin_home)
 
     Box(modifier = modifier) {
         Card(
@@ -246,27 +252,46 @@ fun ToolCard(
                 }
             }
         }
-        OverlayListPopup(
-            show = menuOpen,
-            alignment = PopupPositionProvider.Align.Start,
-            onDismissRequest = { menuOpen = false },
-        ) {
-            ListPopupColumn {
-                DropdownImpl(
-                    text = favoriteLabel,
-                    optionSize = 2,
-                    isSelected = false,
-                    index = 0,
-                    onSelectedIndexChange = { favorites.toggle(tool.id); menuOpen = false },
-                )
-                DropdownImpl(
-                    text = pinLabel,
-                    optionSize = 2,
-                    isSelected = false,
-                    index = 1,
-                    onSelectedIndexChange = { pinToolShortcut(context, tool); menuOpen = false },
-                )
-            }
+        ToolActionMenu(show = menuOpen, tool = tool, onDismiss = { menuOpen = false })
+    }
+}
+
+/**
+ * 长按工具弹出的菜单：收藏 / 取消收藏、添加到主屏幕。
+ * 标准模式的卡片和紧凑模式的药丸共用，必须放在要弹出菜单的那个控件的同一个父 Box 里。
+ */
+@Composable
+fun ToolActionMenu(
+    show: Boolean,
+    tool: Tool,
+    onDismiss: () -> Unit,
+) {
+    val favorites = LocalFavorites.current
+    val context = LocalContext.current
+    val favoriteLabel = if (favorites.isFavorite(tool.id)) stringResource(R.string.action_unfavorite)
+                        else stringResource(R.string.action_favorite)
+    val pinLabel = stringResource(R.string.action_pin_home)
+
+    OverlayListPopup(
+        show = show,
+        alignment = PopupPositionProvider.Align.Start,
+        onDismissRequest = onDismiss,
+    ) {
+        ListPopupColumn {
+            DropdownImpl(
+                text = favoriteLabel,
+                optionSize = 2,
+                isSelected = false,
+                index = 0,
+                onSelectedIndexChange = { favorites.toggle(tool.id); onDismiss() },
+            )
+            DropdownImpl(
+                text = pinLabel,
+                optionSize = 2,
+                isSelected = false,
+                index = 1,
+                onSelectedIndexChange = { pinToolShortcut(context, tool); onDismiss() },
+            )
         }
     }
 }
@@ -279,46 +304,70 @@ private fun clipForDisplay(text: String): String =
     else text.substring(0, RESULT_DISPLAY_CHARS) +
         "\n…（共 ${text.length} 个字符，这里只显示前 $RESULT_DISPLAY_CHARS 个）"
 
-/** A boxed output row with a copy button. Used by text/conversion tools. */
+/**
+ * A boxed output row with a copy button. Used by text/conversion tools.
+ *
+ * 配色说明：Miuix 亮色里 onSecondaryContainer 是很浅的灰（#A9A9A9），
+ * 原来标题和正文都用它，落在浅灰底上又糊又分不出层次。
+ * 现在底色用白色卡片，标题用主题色小字，正文用 onSurface（黑 / 白），层次一眼就能看清。
+ *
+ * @param minHeight 输出区域的最小高度。文本类工具传一个较大的值，让输出框和输入框一样宽敞。
+ */
 @Composable
 fun ResultBox(
     text: String,
     label: String? = null,
     monospace: Boolean = false,
     modifier: Modifier = Modifier,
+    minHeight: Dp = 0.dp,
 ) {
     val context = LocalContext.current
+    val colors = MiuixTheme.colorScheme
     Card(
         modifier = modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(12.dp),
+        insideMargin = PaddingValues(start = 14.dp, top = 12.dp, end = 6.dp, bottom = 14.dp),
         colors = CardDefaults.defaultColors(
-            color = MiuixTheme.colorScheme.secondaryContainer,
-            contentColor = MiuixTheme.colorScheme.onSecondaryContainer,
+            color = colors.surfaceContainer,
+            contentColor = colors.onSurface,
         ),
     ) {
-        if (label != null) {
-            Text(
-                text = label,
-                style = MiuixTheme.textStyles.footnote2,
-                color = MiuixTheme.colorScheme.onSecondaryContainer,
-            )
-            Spacer(Modifier.height(4.dp))
-        }
-        Row(verticalAlignment = Alignment.Top) {
-            Text(
-                text = if (text.isEmpty()) context.getString(R.string.placeholder_empty) else clipForDisplay(text),
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSecondaryContainer,
-                fontFamily = if (monospace) FontFamily.Monospace else null,
-                modifier = Modifier.weight(1f),
-            )
+        Row(
+            modifier = Modifier.heightIn(min = minHeight),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(top = 2.dp)) {
+                if (label != null) {
+                    Text(
+                        text = label,
+                        style = MiuixTheme.textStyles.footnote1,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.primary,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (text.isEmpty()) {
+                    Text(
+                        text = context.getString(R.string.placeholder_empty),
+                        style = MiuixTheme.textStyles.body2,
+                        color = colors.onSurfaceVariantActions,
+                    )
+                } else {
+                    SelectionContainer {
+                        Text(
+                            text = clipForDisplay(text),
+                            style = MiuixTheme.textStyles.body2,
+                            color = colors.onSurface,
+                            fontFamily = if (monospace) FontFamily.Monospace else null,
+                        )
+                    }
+                }
+            }
             if (text.isNotEmpty()) {
-                Spacer(Modifier.width(8.dp))
-                IconButton(onClick = { copyText(context, text) }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { copyText(context, text, label) }, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Filled.ContentCopy,
                         contentDescription = context.getString(R.string.action_copy),
-                        tint = MiuixTheme.colorScheme.onSecondaryContainer,
+                        tint = colors.primary,
                         modifier = Modifier.size(18.dp),
                     )
                 }

@@ -320,7 +320,7 @@ private fun DateField(label: String, date: LocalDate?, onPick: (LocalDate) -> Un
 
 @Composable
 fun DateTool(padding: PaddingValues) {
-    var mode by remember { mutableStateOf(0) } // 0 = 日期差, 1 = 日期加减
+    var mode by remember { mutableStateOf(0) } // 0 = 作差, 1 = 目标日
     var d1 by remember { mutableStateOf<LocalDate?>(LocalDate.now()) }
     var d2 by remember { mutableStateOf<LocalDate?>(LocalDate.now().plusMonths(1)) }
     var days by remember { mutableStateOf("30") }
@@ -328,8 +328,8 @@ fun DateTool(padding: PaddingValues) {
 
     ToolBody(padding) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SelectChip(selected = mode == 0, onClick = { mode = 0 }, label = "日期差")
-            SelectChip(selected = mode == 1, onClick = { mode = 1 }, label = "日期加减")
+            SelectChip(selected = mode == 0, onClick = { mode = 0 }, label = "作差")
+            SelectChip(selected = mode == 1, onClick = { mode = 1 }, label = "目标日")
         }
         if (mode == 0) {
             DateField("起始日期", d1) { d1 = it }
@@ -351,11 +351,11 @@ fun DateTool(padding: PaddingValues) {
             )
             val n = days.trim().toIntOrNull()
             val result = if (base != null && n != null) {
-                "结果：${base!!.plusDays(n.toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE)}"
+                base!!.plusDays(n.toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE)
             } else {
                 "请输入有效的天数"
             }
-            ResultBox(result, label = "结果")
+            ResultBox(result, label = "目标日")
         }
     }
 }

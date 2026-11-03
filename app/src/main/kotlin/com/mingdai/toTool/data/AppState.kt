@@ -20,6 +20,12 @@ class FavoritesState(private val prefs: Prefs) {
     fun toggle(id: String) {
         favorites = prefs.toggleFavorite(id)
     }
+
+    /** 清空全部收藏。 */
+    fun clear() {
+        prefs.setFavorites(emptySet())
+        favorites = emptySet()
+    }
 }
 
 /** Observable theme-mode holder so Settings can mutate the theme at runtime. */
@@ -84,6 +90,42 @@ class UnitLabelState(private val prefs: Prefs) {
     }
 
     fun toggle() = set(!useAbbr)
+}
+
+/** 交互 / 行为类设置：触感反馈、工具页常亮、分类默认展开。 */
+class BehaviorState(private val prefs: Prefs) {
+    var haptics: Boolean by mutableStateOf(prefs.hapticsEnabled())
+        private set
+    var keepScreenOn: Boolean by mutableStateOf(prefs.keepScreenOn())
+        private set
+    var expandCategories: Boolean by mutableStateOf(prefs.categoriesExpanded())
+        private set
+
+    fun setHaptics(value: Boolean) {
+        prefs.setHapticsEnabled(value)
+        haptics = value
+    }
+
+    fun setKeepScreenOn(value: Boolean) {
+        prefs.setKeepScreenOn(value)
+        keepScreenOn = value
+    }
+
+    fun setExpandCategories(value: Boolean) {
+        prefs.setCategoriesExpanded(value)
+        expandCategories = value
+    }
+
+    /** 恢复默认值。 */
+    fun reset() {
+        setHaptics(true)
+        setKeepScreenOn(false)
+        setExpandCategories(true)
+    }
+}
+
+val LocalBehaviorState = staticCompositionLocalOf<BehaviorState> {
+    error("BehaviorState not provided")
 }
 
 val LocalPrefs = staticCompositionLocalOf<Prefs> {

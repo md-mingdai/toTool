@@ -1,13 +1,9 @@
 package com.mingdai.toTool.ui.screens.tools
 
-import android.app.Activity
-import android.content.Context
-import android.content.pm.ActivityInfo
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,13 +23,10 @@ import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +43,28 @@ import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
+import com.mingdai.toTool.ui.components.AppDialog
+import com.mingdai.toTool.ui.components.SecondaryButton
+import com.mingdai.toTool.ui.components.displayStyle
+import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /* ------------------------------- 尺子 ------------------------------- */
 
@@ -65,12 +79,7 @@ fun RulerTool(padding: PaddingValues) {
     val ink = MiuixTheme.colorScheme.onSurfaceVariantSummary.toArgb()
     val accent = MiuixTheme.colorScheme.primary.toArgb()
 
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        val activity = view.context as? Activity
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-    }
+    // 横屏锁定由 ToolRouter 统一处理（返回时与转场同时切回竖屏）
 
     var widthPx by remember { mutableStateOf(0) }
     var screenWidthCmInput by remember { mutableStateOf("") }
@@ -177,14 +186,70 @@ fun RulerTool(padding: PaddingValues) {
 
 /* ------------------------------- 量角器 ------------------------------- */
 
+/** 角度统一落在 0.1° 的网格上：滑块、微调按钮、手动输入都过这一关，显示值与内部值永远一致。 */
+private fun roundAngle(value: Float): Float = Math.round(value.coerceIn(0f, 180f) * 10f) / 10f
+
+private fun angleText(angle: Float): String = String.format(Locale.US, "%.1f", angle)
+
+/** 输入框的初值：整数度不带“.0”，方便直接改写。 */
+private fun angleInputText(angle: Float): String = angleText(angle).removeSuffix(".0")
+
+/**
+ * 解析手动输入。兼容小数逗号、全角逗号、结尾的“°”和空格；
+ * 不是数字，或四舍五入到 0.1° 后不在 0 ~ 180 之间，返回 null。
+ */
+private fun parseAngle(input: String): Float? {
+    val cleaned = input.trim()
+        .replace('，', '.')
+        .replace(',', '.')
+        .replace("°", "")
+        .replace(" ", "")
+    val value = cleaned.toFloatOrNull() ?: return null
+    if (value.isNaN() || value.isInfinite()) return null
+    val rounded = Math.round(value * 10f) / 10f
+    return if (rounded in 0f..180f) rounded else null
+}
+
+private val ProtractorNudges = listOf("\u22121°" to -1f, "\u22120.1°" to -0.1f, "+0.1°" to 0.1f, "+1°" to 1f)
+
 @Composable
 fun ProtractorTool(padding: PaddingValues) {
     var angle by remember { mutableStateOf(45f) }
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(TextFieldValue("")) }
+    var draftInvalid by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
     val textMeasurer = rememberTextMeasurer()
+    val colors = MiuixTheme.colorScheme
+
+    fun openEditor() {
+        val text = angleInputText(angle)
+        draft = TextFieldValue(text, TextRange(0, text.length)) // 全选：直接输入即可覆盖
+        draftInvalid = false
+        editing = true
+    }
+
+    fun applyDraft() {
+        val value = parseAngle(draft.text)
+        if (value == null) {
+            draftInvalid = true
+        } else {
+            angle = value
+            editing = false
+        }
+    }
+
+    // 对话框是独立窗口：等它弹出之后再把焦点交给输入框，键盘会随之升起
+    LaunchedEffect(editing) {
+        if (editing) {
+            delay(180)
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
 
     ToolBody(padding) {
-        val ink = MiuixTheme.colorScheme.onSurfaceVariantSummary.toArgb()
-        val primary = MiuixTheme.colorScheme.primary.toArgb()
+        val ink = colors.onSurfaceVariantSummary.toArgb()
+        val primary = colors.primary.toArgb()
 
         Box(
             modifier = Modifier.fillMaxWidth().height(330.dp),
@@ -265,18 +330,94 @@ fun ProtractorTool(padding: PaddingValues) {
                 drawCircle(color = Color(primary), center = Offset(cx, cy), radius = 7f)
             }
         }
-        Text(
-            "角度：${String.format(Locale.US, "%.0f°", angle)}",
-            style = MiuixTheme.textStyles.title3,
-            color = MiuixTheme.colorScheme.primary,
+        // 读数：点按即可输入精确角度
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            pressFeedbackType = PressFeedbackType.Sink,
+            showIndication = true,
+            onClick = { openEditor() },
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${angleText(angle)}°",
+                        style = displayStyle(44.sp),
+                        color = colors.primary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Icon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = "输入精确角度",
+                        tint = colors.onSurfaceVariantSummary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Text(
+                    "点按数字输入精确角度",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = colors.onSurfaceVariantSummary,
+                )
+            }
+        }
+        Slider(
+            value = angle,
+            onValueChange = { angle = roundAngle(it) },
+            valueRange = 0f..180f,
         )
-        Slider(value = angle, onValueChange = { angle = it }, valueRange = 0f..180f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ProtractorNudges.forEach { (label, delta) ->
+                SecondaryButton(
+                    onClick = { angle = roundAngle(angle + delta) },
+                    enabled = if (delta < 0f) angle > 0f else angle < 180f,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(label)
+                }
+            }
+        }
         SectionLabel("说明")
         Text(
-            "拖动滑块移动蓝色指针，圆弧表示当前角度；外圈刻度从左侧 0° 到右侧 180°。",
+            "点按上方的角度数字，可直接输入精确角度（0 ~ 180°，精确到 0.1°）。" +
+                "滑块用于快速调整，下方按钮可按 1° 或 0.1° 微调；外圈刻度从左侧 0° 到右侧 180°。",
             style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = colors.onSurfaceVariantSummary,
         )
+    }
+
+    AppDialog(
+        show = editing,
+        title = "输入角度",
+        summary = "范围 0 ~ 180°，精确到 0.1°",
+        onDismiss = { editing = false },
+        onConfirm = { applyDraft() },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextField(
+                value = draft,
+                onValueChange = {
+                    draft = it
+                    draftInvalid = false
+                },
+                label = "角度（°）",
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { applyDraft() }),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            )
+            if (draftInvalid) {
+                Text(
+                    "请输入 0 ~ 180 之间的数字",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = colors.error,
+                )
+            }
+        }
     }
 }
 

@@ -14,8 +14,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.mingdai.toTool.data.BehaviorState
 import com.mingdai.toTool.data.DisplayState
 import com.mingdai.toTool.data.FavoritesState
+import com.mingdai.toTool.data.LocalBehaviorState
 import com.mingdai.toTool.data.LocalDisplayState
 import com.mingdai.toTool.data.LocalFavorites
 import com.mingdai.toTool.data.LocalPrefs
@@ -52,6 +54,7 @@ class MainActivity : ComponentActivity() {
             val favorites = remember { FavoritesState(prefs) }
             val display = remember { DisplayState(prefs) }
             val unitLabel = remember { UnitLabelState(prefs) }
+            val behavior = remember { BehaviorState(prefs) }
             ToolyTheme(
                 mode = themeState.mode,
                 customHue = themeState.hue,
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity() {
                     LocalThemeState provides themeState,
                     LocalDisplayState provides display,
                     LocalUnitLabelState provides unitLabel,
+                    LocalBehaviorState provides behavior,
                 ) {
                     Box(
                         modifier = Modifier

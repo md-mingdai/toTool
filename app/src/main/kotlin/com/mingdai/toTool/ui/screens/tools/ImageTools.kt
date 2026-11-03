@@ -10,7 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +55,15 @@ import top.yukonga.miuix.kmp.basic.TextField
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import com.mingdai.toTool.ui.components.SelectChip
+import kotlin.math.abs
 
 /* ---------------------------- shared image plumbing ---------------------------- */
 
@@ -112,11 +120,12 @@ private fun BitmapPreview(
     }
 }
 
+/** 返回一个“打开系统相册选图”的函数；选好并解码成功后回调 [onPicked]。 */
 @Composable
-private fun ImagePicker(onPicked: (Bitmap?) -> Unit) {
+private fun rememberImagePicker(onPicked: (Bitmap) -> Unit): () -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
                 val bmp = withContext(Dispatchers.IO) { ImageOps.uriToBitmap(context, uri) }
@@ -128,10 +137,66 @@ private fun ImagePicker(onPicked: (Bitmap?) -> Unit) {
             }
         }
     }
-    PrimaryButton(onClick = { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+    return { launcher.launch("image/*") }
+}
+
+/** 已经选过图片之后，页面顶部那个“重新选择”的小按钮。 */
+@Composable
+private fun ImagePicker(onPicked: (Bitmap?) -> Unit) {
+    val pick = rememberImagePicker { onPicked(it) }
+    PrimaryButton(onClick = pick, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Filled.AddAPhoto, contentDescription = null)
         Spacer(Modifier.width(8.dp))
         Text("选择图片")
+    }
+}
+
+/**
+ * 还没选图片时的空状态：整块内容（图标、说明、按钮）在屏幕正中央，
+ * 而不是挤在页面顶部。图标和按钮都能点。
+ */
+@Composable
+private fun ImageEmptyState(padding: PaddingValues, hint: String, onPicked: (Bitmap) -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    val pick = rememberImagePicker(onPicked)
+    Column(
+        modifier = Modifier
+            .padding(padding)
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(104.dp)
+                .clip(CircleShape)
+                .background(colors.primary.copy(alpha = 0.12f))
+                .clickable(onClick = pick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.AddAPhoto,
+                contentDescription = "选择图片",
+                tint = colors.primary,
+                modifier = Modifier.size(46.dp),
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("选择一张图片", style = MiuixTheme.textStyles.title4, color = colors.onSurface)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            hint,
+            style = MiuixTheme.textStyles.footnote1,
+            color = colors.onSurfaceVariantSummary,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(28.dp))
+        PrimaryButton(onClick = pick, modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth()) {
+            Icon(Icons.Filled.AddAPhoto, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("从相册选择")
+        }
     }
 }
 
@@ -190,6 +255,7 @@ private fun SaveButton(
 private fun TransformTool(
     padding: PaddingValues,
     key: Any,
+    emptyHint: String,
     transform: (Bitmap) -> Bitmap,
     checker: Boolean = false,
     controls: @Composable () -> Unit,
@@ -206,17 +272,13 @@ private fun TransformTool(
         busy = false
     }
 
+    if (src == null) {
+        ImageEmptyState(padding, emptyHint) { src = it; result = null }
+        return
+    }
+
     ToolBody(padding) {
         ImagePicker { src = it; result = null }
-
-        if (src == null) {
-            Text(
-                "选择一张图片后，可调节参数并保存到相册",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-            return@ToolBody
-        }
 
         controls()
 
@@ -297,16 +359,13 @@ fun ImageCompressTool(padding: PaddingValues) {
         busy = false
     }
 
+    if (src == null) {
+        ImageEmptyState(padding, "降低质量或缩小尺寸，减小图片体积") { src = it; out = null }
+        return
+    }
+
     ToolBody(padding) {
         ImagePicker { src = it; out = null }
-        if (src == null) {
-            Text(
-                "选择一张图片后，可降低质量或缩小尺寸以减小体积",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-            return@ToolBody
-        }
         SliderRow("JPEG 质量", quality, { quality = it }, 5f..95f)
         SliderRow(
             "尺寸缩放",
@@ -356,6 +415,7 @@ fun ImageGrayscaleTool(padding: PaddingValues) {
     TransformTool(
         padding = padding,
         key = Unit,
+        emptyHint = "一键把照片转成黑白",
         transform = ImageOps::grayscale,
         controls = {},
     )
@@ -369,6 +429,7 @@ fun ImagePixelateTool(padding: PaddingValues) {
     TransformTool(
         padding = padding,
         key = block,
+        emptyHint = "把照片变成马赛克，块大小可调",
         transform = { ImageOps.pixelate(it, block) },
         controls = {
             SliderRow("像素块大小", block.toFloat(), { block = it.toInt() }, 2f..64f) {
@@ -380,6 +441,82 @@ fun ImagePixelateTool(padding: PaddingValues) {
 
 /* ------------------------------ 水印 ------------------------------ */
 
+/** 斜率的显示格式：最多两位小数，去掉多余的 0（0.50 → 0.5，1.00 → 1）。 */
+private fun slopeLabel(k: Float): String {
+    val text = String.format(Locale.US, "%.2f", k)
+    return if (text.contains('.')) text.trimEnd('0').trimEnd('.') else text
+}
+
+private fun slopeToAngle(k: Float): Float = Math.toDegrees(Math.atan(k.toDouble())).toFloat()
+
+private fun angleToSlope(deg: Float): Float = Math.tan(Math.toRadians(deg.toDouble())).toFloat()
+
+/** 常用斜率：标签 → 斜率。 */
+private val SlopePresets = listOf(
+    "水平" to 0f,
+    "30°" to 0.58f,
+    "45°" to 1f,
+    "60°" to 1.73f,
+    "-30°" to -0.58f,
+    "-45°" to -1f,
+)
+
+/**
+ * 水印斜率输入：可以直接输入斜率 k，也可以拖滑杆按角度调（k = tan θ），或点常用值。
+ * 约定与数学里一致：正值向右上倾斜，负值向右下倾斜，0 是水平。
+ */
+@Composable
+private fun SlopeControl(
+    slope: Float,
+    slopeText: String,
+    onTextChange: (String) -> Unit,
+    onSlopeChange: (Float) -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    val valid = slopeText.trim().toFloatOrNull() != null
+    val angle = slopeToAngle(slope)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("文字斜率 k（正值向右上，负值向右下，0 为水平）", style = MiuixTheme.textStyles.body2)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextField(
+                value = slopeText,
+                onValueChange = onTextChange,
+                label = "斜率",
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f),
+            )
+            // 数字键盘上不一定有负号，所以单独给一个“取反”
+            SecondaryButton(onClick = { onSlopeChange(-slope) }) { Text("取反") }
+        }
+        Text(
+            text = if (valid) "当前倾角约 ${String.format(Locale.US, "%.1f", angle)}°" else "请输入有效的数字",
+            style = MiuixTheme.textStyles.footnote1,
+            color = if (valid) colors.onSurfaceVariantSummary else colors.error,
+        )
+        Slider(
+            value = angle.coerceIn(-85f, 85f),
+            onValueChange = { onSlopeChange(angleToSlope(it)) },
+            valueRange = -85f..85f,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SlopePresets.forEach { (label, k) ->
+                SelectChip(
+                    selected = abs(slope - k) < 0.005f,
+                    onClick = { onSlopeChange(k) },
+                    label = label,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun ImageWatermarkTool(padding: PaddingValues) {
     var text by remember { mutableStateOf("toTool") }
@@ -387,17 +524,34 @@ fun ImageWatermarkTool(padding: PaddingValues) {
     var opacity by remember { mutableStateOf(0.45f) }
     var dx by remember { mutableStateOf(180f) }
     var dy by remember { mutableStateOf(90f) }
+    var slope by remember { mutableStateOf(0.58f) }
+    var slopeText by remember { mutableStateOf("0.58") }
 
     TransformTool(
         padding = padding,
-        key = Triple(text, size to opacity, dx to dy),
-        transform = { ImageOps.watermark(it, text, size, opacity, dx, dy) },
+        key = listOf(text, size, opacity, dx, dy, slope),
+        emptyHint = "平铺你的文字水印，可指定斜率与透明度",
+        transform = { ImageOps.watermark(it, text, size, opacity, dx, dy, slope) },
         controls = {
             TextField(
                 value = text,
                 onValueChange = { text = it },
                 label = "水印文字",
                 modifier = Modifier.fillMaxWidth(),
+            )
+            SlopeControl(
+                slope = slope,
+                slopeText = slopeText,
+                onTextChange = { input ->
+                    slopeText = input
+                    // 输入到一半（空、只有负号）时保留上一次有效的斜率
+                    input.trim().toFloatOrNull()?.let { if (it.isFinite()) slope = it }
+                },
+                onSlopeChange = { k ->
+                    val rounded = Math.round(k * 100f) / 100f
+                    slope = rounded
+                    slopeText = slopeLabel(rounded)
+                },
             )
             SliderRow("字号", size, { size = it }, 10f..96f)
             SliderRow(
@@ -423,6 +577,7 @@ fun ImageBlurTool(padding: PaddingValues) {
     TransformTool(
         padding = padding,
         key = radius to veil,
+        emptyHint = "高斯模糊加白色蒙层，生成毛玻璃效果图",
         transform = { ImageOps.frostedGlass(it, radius.toInt(), veil) },
         controls = {
             SliderRow("模糊强度", radius, { radius = it }, 1f..48f)
@@ -446,6 +601,7 @@ fun ImageRoundRectTool(padding: PaddingValues) {
     TransformTool(
         padding = padding,
         key = radius,
+        emptyHint = "把照片四角裁成圆角，角外透明",
         transform = { b -> ImageOps.roundRect(b, minOf(b.width, b.height).toFloat() * radius) },
         checker = true,
         controls = {

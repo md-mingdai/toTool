@@ -16,8 +16,11 @@ class Prefs(context: Context) {
     private val sp: SharedPreferences =
         context.applicationContext.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
+    /** 读取收藏；旧版本里已被合并/改名的工具 id 会自动换成新的 id。 */
     fun favorites(): Set<String> =
-        sp.getStringSet(KEY_FAV, emptySet())?.toSet() ?: emptySet()
+        (sp.getStringSet(KEY_FAV, emptySet()) ?: emptySet())
+            .map { ToolRegistry.resolve(it) }
+            .toSet()
 
     fun setFavorites(ids: Set<String>) {
         sp.edit().putStringSet(KEY_FAV, ids).apply()
@@ -71,7 +74,31 @@ class Prefs(context: Context) {
         sp.edit().putBoolean(KEY_UNIT_ABBR, value).apply()
     }
 
+    /** 触感反馈总开关（列表边缘、长按复制等）。 */
+    fun hapticsEnabled(): Boolean = sp.getBoolean(KEY_HAPTICS, true)
+
+    fun setHapticsEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_HAPTICS, value).apply()
+    }
+
+    /** 进入工具页时保持屏幕常亮。 */
+    fun keepScreenOn(): Boolean = sp.getBoolean(KEY_KEEP_ON, false)
+
+    fun setKeepScreenOn(value: Boolean) {
+        sp.edit().putBoolean(KEY_KEEP_ON, value).apply()
+    }
+
+    /** 紧凑模式下，分类默认展开还是收起。 */
+    fun categoriesExpanded(): Boolean = sp.getBoolean(KEY_CAT_EXPANDED, true)
+
+    fun setCategoriesExpanded(value: Boolean) {
+        sp.edit().putBoolean(KEY_CAT_EXPANDED, value).apply()
+    }
+
     private companion object {
+        const val KEY_HAPTICS = "haptics_enabled"
+        const val KEY_KEEP_ON = "keep_screen_on"
+        const val KEY_CAT_EXPANDED = "categories_expanded"
         const val NAME = "tooly_prefs"
         const val KEY_FAV = "favorite_ids"
         const val KEY_THEME = "theme_mode"

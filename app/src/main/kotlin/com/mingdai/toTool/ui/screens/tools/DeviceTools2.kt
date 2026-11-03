@@ -51,7 +51,6 @@ import java.util.Locale
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
@@ -66,6 +65,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
+import com.mingdai.toTool.ui.components.HintText
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /* ------------------------------ 提取 APK ------------------------------ */
 
@@ -250,13 +257,63 @@ fun ApkExtractorTool(padding: PaddingValues) {
 
 /* ------------------------------ 振动器 ------------------------------ */
 
+/**
+ * 一个振动模式。[timings] 的格式是 [延迟, 振, 停, 振, 停, …]（毫秒）。
+ *
+ * 所有模式都会一直循环到用户手动点“停止”，所以每个模式的末尾都留了一段“停”，
+ * 让相邻两轮之间有间隔；否则以“振”结尾的模式一循环就会连成一条不停的长振。
+ */
+private class VibPattern(val name: String, val desc: String, val timings: LongArray)
+
 private val Patterns = listOf(
-    "短振" to longArrayOf(0, 180),
-    "长振" to longArrayOf(0, 900),
-    "急促" to longArrayOf(0, 90, 120, 90, 120, 90),
-    "心跳" to longArrayOf(0, 120, 220, 160, 500),
-    "连续循环" to longArrayOf(0, 700, 300),
+    VibPattern("短振", "振 0.18 秒，停 0.42 秒", longArrayOf(0, 180, 420)),
+    VibPattern("长振", "振 0.9 秒，停 0.4 秒", longArrayOf(0, 900, 400)),
+    VibPattern("急促", "连振 3 下，停 0.5 秒", longArrayOf(0, 90, 120, 90, 120, 90, 520)),
+    VibPattern("心跳", "咚—咚，停 0.6 秒", longArrayOf(0, 120, 220, 160, 600)),
 )
+
+@Composable
+private fun PatternRow(pattern: VibPattern, selected: Boolean, onClick: () -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.defaultColors(
+            color = if (selected) colors.primary.copy(alpha = 0.12f) else colors.surfaceContainer,
+            contentColor = colors.onSurface,
+        ),
+        pressFeedbackType = PressFeedbackType.Sink,
+        showIndication = true,
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    pattern.name,
+                    style = MiuixTheme.textStyles.headline2,
+                    color = if (selected) colors.primary else colors.onSurface,
+                )
+                Text(
+                    pattern.desc,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = colors.onSurfaceVariantSummary,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .border(2.dp, if (selected) colors.primary else colors.outline, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Box(modifier = Modifier.size(12.dp).background(colors.primary, CircleShape))
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun VibratorTool(padding: PaddingValues) {
@@ -277,6 +334,7 @@ fun VibratorTool(padding: PaddingValues) {
         }.getOrNull()
     }
     val hasMotor = vibrator?.hasVibrator() ?: false
+    val hasAmplitudeControl = vibrator?.hasAmplitudeControl() ?: false
 
     fun stop() {
         runCatching { vibrator?.cancel() }
@@ -286,23 +344,23 @@ fun VibratorTool(padding: PaddingValues) {
     fun start() {
         val v = vibrator
         if (v == null || !v.hasVibrator()) return
-        val (_, pattern) = Patterns[patternIdx]
+        val timings = Patterns[patternIdx].timings
         val ampInt = (amplitude * 255f).toInt().coerceIn(1, 255)
-        val amps = IntArray(pattern.size) { idx -> if (idx % 2 == 0) 0 else ampInt }
-        // 只有最后一个“连续循环”模式需要重复（repeat = 0 表示从头循环），其余只振一遍（-1）
-        val loop = patternIdx == Patterns.lastIndex
-        val effect = VibrationEffect.createWaveform(pattern, amps, if (loop) 0 else -1)
-        v.vibrate(effect)
+        // 偶数位是“停”（强度 0），奇数位是“振”
+        val amps = IntArray(timings.size) { idx -> if (idx % 2 == 0) 0 else ampInt }
+        // repeat = 0：从头开始无限循环，直到调用 cancel()。所有模式都循环，不再有单次模式。
+        v.vibrate(VibrationEffect.createWaveform(timings, amps, 0))
         running = true
     }
 
-    // 单次模式振完后自动复位按钮；离开页面时停止振动
-    LaunchedEffect(running, patternIdx) {
-        if (running && patternIdx != Patterns.lastIndex) {
-            delay(Patterns[patternIdx].second.sum() + 100L)
-            running = false
+    // 振动过程中切换模式或拖动强度：稍等片刻（拖动时不要每一帧都重启）后，用新参数接着振
+    LaunchedEffect(patternIdx, amplitude) {
+        if (running) {
+            delay(150)
+            start()
         }
     }
+    // 离开页面时一定要停下，否则会一直振到天荒地老
     DisposableEffect(Unit) { onDispose { runCatching { vibrator?.cancel() } } }
 
     ToolBody(padding) {
@@ -315,28 +373,29 @@ fun VibratorTool(padding: PaddingValues) {
             return@ToolBody
         }
         SectionLabel("振动模式")
-        Patterns.forEachIndexed { i, (label, _) ->
-            SecondaryButton(
-                onClick = { patternIdx = i },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(label, modifier = Modifier.weight(1f))
-                    if (i == patternIdx) {
-                        Text("●", color = MiuixTheme.colorScheme.primary)
-                    }
-                }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Patterns.forEachIndexed { i, pattern ->
+                PatternRow(pattern, selected = i == patternIdx, onClick = { patternIdx = i })
             }
         }
-        Column {
+        Column(modifier = Modifier.padding(top = 4.dp)) {
             Text(
                 "强度：${(amplitude * 100).toInt()}%",
                 style = MiuixTheme.textStyles.body2,
             )
-            Slider(value = amplitude, onValueChange = { amplitude = it }, valueRange = 0f..1f)
+            Slider(
+                value = amplitude,
+                onValueChange = { amplitude = it },
+                valueRange = 0.05f..1f,
+                enabled = hasAmplitudeControl,
+            )
+            if (!hasAmplitudeControl) {
+                Text(
+                    "此设备的马达不支持强度调节",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
         }
         PrimaryButton(
             onClick = { if (running) stop() else start() },
@@ -344,6 +403,7 @@ fun VibratorTool(padding: PaddingValues) {
         ) {
             Text(if (running) "停止振动" else "开始振动")
         }
+        HintText(if (running) "正在循环振动，点击「停止振动」结束" else "所有模式都会循环振动，直到你手动停止")
     }
 }
 
