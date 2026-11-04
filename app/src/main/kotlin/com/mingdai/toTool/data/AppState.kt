@@ -101,26 +101,28 @@ class BehaviorState(private val prefs: Prefs) {
     var expandCategories: Boolean by mutableStateOf(prefs.categoriesExpanded())
         private set
 
-    fun setHaptics(value: Boolean) {
+    // 注意：这里不能叫 setHaptics / setKeepScreenOn / setExpandCategories——
+    // 上面的属性（即使 setter 是 private）也会生成同名的 JVM 方法，会触发 "Platform declaration clash"。
+    fun updateHaptics(value: Boolean) {
         prefs.setHapticsEnabled(value)
         haptics = value
     }
 
-    fun setKeepScreenOn(value: Boolean) {
+    fun updateKeepScreenOn(value: Boolean) {
         prefs.setKeepScreenOn(value)
         keepScreenOn = value
     }
 
-    fun setExpandCategories(value: Boolean) {
+    fun updateExpandCategories(value: Boolean) {
         prefs.setCategoriesExpanded(value)
         expandCategories = value
     }
 
     /** 恢复默认值。 */
     fun reset() {
-        setHaptics(true)
-        setKeepScreenOn(false)
-        setExpandCategories(true)
+        updateHaptics(true)
+        updateKeepScreenOn(false)
+        updateExpandCategories(true)
     }
 }
 

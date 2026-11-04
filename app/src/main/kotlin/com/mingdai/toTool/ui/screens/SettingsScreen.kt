@@ -187,7 +187,7 @@ fun SettingsScreen(navController: NavHostController) {
                 )
                 SwitchPreference(
                     checked = behavior.expandCategories,
-                    onCheckedChange = { behavior.setExpandCategories(it) },
+                    onCheckedChange = { behavior.updateExpandCategories(it) },
                     title = "分类默认展开",
                     summary = "紧凑显示下，进入主界面时各分类默认展开；关闭则默认收起",
                     enabled = display.compact,
@@ -205,13 +205,13 @@ fun SettingsScreen(navController: NavHostController) {
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 SwitchPreference(
                     checked = behavior.haptics,
-                    onCheckedChange = { behavior.setHaptics(it) },
+                    onCheckedChange = { behavior.updateHaptics(it) },
                     title = "触感反馈",
                     summary = "列表拉到边缘、长按工具、长按复制等操作时给出振动反馈",
                 )
                 SwitchPreference(
                     checked = behavior.keepScreenOn,
-                    onCheckedChange = { behavior.setKeepScreenOn(it) },
+                    onCheckedChange = { behavior.updateKeepScreenOn(it) },
                     title = "使用工具时保持常亮",
                     summary = "打开任意工具期间屏幕不自动熄灭（时钟、坏点检测等工具始终常亮）",
                 )
