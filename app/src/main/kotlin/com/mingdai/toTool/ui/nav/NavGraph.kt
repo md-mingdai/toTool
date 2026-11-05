@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -101,7 +103,13 @@ private fun AnimatedContentScope.StackPage(
     // 页面被销毁时一定要把首页恢复原位
     DisposableEffect(Unit) { onDispose { cover.floatValue = 0f } }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // 拦截触摸：页面上没有可交互控件的空白处也要“吃掉”事件。
+            // 否则事件会穿过去落到下面常驻的首页上，点到首页的卡片就误开了另一个工具。
+            .pointerInput(Unit) {},
+    ) {
         content()
         val shadow = Color.Black.copy(alpha = 0.18f)
         Box(
@@ -143,6 +151,9 @@ fun AppNavGraph(
     }
     // 上层页面“盖住”首页的程度：0 = 首页完全可见，1 = 完全被盖住
     val cover = remember { mutableFloatStateOf(0f) }
+    // 是否有页面正在 / 已经盖在首页上。派生成布尔值：只在 false ↔ true 切换时才重组，
+    // 转场过程中 cover 每一帧都在变，但这里不会跟着每帧重组。
+    val covered by remember { derivedStateOf { cover.floatValue > 0f } }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 底层：首页常驻，不随导航销毁 / 重建；被上层页面推开时做视差和压暗
@@ -157,7 +168,10 @@ fun AppNavGraph(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = STACK_DIM * cover.floatValue }
-                .background(Color.Black),
+                .background(Color.Black)
+                // 有页面盖在上面时，这一层同时挡住下面的首页：
+                // 转场期间页面还没铺满，露出来的那一截首页也不能被点到。
+                .then(if (covered) Modifier.pointerInput(Unit) {} else Modifier),
         )
 
         NavHost(
