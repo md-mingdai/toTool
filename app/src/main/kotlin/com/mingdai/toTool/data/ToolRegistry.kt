@@ -101,7 +101,7 @@ object ToolRegistry {
         Tool("dev_network", "网络信息", "连接类型与本地 IP", ToolCategory.DEVICE, Icons.Filled.Wifi),
         Tool("dev_sensor", "传感器列表", "列出设备可用传感器", ToolCategory.DEVICE, Icons.Filled.Sensors),
         Tool("dev_level", "水平仪", "气泡水平仪与倾角", ToolCategory.DEVICE, Icons.Filled.LinearScale),
-        Tool("dev_apk", "提取 APK", "导出已安装第三方应用安装包", ToolCategory.DEVICE, Icons.Filled.Android),
+        Tool("dev_apk", "提取 APK", "导出已安装应用安装包，AAB 应用导出为 APKS", ToolCategory.DEVICE, Icons.Filled.Android),
         Tool("dev_vibrate", "振动器", "预设模式循环振动，可调强度，手动停止", ToolCategory.DEVICE, Icons.Filled.Vibration),
         Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.DEVICE, Icons.Filled.Apps),
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.DEVICE, Icons.Filled.Wallpaper),

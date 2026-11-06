@@ -73,10 +73,42 @@ import com.mingdai.toTool.ui.components.HintText
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.text.style.TextOverflow
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.TextField
+import java.io.OutputStream
+import java.util.zip.Deflater
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /* ------------------------------ 提取 APK ------------------------------ */
 
-private data class AppEntry(val label: String, val source: String, val icon: Bitmap?, val versionCode: Long)
+/**
+ * 一个可导出的已安装应用。
+ *
+ * [splits] 非空，说明它是用 AAB 发布的：安装时被拆成“基础包 + 若干配置 / 功能拆分包”。
+ * 只导出基础包是装不回去的（缺架构库和资源，装不上或一打开就闪退），
+ * 所以这类应用要把所有拆分包一起打成 .apks。
+ */
+private data class AppEntry(
+    val label: String,
+    val packageName: String,
+    val source: String,
+    val splits: List<String>,
+    val icon: Bitmap?,
+    val versionCode: Long,
+) {
+    val isBundle: Boolean get() = splits.isNotEmpty()
+}
+
+/** 一次导出的结果：成功时 [text] 是保存路径，失败时是原因；[splitCount] > 0 表示打成了 .apks。 */
+private data class ApkExportResult(val ok: Boolean, val text: String, val splitCount: Int = 0)
 
 private fun getApkPath(packageName: String): String? =
     try {
@@ -98,7 +130,50 @@ private fun drawableToBitmap(drawable: Drawable): Bitmap? {
     return bmp
 }
 
-/** Copy an installed app's .apk out of /data/app to the shared Downloads area. */
+/** 搜索：按空格拆成多个关键词，每个词都要命中应用名或包名（不区分大小写）。 */
+private fun filterApps(apps: List<AppEntry>, query: String): List<AppEntry> {
+    val tokens = query.trim().lowercase(Locale.ROOT).split(Regex("""\s+""")).filter { it.isNotEmpty() }
+    if (tokens.isEmpty()) return apps
+    return apps.filter { app ->
+        val label = app.label.lowercase(Locale.ROOT)
+        val pkg = app.packageName.lowercase(Locale.ROOT)
+        tokens.all { label.contains(it) || pkg.contains(it) }
+    }
+}
+
+/**
+ * 把应用的安装包写进 [out]。
+ * - 普通应用：原样拷贝那个 .apk；
+ * - AAB 应用（[asBundle]）：打成 .apks（其实就是个 zip）。基础包固定叫 base.apk，
+ *   拆分包沿用原文件名（split_config.arm64_v8a.apk 之类），本工具的“安装特殊应用”、
+ *   SAI 等拆分包安装器都能直接装。APK 本来就压缩过，这里用“只存储”，
+ *   几百 MB 的应用也不会卡在压缩上。
+ */
+private fun writeApkFiles(out: OutputStream, files: List<File>, asBundle: Boolean) {
+    if (!asBundle) {
+        files.first().inputStream().use { it.copyTo(out) }
+        return
+    }
+    ZipOutputStream(out.buffered()).use { zip ->
+        zip.setLevel(Deflater.NO_COMPRESSION)
+        val used = HashSet<String>()
+        files.forEachIndexed { index, file ->
+            var entryName = if (index == 0) "base.apk" else file.name
+            if (!used.add(entryName)) { // 理论上不会重名，保险起见
+                entryName = "${index}_$entryName"
+                used.add(entryName)
+            }
+            zip.putNextEntry(ZipEntry(entryName))
+            file.inputStream().use { it.copyTo(zip) }
+            zip.closeEntry()
+        }
+    }
+}
+
+/**
+ * 把已安装应用的安装包导出到下载目录。顶部有固定的搜索框（应用名 / 包名）；
+ * 普通应用导出为 .apk，AAB 应用（带拆分包）自动打成 .apks。
+ */
 @Composable
 fun ApkExtractorTool(padding: PaddingValues) {
     val context = LocalContext.current
@@ -106,9 +181,15 @@ fun ApkExtractorTool(padding: PaddingValues) {
     var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var busyLabel by remember { mutableStateOf<String?>(null) }
-    var extractResult by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<ApkExportResult?>(null) }
     var lastVersionCode by remember { mutableStateOf(0L) }
+    var query by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+
+    val shown = remember(apps, query) { filterApps(apps, query) }
+    // 搜索词一变就回到列表顶部，免得停在之前滚到的位置、看不到第一条结果
+    LaunchedEffect(query) { scroll.scrollTo(0) }
 
     LaunchedEffect(Unit) {
         loading = true
@@ -119,8 +200,11 @@ fun ApkExtractorTool(padding: PaddingValues) {
                     val ai = pi.applicationInfo ?: return@mapNotNull null
                     AppEntry(
                         label = pm.getApplicationLabel(ai).toString(),
+                        packageName = ai.packageName,
                         source = ai.sourceDir?.takeIf { it.isNotBlank() }
                             ?: getApkPath(ai.packageName) ?: "",
+                        // AAB 应用安装后，除了 base.apk 还有 split_config.*.apk 等拆分包
+                        splits = ai.splitSourceDirs?.filter { it.isNotBlank() }.orEmpty(),
                         icon = runCatching { drawableToBitmap(pm.getApplicationIcon(ai)) }.getOrNull(),
                         versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
                             pi.longVersionCode
@@ -134,24 +218,29 @@ fun ApkExtractorTool(padding: PaddingValues) {
         loading = false
     }
 
-    suspend fun extract(label: String, source: String, versionCode: Long) {
-        lastVersionCode = versionCode
-        busyLabel = label
-        val src = File(source)
-        if (!src.exists()) {
+    suspend fun extract(entry: AppEntry) {
+        lastVersionCode = entry.versionCode
+        busyLabel = entry.label
+        val files = (listOf(entry.source) + entry.splits).map { File(it) }
+        val missing = files.firstOrNull { !it.exists() }
+        if (missing != null) {
             busyLabel = null
-            extractResult = "找不到 APK 文件：$source"
+            result = ApkExportResult(false, "找不到 APK 文件：${missing.path}")
             return
         }
-        val safeLabel = label.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "app" }
-        val name = "${safeLabel}_v$versionCode.apk"
+        val asBundle = entry.isBundle
+        val ext = if (asBundle) "apks" else "apk"
+        // .apks 不是系统认识的类型：用 octet-stream，MediaStore 才不会在文件名后面再补一个 .zip
+        val mime = if (asBundle) "application/octet-stream" else "application/vnd.android.package-archive"
+        val safeLabel = entry.label.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "app" }
+        val name = "${safeLabel}_v${entry.versionCode}.$ext"
         val target = withContext(Dispatchers.IO) {
             runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val resolver = context.contentResolver
                     val values = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, name)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive")
+                        put(MediaStore.Downloads.MIME_TYPE, mime)
                         put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/toTool")
                         put(MediaStore.Downloads.IS_PENDING, 1)
                     }
@@ -159,7 +248,7 @@ fun ApkExtractorTool(padding: PaddingValues) {
                         ?: throw IllegalStateException("insert failed")
                     try {
                         resolver.openOutputStream(uri)?.use { out ->
-                            src.inputStream().use { it.copyTo(out) }
+                            writeApkFiles(out, files, asBundle)
                         } ?: throw IllegalStateException("openOutputStream failed")
                         values.clear()
                         values.put(MediaStore.Downloads.IS_PENDING, 0)
@@ -174,82 +263,156 @@ fun ApkExtractorTool(padding: PaddingValues) {
                         ?: throw IllegalStateException("no external dir")
                     dir.mkdirs()
                     val f = File(dir, name)
-                    src.inputStream().use { input -> FileOutputStream(f).use { input.copyTo(it) } }
+                    FileOutputStream(f).use { writeApkFiles(it, files, asBundle) }
                     f.absolutePath
                 }
             }.getOrNull()
         }
         busyLabel = null
-        extractResult = target
-            ?: "导出失败：无法写入文件"
+        result = if (target != null) {
+            ApkExportResult(true, target, entry.splits.size)
+        } else {
+            ApkExportResult(false, "导出失败：无法写入文件")
+        }
     }
 
-    ToolBody(padding) {
-        Text(
-            "支持第三方与系统应用，导出到下载目录。",
-            style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        if (loading) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(200.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (apps.isEmpty()) {
-            Text("未找到可导出的应用", style = MiuixTheme.textStyles.body2)
-        } else {
-            apps.forEach { entry ->
-                val busy = busyLabel == entry.label
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val iconBm = entry.icon
-                    if (iconBm != null) {
-                        Image(
-                            bitmap = iconBm.asImageBitmap(),
-                            contentDescription = entry.label,
-                            modifier = Modifier.size(32.dp).padding(end = 10.dp),
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        // 固定在顶部的搜索框：应用很多，翻到下面也能随时改关键词
+        TextField(
+            value = query,
+            onValueChange = { query = it },
+            label = "搜索应用名或包名",
+            useLabelAsPlaceholder = true,
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 12.dp).size(20.dp),
+                )
+            },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "清除",
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
-                    Text(
-                        entry.label,
-                        modifier = Modifier.weight(1f),
-                        style = MiuixTheme.textStyles.body2,
-                        maxLines = 2,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    SecondaryButton(
-                        onClick = { scope.launch { extract(entry.label, entry.source, entry.versionCode) } },
-                        enabled = !busy,
-                    ) {
-                        if (busy) {
-                            CircularProgressIndicator(size = 16.dp, strokeWidth = 2.dp)
-                        } else {
-                            Text("导出")
-                        }
-                    }
                 }
-            }
+            },
+            singleLine = true,
+            cornerRadius = 24.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        ToolBody(
+            padding = PaddingValues(0.dp),
+            modifier = Modifier.weight(1f),
+            scrollState = scroll,
+        ) {
             Text(
-                "共 ${apps.size} 个应用，导出前请确认备份用途合法。",
+                "支持第三方与系统应用，导出到下载目录；AAB 应用（带拆分包）会自动打成 .apks。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
+            if (loading) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (apps.isEmpty()) {
+                Text("未找到可导出的应用", style = MiuixTheme.textStyles.body2)
+            } else if (shown.isEmpty()) {
+                Text(
+                    "没有找到与「${query.trim()}」匹配的应用",
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            } else {
+                shown.forEach { entry ->
+                    val busy = busyLabel == entry.label
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val iconBm = entry.icon
+                        if (iconBm != null) {
+                            Image(
+                                bitmap = iconBm.asImageBitmap(),
+                                contentDescription = entry.label,
+                                modifier = Modifier.size(32.dp).padding(end = 10.dp),
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                entry.label,
+                                style = MiuixTheme.textStyles.body2,
+                                maxLines = 2,
+                            )
+                            Text(
+                                entry.packageName,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (entry.isBundle) {
+                                Text(
+                                    "AAB · 基础包 + ${entry.splits.size} 个拆分包 → .apks",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        SecondaryButton(
+                            onClick = { scope.launch { extract(entry) } },
+                            // 导出一个应用期间其它行先不可点：.apks 可能有几百 MB，同时导出会互相串状态
+                            enabled = busyLabel == null,
+                        ) {
+                            if (busy) {
+                                CircularProgressIndicator(size = 16.dp, strokeWidth = 2.dp)
+                            } else {
+                                Text("导出")
+                            }
+                        }
+                    }
+                }
+                val bundleCount = shown.count { it.isBundle }
+                Text(
+                    buildString {
+                        if (shown.size == apps.size) append("共 ${apps.size} 个应用")
+                        else append("匹配 ${shown.size} / ${apps.size} 个应用")
+                        if (bundleCount > 0) append("，其中 $bundleCount 个是 AAB 应用（导出为 .apks）")
+                        append("。导出前请确认备份用途合法。")
+                    },
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
         }
     }
-    val resultMsg = extractResult
+
+    val r = result
     AppDialog(
-        show = resultMsg != null,
-        title = if (resultMsg?.endsWith(".apk") == true) "导出完成" else "导出失败",
+        show = r != null,
+        title = if (r?.ok == true) "导出完成" else "导出失败",
         summary = when {
-            resultMsg == null -> null
-            resultMsg.endsWith(".apk") -> "路径：$resultMsg\n版本代码：$lastVersionCode"
-            else -> resultMsg
+            r == null -> null
+            !r.ok -> r.text
+            r.splitCount > 0 ->
+                "路径：${r.text}\n版本代码：$lastVersionCode\n" +
+                    "这是 AAB 应用，已把基础包和 ${r.splitCount} 个拆分包打成 .apks，" +
+                    "可以用「安装特殊应用」装回去。"
+            else -> "路径：${r.text}\n版本代码：$lastVersionCode"
         },
-        onDismiss = { extractResult = null },
+        onDismiss = { result = null },
         confirmText = "好的",
         dismissText = null,
     )

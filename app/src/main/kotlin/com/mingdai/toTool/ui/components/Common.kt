@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -145,17 +146,21 @@ fun ToolScaffold(
     ) { padding -> content(padding) }
 }
 
-/** Scrollable column with consistent padding — the body of most tool screens. */
+/**
+ * Scrollable column with consistent padding — the body of most tool screens.
+ * 需要从外面控制滚动位置（比如搜索词变了要回到顶部）时，传入自己的 [scrollState]。
+ */
 @Composable
 fun ToolBody(
     padding: PaddingValues,
     modifier: Modifier = Modifier,
+    scrollState: ScrollState = rememberScrollState(),
     content: @Composable () -> Unit,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(padding)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
