@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -41,12 +42,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
-import androidx.core.graphics.drawable.IconCompat
 import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
 import com.mingdai.toTool.data.LocalFavorites
 import com.mingdai.toTool.data.Tool
+import com.mingdai.toTool.data.ToolRegistry
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownImpl
@@ -91,19 +91,19 @@ fun copyText(context: Context, text: String, what: String? = null) {
  * Tapping the shortcut reopens [MainActivity] and jumps straight to the tool.
  */
 fun pinToolShortcut(context: Context, tool: Tool) {
-    if (!ShortcutManagerCompat.isRequestPinShortcutSupported(context)) {
-        Toast.makeText(context, context.getString(R.string.action_pin_unsupported), Toast.LENGTH_SHORT).show()
-        return
-    }
     val intent = Intent(context, MainActivity::class.java)
         .setAction(Intent.ACTION_VIEW)
+        // 应用已经在后台时复用现有的 MainActivity（走 onNewIntent），不再叠一个新的
+        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         .putExtra(MainActivity.EXTRA_TOOL_ID, tool.id)
     val shortcut = ShortcutInfoCompat.Builder(context, "tool_${tool.id}")
         .setShortLabel(tool.name)
-        .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+        .setLongLabel(tool.name)
+        // 每个工具用自己的图标（分类底色 + 工具图标），桌面上才分得清；再次添加同一个工具会顺便更新旧图标
+        .setIcon(toolShortcutIcon(context, tool))
         .setIntent(intent)
         .build()
-    ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
+    requestPinWithFeedback(context, shortcut)
 }
 
 /** Standard scaffold for a single tool screen: back + title + favorite toggle. */
@@ -117,6 +117,8 @@ fun ToolScaffold(
 ) {
     val favorites = LocalFavorites.current
     val isFavorite = favorites.isFavorite(favoriteId)
+    val context = LocalContext.current
+    val pinnable = ToolRegistry.byId[ToolRegistry.resolve(favoriteId)]
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -132,6 +134,15 @@ fun ToolScaffold(
                     }
                 },
                 actions = {
+                    if (pinnable != null) {
+                        IconButton(onClick = { pinToolShortcut(context, pinnable) }) {
+                            Icon(
+                                imageVector = Icons.Filled.AddToHomeScreen,
+                                contentDescription = stringResource(R.string.action_pin_home),
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
                     IconButton(onClick = { favorites.toggle(favoriteId) }) {
                         Icon(
                             imageVector = if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,

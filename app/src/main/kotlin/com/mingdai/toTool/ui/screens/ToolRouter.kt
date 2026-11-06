@@ -24,6 +24,7 @@ import com.mingdai.toTool.ui.components.ToolScaffold
 import com.mingdai.toTool.ui.components.findActivity
 import com.mingdai.toTool.ui.components.setSystemBarsHidden
 import com.mingdai.toTool.ui.screens.tools.ApkExtractorTool
+import com.mingdai.toTool.ui.screens.tools.CustomShortcutTool
 import com.mingdai.toTool.ui.screens.tools.Base64Tool
 import com.mingdai.toTool.ui.screens.tools.BaseConverterTool
 import com.mingdai.toTool.ui.screens.tools.BatteryTool
@@ -208,6 +209,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_apk" -> ApkExtractorTool(padding)
             "dev_vibrate" -> VibratorTool(padding)
             "dev_installer" -> SplitInstallerTool(padding)
+            "dev_shortcut" -> CustomShortcutTool(padding)
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)
             "dev_wallpaper_video" -> VideoWallpaperTool(padding)
             // --- 日常工具 ---

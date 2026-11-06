@@ -39,7 +39,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val prefs = Prefs(this)
-        deepLinkToolId = intent?.getStringExtra(EXTRA_TOOL_ID)
+        // 只在“全新启动”时读快捷方式带来的工具 id：Activity 被系统重建（切换深色模式、进程被回收后恢复）时
+        // intent 还是最初那个，再读一次会把已经关掉的工具又打开一遍。
+        if (savedInstanceState == null) {
+            deepLinkToolId = intent?.getStringExtra(EXTRA_TOOL_ID)
+        }
         setContent {
             // 这些状态对象必须 remember：否则每次重组都会新建一份，Local 提供的实例不断变化。
             val themeState = remember {

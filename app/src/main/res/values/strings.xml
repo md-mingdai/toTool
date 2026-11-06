@@ -13,6 +13,8 @@
     <string name="action_pin_home">添加到主屏幕</string>
     <string name="action_pin_unsupported">当前启动器不支持添加到主屏幕</string>
     <string name="action_pin_done">已添加到主屏幕</string>
+    <string name="action_pin_requested">已向桌面发出添加请求。如果没有弹出确认窗口，请在系统设置里允许本应用的「桌面快捷方式」权限</string>
+    <string name="action_pin_failed">添加失败：桌面拒绝了请求，请检查本应用的「桌面快捷方式」权限</string>
     <string name="action_compact">紧凑显示</string>
     <string name="label_all">全部</string>
     <string name="label_favorites">收藏</string>
