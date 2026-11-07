@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -62,6 +63,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.mingdai.toTool.data.LocalBehaviorState
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_BASE_PX
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_MAX
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SectionLabel
@@ -69,8 +73,10 @@ import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.openAppDetailsSettings
 import com.mingdai.toTool.ui.components.requestPinWithFeedback
+import com.mingdai.toTool.ui.components.roundShortcutCorners
 import com.mingdai.toTool.ui.components.shortcutIconSizePx
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -78,6 +84,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -93,10 +100,27 @@ private data class PickActivity(
     val exported: Boolean,
     val enabled: Boolean,
     val needsPermission: Boolean,
+    /** 是桌面入口（声明了 MAIN / LAUNCHER 的 Activity），也就是点应用图标时打开的那个。 */
+    val isLauncher: Boolean,
 ) {
     /** 别的应用能直接拉起它：已导出、没被禁用、也不需要我们没有的权限。 */
     val launchable: Boolean get() = exported && enabled && !needsPermission
     val shortName: String get() = className.substringAfterLast('.')
+
+    /**
+     * 列表排序的优先级，越小越靠前：名为 MainActivity 的排最前，其次是桌面入口，其余的再按「能否启动」和类名排。
+     * 两条都满足的最靠前。
+     */
+    val priority: Int
+        get() {
+            val isMain = shortName.equals("MainActivity", ignoreCase = true)
+            return when {
+                isMain && isLauncher -> 0
+                isMain -> 1
+                isLauncher -> 2
+                else -> 3
+            }
+        }
 }
 
 private data class ShortcutTarget(
@@ -123,7 +147,7 @@ private fun loadInstalledApps(pm: PackageManager): List<PickApp> =
         .map { PickApp(it.packageName, pm.getApplicationLabel(it).toString()) }
         .sortedBy { it.label.lowercase(Locale.ROOT) }
 
-/** 读出一个应用声明的全部 Activity；可直接启动的排在前面。 */
+/** 读出一个应用声明的全部 Activity：名为 MainActivity 的和桌面入口排最前，其余的可直接启动的在前。 */
 @Suppress("DEPRECATION")
 private fun loadActivities(context: Context, packageName: String): List<PickActivity> {
     val pm = context.packageManager
@@ -139,6 +163,16 @@ private fun loadActivities(context: Context, packageName: String): List<PickActi
     } catch (e: Exception) {
         return emptyList()
     }
+    // 声明了 MAIN / LAUNCHER 的 Activity，就是点应用图标时打开的主入口
+    val launcherNames: Set<String> = runCatching {
+        val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName)
+        val resolved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(query, PackageManager.ResolveInfoFlags.of(0L))
+        } else {
+            pm.queryIntentActivities(query, 0)
+        }
+        resolved.map { it.activityInfo.name }.toSet()
+    }.getOrDefault(emptySet())
     return info.activities.orEmpty().map { a ->
         val permission = a.permission
         PickActivity(
@@ -148,8 +182,13 @@ private fun loadActivities(context: Context, packageName: String): List<PickActi
             enabled = a.enabled,
             needsPermission = permission != null &&
                 context.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED,
+            isLauncher = a.name in launcherNames,
         )
-    }.sortedWith(compareByDescending<PickActivity> { it.launchable }.thenBy { it.className })
+    }.sortedWith(
+        compareBy<PickActivity> { it.priority }
+            .thenByDescending { it.launchable }
+            .thenBy { it.className },
+    )
 }
 
 /** 列表里用的小图标缓存：滚动时不用反复取图、缩放。 */
@@ -291,6 +330,9 @@ fun CustomShortcutTool(padding: PaddingValues) {
     var pickedImage by remember { mutableStateOf<Bitmap?>(null) }
     var iconText by remember { mutableStateOf("") }
     var iconColor by remember { mutableStateOf(TextIconColors[0]) }
+    // 圆角：初始值取设置页里的默认值，之后只影响这一个快捷方式，不会改动全局默认
+    val behavior = LocalBehaviorState.current
+    var cornerRadius by remember { mutableIntStateOf(behavior.shortcutCornerRadius) }
 
     // 选择页里按返回：Activity 列表 → 应用列表 → 表单，而不是直接退出整个工具
     BackHandler(enabled = step != ShortcutStep.FORM) {
@@ -330,11 +372,13 @@ fun CustomShortcutTool(padding: PaddingValues) {
         IconSource.TEXT -> renderTextIcon(iconText.ifBlank { fallbackChar }, iconColor.toInt(), size)
     }
 
-    val preview = remember(iconSource, target, pickedImage, iconText, iconColor, fallbackChar) { buildIcon(192) }
+    // 底图和圆角分开算：拖圆角滑块时只重新裁一遍圆角，不用重新取图、绘制
+    val baseIcon = remember(iconSource, target, pickedImage, iconText, iconColor, fallbackChar) { buildIcon(192) }
+    val preview = remember(baseIcon, cornerRadius) { baseIcon?.let { roundShortcutCorners(it, cornerRadius) } }
 
     fun pin() {
         val t = target ?: return
-        val bitmap = buildIcon(iconSize)
+        val bitmap = buildIcon(iconSize)?.let { roundShortcutCorners(it, cornerRadius) }
         if (bitmap == null) {
             Toast.makeText(context, "图标生成失败", Toast.LENGTH_SHORT).show()
             return
@@ -466,7 +510,7 @@ fun CustomShortcutTool(padding: PaddingValues) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(64.dp)
+                        .size(88.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(MiuixTheme.colorScheme.secondaryContainer),
                     contentAlignment = Alignment.Center,
@@ -476,7 +520,7 @@ fun CustomShortcutTool(padding: PaddingValues) {
                         Image(
                             bitmap = shown.asImageBitmap(),
                             contentDescription = "图标预览",
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.size(64.dp),
                         )
                     }
                 }
@@ -549,6 +593,30 @@ fun CustomShortcutTool(padding: PaddingValues) {
 
                 IconSource.TARGET -> Unit
             }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "圆角",
+                    style = MiuixTheme.textStyles.body2,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "${cornerRadius}px",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Slider(
+                value = cornerRadius.toFloat(),
+                onValueChange = { cornerRadius = it.roundToInt() },
+                valueRange = 0f..SHORTCUT_RADIUS_MAX.toFloat(),
+            )
+            Text(
+                text = "半径按 ${SHORTCUT_RADIUS_BASE_PX}px 边长的图标换算，实际图标等比放大；" +
+                    "0 为直角，${SHORTCUT_RADIUS_MAX} 为正圆。初始值取自设置页里的默认圆角。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SecondaryButton(
@@ -736,6 +804,7 @@ private fun ActivityPickerPage(
                         !activity.enabled -> "已禁用"
                         !activity.exported -> "未导出"
                         activity.needsPermission -> "需权限"
+                        activity.isLauncher -> "主入口"
                         else -> "可启动"
                     }
                     PickRow(

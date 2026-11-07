@@ -3,9 +3,12 @@ package com.mingdai.toTool.ui.components
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
@@ -20,6 +23,9 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.mingdai.toTool.R
+import com.mingdai.toTool.data.Prefs
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_BASE_PX
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_MAX
 import com.mingdai.toTool.data.Tool
 import com.mingdai.toTool.data.ToolCategory
 
@@ -81,10 +87,32 @@ fun renderVectorShortcutIcon(icon: ImageVector, background: Int, sizePx: Int): B
     return bitmap
 }
 
-/** 工具自己的快捷方式图标：分类底色 + 工具图标。 */
+/**
+ * 把方形位图裁成圆角矩形（四角透明）。
+ * [radius] 的单位是 px，按 [SHORTCUT_RADIUS_BASE_PX] 边长的图标换算：位图更大时半径等比放大，
+ * 所以同一个数值在任何设备上看起来都一样。0 表示直角，原样返回；[SHORTCUT_RADIUS_MAX] 是正圆。
+ */
+fun roundShortcutCorners(source: Bitmap, radius: Int): Bitmap {
+    val r = radius.coerceIn(0, SHORTCUT_RADIUS_MAX)
+    if (r == 0) return source
+    val width = source.width
+    val height = source.height
+    val radiusPx = r.toFloat() / SHORTCUT_RADIUS_BASE_PX * minOf(width, height)
+    val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    paint.shader = BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    Canvas(result).drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), radiusPx, radiusPx, paint)
+    return result
+}
+
+/** 工具自己的快捷方式图标位图：分类底色 + 工具图标，再按 [radius] 裁圆角。设置页的预览也用它。 */
+fun toolShortcutBitmap(tool: Tool, sizePx: Int, radius: Int): Bitmap =
+    roundShortcutCorners(renderVectorShortcutIcon(tool.icon, shortcutColorOf(tool.category), sizePx), radius)
+
+/** 工具自己的快捷方式图标：圆角取自设置页里的默认值。 */
 fun toolShortcutIcon(context: Context, tool: Tool): IconCompat =
     IconCompat.createWithBitmap(
-        renderVectorShortcutIcon(tool.icon, shortcutColorOf(tool.category), shortcutIconSizePx(context)),
+        toolShortcutBitmap(tool, shortcutIconSizePx(context), Prefs(context).shortcutCornerRadius()),
     )
 
 /**

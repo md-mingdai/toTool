@@ -3,9 +3,13 @@ package com.mingdai.toTool.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.mingdai.toTool.ui.theme.ThemeMode
+
+/** 快捷方式图标圆角（px）：默认值、上限、换算基准。上限正好是基准的一半，即正圆。 */
+const val SHORTCUT_RADIUS_DEFAULT = 16
+const val SHORTCUT_RADIUS_MAX = 48
+const val SHORTCUT_RADIUS_BASE_PX = 96
 
 /**
  * Lightweight persistence wrapper backed by SharedPreferences.
@@ -95,7 +99,18 @@ class Prefs(context: Context) {
         sp.edit().putBoolean(KEY_CAT_EXPANDED, value).apply()
     }
 
+    /**
+     * 工具添加到桌面时，快捷方式图标的圆角半径（px，按 [SHORTCUT_RADIUS_BASE_PX] 边长的图标换算）。
+     */
+    fun shortcutCornerRadius(): Int =
+        sp.getInt(KEY_SHORTCUT_RADIUS, SHORTCUT_RADIUS_DEFAULT).coerceIn(0, SHORTCUT_RADIUS_MAX)
+
+    fun setShortcutCornerRadius(value: Int) {
+        sp.edit().putInt(KEY_SHORTCUT_RADIUS, value.coerceIn(0, SHORTCUT_RADIUS_MAX)).apply()
+    }
+
     private companion object {
+        const val KEY_SHORTCUT_RADIUS = "shortcut_corner_radius"
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_KEEP_ON = "keep_screen_on"
         const val KEY_CAT_EXPANDED = "categories_expanded"

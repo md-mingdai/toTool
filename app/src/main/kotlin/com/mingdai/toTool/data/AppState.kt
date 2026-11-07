@@ -2,10 +2,10 @@ package com.mingdai.toTool.data
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.platform.LocalContext
 import com.mingdai.toTool.ui.theme.ThemeMode
 
 /**
@@ -92,7 +92,7 @@ class UnitLabelState(private val prefs: Prefs) {
     fun toggle() = set(!useAbbr)
 }
 
-/** 交互 / 行为类设置：触感反馈、工具页常亮、分类默认展开。 */
+/** 交互 / 行为类设置：触感反馈、工具页常亮、分类默认展开、快捷方式圆角。 */
 class BehaviorState(private val prefs: Prefs) {
     var haptics: Boolean by mutableStateOf(prefs.hapticsEnabled())
         private set
@@ -100,8 +100,11 @@ class BehaviorState(private val prefs: Prefs) {
         private set
     var expandCategories: Boolean by mutableStateOf(prefs.categoriesExpanded())
         private set
+    /** 工具添加到桌面时，快捷方式图标的圆角半径（px，按 96px 边长的图标换算）。 */
+    var shortcutCornerRadius: Int by mutableIntStateOf(prefs.shortcutCornerRadius())
+        private set
 
-    // 注意：这里不能叫 setHaptics / setKeepScreenOn / setExpandCategories——
+    // 注意：这里不能叫 setHaptics / setKeepScreenOn / setExpandCategories / setShortcutCornerRadius——
     // 上面的属性（即使 setter 是 private）也会生成同名的 JVM 方法，会触发 "Platform declaration clash"。
     fun updateHaptics(value: Boolean) {
         prefs.setHapticsEnabled(value)
@@ -118,11 +121,19 @@ class BehaviorState(private val prefs: Prefs) {
         expandCategories = value
     }
 
+    fun updateShortcutCornerRadius(value: Int) {
+        val clamped = value.coerceIn(0, SHORTCUT_RADIUS_MAX)
+        if (clamped == shortcutCornerRadius) return
+        prefs.setShortcutCornerRadius(clamped)
+        shortcutCornerRadius = clamped
+    }
+
     /** 恢复默认值。 */
     fun reset() {
         updateHaptics(true)
         updateKeepScreenOn(false)
         updateExpandCategories(true)
+        updateShortcutCornerRadius(SHORTCUT_RADIUS_DEFAULT)
     }
 }
 

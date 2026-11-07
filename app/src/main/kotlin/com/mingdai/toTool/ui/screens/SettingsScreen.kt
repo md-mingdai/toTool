@@ -47,9 +47,13 @@ import com.mingdai.toTool.data.LocalDisplayState
 import com.mingdai.toTool.data.LocalFavorites
 import com.mingdai.toTool.data.LocalThemeState
 import com.mingdai.toTool.data.LocalUnitLabelState
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_BASE_PX
+import com.mingdai.toTool.data.SHORTCUT_RADIUS_MAX
+import com.mingdai.toTool.data.ToolCategory
 import com.mingdai.toTool.data.ToolRegistry
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.ColorWheelPicker
+import com.mingdai.toTool.ui.components.toolShortcutBitmap
 import com.mingdai.toTool.ui.theme.ThemeMode
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -57,6 +61,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -65,6 +70,7 @@ import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import kotlin.math.roundToInt
 
 /** 自定义主题色的默认值，和 Prefs 里的默认值保持一致。 */
 private const val DefaultHue = 0f
@@ -217,6 +223,15 @@ fun SettingsScreen(navController: NavHostController) {
                 )
             }
 
+            // ── 桌面快捷方式 ─────────────────────────────────────
+            SmallTitle(text = "桌面快捷方式")
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                ShortcutRadiusSetting(
+                    radius = behavior.shortcutCornerRadius,
+                    onRadiusChange = { behavior.updateShortcutCornerRadius(it) },
+                )
+            }
+
             // ── 数据 ─────────────────────────────────────────────
             SmallTitle(text = "数据")
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -228,7 +243,7 @@ fun SettingsScreen(navController: NavHostController) {
                 )
                 ArrowPreference(
                     title = "恢复默认设置",
-                    summary = "主题、显示与交互选项恢复为默认值，收藏不受影响",
+                    summary = "主题、显示、交互与快捷方式选项恢复为默认值，收藏不受影响",
                     onClick = { showReset = true },
                 )
             }
@@ -289,7 +304,7 @@ fun SettingsScreen(navController: NavHostController) {
     AppDialog(
         show = showReset,
         title = "恢复默认设置？",
-        summary = "主题、显示和交互选项都会恢复为默认值；收藏的工具不受影响。",
+        summary = "主题、显示、交互和快捷方式选项都会恢复为默认值；收藏的工具不受影响。",
         onDismiss = { showReset = false },
         confirmText = "恢复",
         onConfirm = {
@@ -437,6 +452,57 @@ private fun AppHeaderCard(versionName: String, versionCode: Long, toolCount: Int
                 }
             }
         }
+    }
+}
+
+/**
+ * 「桌面快捷方式」圆角：滑块 + 实时预览。
+ * 预览是每个分类各取一个工具，用和真正添加到桌面时同一套代码画出来的，所见即所得。
+ */
+@Composable
+private fun ShortcutRadiusSetting(radius: Int, onRadiusChange: (Int) -> Unit) {
+    val samples = remember {
+        ToolCategory.values().mapNotNull { category -> ToolRegistry.byCategory(category).firstOrNull() }
+    }
+    val previews = remember(radius) {
+        samples.map { tool -> toolShortcutBitmap(tool, 128, radius).asImageBitmap() }
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "快捷方式圆角",
+                style = MiuixTheme.textStyles.body1,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${radius}px",
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        Text(
+            text = "工具添加到桌面时图标的圆角半径。按 ${SHORTCUT_RADIUS_BASE_PX}px 边长的图标换算，实际图标等比放大；" +
+                "0 为直角，${SHORTCUT_RADIUS_MAX} 为正圆。已添加的快捷方式不会变化，重新添加同一个工具即可更新。",
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            previews.forEach { bitmap ->
+                Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.size(48.dp))
+            }
+        }
+        Slider(
+            value = radius.toFloat(),
+            onValueChange = { onRadiusChange(it.roundToInt()) },
+            valueRange = 0f..SHORTCUT_RADIUS_MAX.toFloat(),
+        )
     }
 }
 
