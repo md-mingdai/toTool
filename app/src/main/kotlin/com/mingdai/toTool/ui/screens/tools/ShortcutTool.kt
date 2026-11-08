@@ -100,27 +100,19 @@ private data class PickActivity(
     val exported: Boolean,
     val enabled: Boolean,
     val needsPermission: Boolean,
-    /** 是桌面入口（声明了 MAIN / LAUNCHER 的 Activity），也就是点应用图标时打开的那个。 */
-    val isLauncher: Boolean,
+    /**
+     * 在桌面入口（声明了 MAIN / LAUNCHER 的 Activity，也就是点应用图标时打开的那些）里的次序：
+     * 0 是默认入口，1、2… 是其他入口，-1 表示不是桌面入口。
+     */
+    val launcherOrder: Int,
 ) {
     /** 别的应用能直接拉起它：已导出、没被禁用、也不需要我们没有的权限。 */
     val launchable: Boolean get() = exported && enabled && !needsPermission
     val shortName: String get() = className.substringAfterLast('.')
+    val isLauncher: Boolean get() = launcherOrder >= 0
 
-    /**
-     * 列表排序的优先级，越小越靠前：名为 MainActivity 的排最前，其次是桌面入口，其余的再按「能否启动」和类名排。
-     * 两条都满足的最靠前。
-     */
-    val priority: Int
-        get() {
-            val isMain = shortName.equals("MainActivity", ignoreCase = true)
-            return when {
-                isMain && isLauncher -> 0
-                isMain -> 1
-                isLauncher -> 2
-                else -> 3
-            }
-        }
+    /** 主入口：点应用图标时打开的那个 Activity。选择时优先推荐它。 */
+    val isRecommended: Boolean get() = launcherOrder == 0
 }
 
 private data class ShortcutTarget(
@@ -147,7 +139,7 @@ private fun loadInstalledApps(pm: PackageManager): List<PickApp> =
         .map { PickApp(it.packageName, pm.getApplicationLabel(it).toString()) }
         .sortedBy { it.label.lowercase(Locale.ROOT) }
 
-/** 读出一个应用声明的全部 Activity：名为 MainActivity 的和桌面入口排最前，其余的可直接启动的在前。 */
+/** 读出一个应用声明的全部 Activity：主入口排最前（推荐），其余的可直接启动的在前。 */
 @Suppress("DEPRECATION")
 private fun loadActivities(context: Context, packageName: String): List<PickActivity> {
     val pm = context.packageManager
@@ -163,16 +155,18 @@ private fun loadActivities(context: Context, packageName: String): List<PickActi
     } catch (e: Exception) {
         return emptyList()
     }
-    // 声明了 MAIN / LAUNCHER 的 Activity，就是点应用图标时打开的主入口
-    val launcherNames: Set<String> = runCatching {
+    // 声明了 MAIN / LAUNCHER 的 Activity，就是点应用图标时打开的入口；系统认定的默认入口放在第一位
+    val launcherNames: List<String> = runCatching {
         val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName)
         val resolved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             pm.queryIntentActivities(query, PackageManager.ResolveInfoFlags.of(0L))
         } else {
             pm.queryIntentActivities(query, 0)
         }
-        resolved.map { it.activityInfo.name }.toSet()
-    }.getOrDefault(emptySet())
+        val primary = pm.getLaunchIntentForPackage(packageName)?.component?.className
+        val ordered = listOfNotNull(primary) + resolved.map { it.activityInfo.name }
+        ordered.distinct()
+    }.getOrDefault(emptyList())
     return info.activities.orEmpty().map { a ->
         val permission = a.permission
         PickActivity(
@@ -182,10 +176,11 @@ private fun loadActivities(context: Context, packageName: String): List<PickActi
             enabled = a.enabled,
             needsPermission = permission != null &&
                 context.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED,
-            isLauncher = a.name in launcherNames,
+            launcherOrder = launcherNames.indexOf(a.name),
         )
     }.sortedWith(
-        compareBy<PickActivity> { it.priority }
+        // 桌面入口在前（默认入口最前），其余的可启动的在前，最后按类名
+        compareBy<PickActivity> { if (it.isLauncher) it.launcherOrder else Int.MAX_VALUE }
             .thenByDescending { it.launchable }
             .thenBy { it.className },
     )
@@ -794,6 +789,15 @@ private fun ActivityPickerPage(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (query.isBlank() && shown.any { it.isRecommended }) {
+                    item(key = "recommend_hint") {
+                        Text(
+                            text = "标「推荐」的是主入口，即点应用图标时打开的 Activity，一般直接选它就行。",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
                 items(shown, key = { it.className }) { activity ->
                     // Activity 没单独起名时，系统会回退成应用名，这时显示类名更有区分度
                     val title = if (activity.label.isNotBlank() &&
@@ -804,7 +808,8 @@ private fun ActivityPickerPage(
                         !activity.enabled -> "已禁用"
                         !activity.exported -> "未导出"
                         activity.needsPermission -> "需权限"
-                        activity.isLauncher -> "主入口"
+                        activity.isRecommended -> "推荐"
+                        activity.isLauncher -> "桌面入口"
                         else -> "可启动"
                     }
                     PickRow(

@@ -55,6 +55,7 @@ import com.mingdai.toTool.ui.screens.tools.QrTool
 import com.mingdai.toTool.ui.screens.tools.RulerTool
 import com.mingdai.toTool.ui.screens.tools.ScoreboardTool
 import com.mingdai.toTool.ui.screens.tools.SensorListTool
+import com.mingdai.toTool.ui.screens.tools.ShellTool
 import com.mingdai.toTool.ui.screens.tools.SpiritLevelTool
 import com.mingdai.toTool.ui.screens.tools.SplitInstallerTool
 import com.mingdai.toTool.ui.screens.tools.StopwatchTool
@@ -210,6 +211,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_vibrate" -> VibratorTool(padding)
             "dev_installer" -> SplitInstallerTool(padding)
             "dev_shortcut" -> CustomShortcutTool(padding)
+            "dev_shell" -> ShellTool(padding)
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)
             "dev_wallpaper_video" -> VideoWallpaperTool(padding)
             // --- 日常工具 ---

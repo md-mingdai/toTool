@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +59,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mingdai.toTool.data.IncomingPackage
 import com.mingdai.toTool.ui.components.AppCheckbox
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
@@ -756,28 +759,47 @@ fun SplitInstallerTool(padding: PaddingValues) {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) {
-            loaded?.close()
-            loaded = null
-            stage = InstStage.Loading
-            scope.launch {
-                try {
-                    val pkg = withContext(Dispatchers.IO) {
-                        instLoadPackage(context, uris.map { instDescribe(context, it) }, device)
-                    }
-                    loaded = pkg
-                    chosen = pkg.plan.selected
-                    withObb = true
-                    stage = InstStage.Ready
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    stage = InstStage.Finished(
-                        false, "无法读取安装包", e.message ?: e.javaClass.simpleName, null, false,
-                    )
+    // 读入所选文件：文件选择器和「打开方式」送来的文件走同一条路
+    fun loadUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        loaded?.close()
+        loaded = null
+        stage = InstStage.Loading
+        scope.launch {
+            try {
+                val pkg = withContext(Dispatchers.IO) {
+                    instLoadPackage(context, uris.map { instDescribe(context, it) }, device)
                 }
+                loaded = pkg
+                chosen = pkg.plan.selected
+                withObb = true
+                stage = InstStage.Ready
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                stage = InstStage.Finished(
+                    false, "无法读取安装包", e.message ?: e.javaClass.simpleName, null, false,
+                )
             }
+        }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        loadUris(uris)
+    }
+
+    // 别的应用用「打开方式」送来了安装包（.apks / .xapk / .apkm）：取走并读入。
+    // 正在读取 / 写入 / 等系统确认 / 复制 OBB 时不能换掉当前的包，这种情况直接提示并放弃新文件。
+    val incoming = IncomingPackage.uri
+    LaunchedEffect(incoming) {
+        val uri = incoming ?: return@LaunchedEffect
+        IncomingPackage.uri = null
+        val busy = stage is InstStage.Loading || stage is InstStage.Writing ||
+            stage is InstStage.Confirming || stage is InstStage.CopyingObb
+        if (busy) {
+            Toast.makeText(context, "正在处理另一个安装包，已忽略新打开的文件", Toast.LENGTH_LONG).show()
+        } else {
+            loadUris(listOf(uri))
         }
     }
 
@@ -954,6 +976,7 @@ private fun InstIdleContent(onPick: () -> Unit) {
             PrimaryButton(onClick = onPick, modifier = Modifier.fillMaxWidth()) { Text("选择文件") }
         }
     }
+    HintText("也可以在文件管理器或浏览器的下载里，直接选择用本应用打开 .apks / .xapk / .apkm 文件")
     HintText("会按本机的 CPU 架构、屏幕密度和语言自动挑选需要的拆分包")
     HintText("首次使用需要在系统设置里允许本应用「安装未知应用」")
     HintText("请只安装来源可信的安装包")

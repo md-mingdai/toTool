@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Vibration
@@ -106,6 +107,7 @@ object ToolRegistry {
         Tool("dev_vibrate", "振动器", "预设模式循环振动，可调强度，手动停止", ToolCategory.DEVICE, Icons.Filled.Vibration),
         Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.DEVICE, Icons.Filled.Apps),
         Tool("dev_shortcut", "自定义快捷方式", "选择目标 Activity 与图标，创建桌面快捷方式", ToolCategory.DEVICE, Icons.Filled.AddToHomeScreen),
+        Tool("dev_shell", "执行 Shell 指令", "通过 Shizuku 执行命令或 .sh 脚本，查看日志", ToolCategory.DEVICE, Icons.Filled.Terminal),
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.DEVICE, Icons.Filled.Wallpaper),
         Tool("dev_wallpaper_video", "桌面视频壁纸", "将视频设为桌面动态壁纸", ToolCategory.DEVICE, Icons.Filled.VideoLibrary),
         Tool("dev_pixelcheck", "屏幕坏点检测", "纯色与点阵逐格排查", ToolCategory.DEVICE, Icons.Filled.GridView),

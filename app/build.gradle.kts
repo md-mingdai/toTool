@@ -108,5 +108,9 @@ dependencies {
 
     implementation("com.google.zxing:core:3.5.3")
 
+    // Shizuku：「执行 Shell 指令」工具通过它以 shell / root 权限运行命令
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

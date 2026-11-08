@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import com.mingdai.toTool.data.BehaviorState
 import com.mingdai.toTool.data.DisplayState
 import com.mingdai.toTool.data.FavoritesState
+import com.mingdai.toTool.data.IncomingPackage
 import com.mingdai.toTool.data.LocalBehaviorState
 import com.mingdai.toTool.data.LocalDisplayState
 import com.mingdai.toTool.data.LocalFavorites
@@ -39,10 +40,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val prefs = Prefs(this)
-        // 只在“全新启动”时读快捷方式带来的工具 id：Activity 被系统重建（切换深色模式、进程被回收后恢复）时
-        // intent 还是最初那个，再读一次会把已经关掉的工具又打开一遍。
+        // 只在“全新启动”时读外部送来的内容（快捷方式的工具 id、“打开方式”送来的安装包）：
+        // Activity 被系统重建（切换深色模式、进程被回收后恢复）时 intent 还是最初那个，
+        // 再读一次会把已经关掉的工具又打开一遍。
         if (savedInstanceState == null) {
-            deepLinkToolId = intent?.getStringExtra(EXTRA_TOOL_ID)
+            handleIntent(intent)
         }
         setContent {
             // 这些状态对象必须 remember：否则每次重组都会新建一份，Local 提供的实例不断变化。
@@ -90,11 +92,36 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        deepLinkToolId = intent.getStringExtra(EXTRA_TOOL_ID)
+        handleIntent(intent)
+    }
+
+    /**
+     * 处理外部送来的 Intent：
+     *  - 带 [EXTRA_TOOL_ID]：桌面快捷方式，直接打开对应的工具；
+     *  - 没有工具 id、但是 ACTION_VIEW + content / file 数据：别的应用用「打开方式」送来的
+     *    .apks / .xapk / .apkm，交给「安装特殊应用」读取。
+     * 工具快捷方式的 Intent 不带数据，所以两种情况不会混淆。
+     */
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+        val toolId = intent.getStringExtra(EXTRA_TOOL_ID)
+        val data = intent.data
+        val scheme = data?.scheme
+        if (toolId.isNullOrEmpty() && intent.action == Intent.ACTION_VIEW &&
+            data != null && (scheme == "content" || scheme == "file")
+        ) {
+            IncomingPackage.uri = data
+            deepLinkToolId = INSTALLER_TOOL_ID
+        } else {
+            deepLinkToolId = toolId
+        }
     }
 
     companion object {
         /** Intent extra carrying a tool id to open directly (pinned shortcuts). */
         const val EXTRA_TOOL_ID = "extra_tool_id"
+
+        /** 「安装特殊应用」工具的 id：收到安装包文件时跳到这里。 */
+        private const val INSTALLER_TOOL_ID = "dev_installer"
     }
 }

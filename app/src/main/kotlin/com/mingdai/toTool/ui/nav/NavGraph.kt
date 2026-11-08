@@ -145,7 +145,15 @@ fun AppNavGraph(
     LaunchedEffect(deepLinkToolId) {
         val id = deepLinkToolId
         if (!id.isNullOrEmpty()) {
-            navController.navigate(Routes.tool(id))
+            // 已经停在这个工具上就不再压一层新页面（比如正在「安装特殊应用」里又从别处打开了一个安装包，
+            // 这时由当前页面自己接手新文件）。
+            val current = navController.currentBackStackEntry
+            val alreadyThere = current != null &&
+                current.destination.route == Routes.TOOL &&
+                current.arguments?.getString("id") == id
+            if (!alreadyThere) {
+                navController.navigate(Routes.tool(id))
+            }
             onDeepLinkConsumed()
         }
     }
