@@ -133,8 +133,12 @@ private fun AnimatedContentScope.StackPage(
 
 /**
  * App navigation graph. [deepLinkToolId] is the tool id delivered by a pinned
- * home-screen shortcut (or null). When set, the graph navigates to that tool
- * once, then calls [onDeepLinkConsumed] so it does not re-trigger on rotation.
+ * home-screen shortcut or an external file open (or null). When set, the graph
+ * navigates to that tool once, then calls [onDeepLinkConsumed] so it does not
+ * re-trigger on rotation.
+ *
+ * A deep link never stacks: the back stack is collapsed to HOME → that tool,
+ * and a link to the tool that is already on top is a no-op.
  */
 @Composable
 fun AppNavGraph(
@@ -152,7 +156,14 @@ fun AppNavGraph(
                 current.destination.route == Routes.TOOL &&
                 current.arguments?.getString("id") == id
             if (!alreadyThere) {
-                navController.navigate(Routes.tool(id))
+                // 从桌面快捷方式 / 外部文件进来，页面栈始终收成「首页 → 该工具」两层。
+                // 只判断“栈顶是不是同一个工具”挡不住两个以上快捷方式交替点击：
+                // A、B 轮流启动时栈会变成 首页→A→B→A→B… 一直长下去。
+                // popUpTo(HOME)（inclusive 默认 false）保留首页，把它上面的页面全部弹掉，
+                // 这样不管之前叠了几层、是哪些工具，都只会剩下新打开的这一个。
+                navController.navigate(Routes.tool(id)) {
+                    popUpTo(Routes.HOME)
+                }
             }
             onDeepLinkConsumed()
         }

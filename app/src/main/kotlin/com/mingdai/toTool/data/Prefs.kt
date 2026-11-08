@@ -11,6 +11,10 @@ const val SHORTCUT_RADIUS_DEFAULT = 16
 const val SHORTCUT_RADIUS_MAX = 48
 const val SHORTCUT_RADIUS_BASE_PX = 96
 
+/** 「FFmpeg 命令」：输入框内容、单条历史命令的长度上限，以及历史命令最多保留几条。 */
+const val FFMPEG_COMMAND_MAX_CHARS = 8000
+const val FFMPEG_HISTORY_MAX = 20
+
 /**
  * Lightweight persistence wrapper backed by SharedPreferences.
  * Stores the favorite tool-id set and the chosen theme mode.
@@ -109,7 +113,38 @@ class Prefs(context: Context) {
         sp.edit().putInt(KEY_SHORTCUT_RADIUS, value.coerceIn(0, SHORTCUT_RADIUS_MAX)).apply()
     }
 
+    /** 格式转换页「FFmpeg 命令」输入框里的内容：离开页面时保存，回来时恢复。 */
+    fun ffmpegDraft(): String = sp.getString(KEY_FFMPEG_DRAFT, "") ?: ""
+
+    fun setFfmpegDraft(value: String) {
+        sp.edit().putString(KEY_FFMPEG_DRAFT, value.take(FFMPEG_COMMAND_MAX_CHARS)).apply()
+    }
+
+    /** 执行过的 FFmpeg 命令，最近的排在最前，最多 [FFMPEG_HISTORY_MAX] 条。 */
+    fun ffmpegHistory(): List<String> =
+        (sp.getString(KEY_FFMPEG_HISTORY, "") ?: "")
+            .split(HISTORY_SEPARATOR)
+            .filter { it.isNotBlank() }
+
+    /** 记下一条执行过的命令（已有的相同命令移到最前），返回更新后的列表。 */
+    fun addFfmpegHistory(command: String): List<String> {
+        val clean = command.trim().replace(HISTORY_SEPARATOR, ' ').take(FFMPEG_COMMAND_MAX_CHARS)
+        if (clean.isEmpty()) return ffmpegHistory()
+        val next = (listOf(clean) + ffmpegHistory().filter { it != clean }).take(FFMPEG_HISTORY_MAX)
+        sp.edit().putString(KEY_FFMPEG_HISTORY, next.joinToString(HISTORY_SEPARATOR.toString())).apply()
+        return next
+    }
+
+    fun clearFfmpegHistory() {
+        sp.edit().remove(KEY_FFMPEG_HISTORY).apply()
+    }
+
     private companion object {
+        const val KEY_FFMPEG_DRAFT = "ffmpeg_draft"
+        const val KEY_FFMPEG_HISTORY = "ffmpeg_history"
+
+        /** 历史命令之间的分隔符：命令里可能有换行、空格，用一个不会出现在命令里的控制字符隔开。 */
+        const val HISTORY_SEPARATOR = '\u0001'
         const val KEY_SHORTCUT_RADIUS = "shortcut_corner_radius"
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_KEEP_ON = "keep_screen_on"

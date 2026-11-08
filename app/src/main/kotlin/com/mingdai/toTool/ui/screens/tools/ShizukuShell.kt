@@ -123,7 +123,7 @@ internal class ShellLine(val id: Long, val kind: ShellLineKind, val text: String
 /**
  * 线程安全的日志缓冲。标准输出、标准错误由各自的读取线程写入，界面定时取快照显示。
  */
-internal class ShellLog {
+internal class ShellLog(private val maxLines: Int = SHELL_LOG_MAX_LINES) {
     private val lock = Any()
     private val lines = ArrayDeque<ShellLine>()
     private var nextId = 0L
@@ -133,7 +133,7 @@ internal class ShellLog {
     fun add(kind: ShellLineKind, text: String) {
         synchronized(lock) {
             lines.addLast(ShellLine(nextId++, kind, text))
-            while (lines.size > SHELL_LOG_MAX_LINES) {
+            while (lines.size > maxLines) {
                 lines.removeFirst()
                 dropped++
             }
@@ -259,8 +259,8 @@ private class LineSplitter(private val emit: (String) -> Unit) {
 /** ANSI 转义序列（颜色、光标移动等）。 */
 private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
 
-/** 去掉 ANSI 转义序列和其他控制字符（制表符保留）。 */
-private fun cleanTerminalText(line: String): String {
+/** 去掉 ANSI 转义序列和其他控制字符（制表符保留）。「FFmpeg 命令」的日志也用它。 */
+internal fun cleanTerminalText(line: String): String {
     val noAnsi = if (line.indexOf('\u001B') >= 0) ANSI_ESCAPE.replace(line, "") else line
     if (noAnsi.none { it < ' ' && it != '\t' || it == '\u007F' }) return noAnsi
     return buildString(noAnsi.length) {

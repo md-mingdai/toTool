@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import android.graphics.PorterDuff
@@ -159,8 +161,36 @@ private fun buildAttempts(fmt: String, sourceExt: String, available: Set<String>
 
 /* ----------------------------------- 界面 ----------------------------------- */
 
+/**
+ * 格式转换页。顶部可以在两个模式之间切换：
+ * - 格式转换：选文件、选目标格式，一键转换；
+ * - FFmpeg 命令：直接执行原始 ffmpeg 命令（见 FfmpegCommandPane.kt）。
+ */
 @Composable
 fun FormatConversionScreen(modifier: Modifier = Modifier) {
+    var mode by rememberSaveable { mutableStateOf(0) }
+    // 任意一个模式正在忙（转换 / 读取文件 / 运行命令）时锁住切换：
+    // 切走会销毁那个模式的页面，也就等于把正在跑的任务终止了。
+    var busy by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier) {
+        TabRowWithContour(
+            tabs = listOf("格式转换", "FFmpeg 命令"),
+            selectedTabIndex = mode,
+            onTabSelected = { if (!busy) mode = it },
+            modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
+        )
+        val paneModifier = Modifier.weight(1f).fillMaxWidth()
+        if (mode == 0) {
+            QuickConvertPane(modifier = paneModifier, onBusyChange = { busy = it })
+        } else {
+            FfmpegCommandPane(modifier = paneModifier, onBusyChange = { busy = it })
+        }
+    }
+}
+
+@Composable
+private fun QuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var inputUri by remember { mutableStateOf<Uri?>(null) }
@@ -177,6 +207,10 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
     var encoders by remember { mutableStateOf<Set<String>?>(null) }
     val runningProcess = remember { arrayOfNulls<Process>(1) }
     val canceled = remember { AtomicBoolean(false) }
+
+    // 把“是否正在转换”告诉外层：转换期间锁住模式切换
+    LaunchedEffect(isRunning) { onBusyChange(isRunning) }
+    DisposableEffect(Unit) { onDispose { onBusyChange(false) } }
 
     // 转换期间保持屏幕常亮：大文件要转很久，息屏后系统可能把进程挂起或杀掉
     val view = LocalView.current
@@ -522,7 +556,7 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MessageCard(title: String?, message: String, container: Color, content: Color) {
+internal fun MessageCard(title: String?, message: String, container: Color, content: Color) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         insideMargin = PaddingValues(12.dp),
@@ -542,7 +576,7 @@ private fun MessageCard(title: String?, message: String, container: Color, conte
 private const val LARGE_FILE_HINT_BYTES = 1_500_000_000L
 
 /** 复制 / 转换时额外保留的磁盘余量。 */
-private const val MIN_FREE_HEADROOM_BYTES = 128L * 1024 * 1024
+internal const val MIN_FREE_HEADROOM_BYTES = 128L * 1024 * 1024
 
 /** 流式复制用的缓冲区：1 MB，内存占用固定，与文件大小无关。 */
 private const val COPY_BUFFER_BYTES = 1 shl 20
@@ -551,9 +585,9 @@ private const val COPY_BUFFER_BYTES = 1 shl 20
 private class ConvertException(message: String) : Exception(message)
 
 /** 用户点了“取消”。 */
-private class ConvertCanceledException : Exception("canceled")
+internal class ConvertCanceledException : Exception("canceled")
 
-private fun humanSize(bytes: Long): String = when {
+internal fun humanSize(bytes: Long): String = when {
     bytes < 0 -> "未知"
     bytes < 1024L -> "$bytes B"
     bytes < 1024L * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
@@ -561,7 +595,7 @@ private fun humanSize(bytes: Long): String = when {
     else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
 }
 
-private fun friendlyError(e: Throwable): String {
+internal fun friendlyError(e: Throwable): String {
     val m = e.message ?: e.javaClass.simpleName
     return when {
         m.contains("ENOSPC", ignoreCase = true) || m.contains("No space left", ignoreCase = true) ->
@@ -571,7 +605,7 @@ private fun friendlyError(e: Throwable): String {
 }
 
 /** 选一个剩余空间最大的目录放临时文件，并确认放得下。 */
-private fun pickWorkDir(context: Context, needBytes: Long): File {
+internal fun pickWorkDir(context: Context, needBytes: Long): File {
     val candidates = listOfNotNull(context.externalCacheDir, context.cacheDir)
     val best = candidates.maxByOrNull { it.usableSpace } ?: context.cacheDir
     if (needBytes > 0L && best.usableSpace < needBytes) {
@@ -606,7 +640,7 @@ private sealed interface ConvertResult {
  * 内置 ffmpeg 以 libffmpeg.so 的名字放在 jniLibs/arm64-v8a 下，安装时被解压到 nativeLibraryDir。
  * Android 10+ 禁止执行应用私有目录（filesDir）里的文件，只有 nativeLibraryDir 里的可执行。
  */
-private fun ffmpegBinary(context: Context): File? {
+internal fun ffmpegBinary(context: Context): File? {
     val f = File(context.applicationInfo.nativeLibraryDir, "libffmpeg.so")
     return if (f.exists() && f.canExecute()) f else null
 }
@@ -655,7 +689,7 @@ private fun forEachBoundedLine(reader: java.io.Reader, maxLen: Int, onLine: (Str
     if (sb.isNotEmpty()) onLine(sb.toString())
 }
 
-private fun describeFailure(exit: Int, tail: List<String>): String {
+internal fun describeFailure(exit: Int, tail: List<String>): String {
     val text = tail.joinToString("\n")
     return when {
         text.contains("No space left", ignoreCase = true) -> "存储空间不足，转换中断。请清理空间后重试。"
@@ -703,14 +737,14 @@ private fun runFfmpeg(
     }
 }
 
-private class PublishResult(val path: String?, val error: String?)
+internal class PublishResult(val path: String?, val error: String?)
 
 /**
  * 把成品复制到系统“下载/toTool”目录（Android 10+），用户才能在文件管理器里找到。
  * 应用私有目录 Android/data 在 Android 11+ 基本无法访问。
  * 分块流式复制，带进度，可取消；取消 / 失败时会把写到一半的条目删掉。
  */
-private fun publishToDownloads(
+internal fun publishToDownloads(
     context: Context,
     file: File,
     mime: String,
@@ -772,17 +806,19 @@ private fun publishToDownloads(
  * 把选中的文件复制成应用目录里的临时文件（ffmpeg 需要能随机读取的真实路径，管道对 MP4 不可靠）。
  * 固定 1 MB 缓冲分块复制；按字节汇报进度；可取消；失败 / 取消时删除半截文件。
  */
-private fun copyUriToTemp(
+internal fun copyUriToTemp(
     context: Context,
     uri: Uri,
     dir: File,
     totalBytes: Long,
     canceled: AtomicBoolean,
+    prefix: String = "conv_in_",
     onProgress: (Float?) -> Unit,
 ): File {
     val name = queryFileName(context, uri)
     val ext = name.substringAfterLast('.', "bin").filter { it.isLetterOrDigit() }.take(8).ifEmpty { "bin" }
-    val tempFile = File(dir, "conv_in_${System.currentTimeMillis()}.$ext")
+    // 用 nanoTime 而不是毫秒：连续读取几个小文件时，毫秒时间戳可能相同，临时文件名会撞车
+    val tempFile = File(dir, "$prefix${System.nanoTime()}.$ext")
     try {
         val input = context.contentResolver.openInputStream(uri)
             ?: throw ConvertException(context.getString(R.string.format_copy_fail))
@@ -1035,7 +1071,7 @@ private fun convertImage(
     }
 }
 
-private fun queryFileName(context: Context, uri: Uri): String {
+internal fun queryFileName(context: Context, uri: Uri): String {
     return try {
         context.contentResolver.query(uri, null, null, null, null)?.use { c ->
             val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -1047,7 +1083,7 @@ private fun queryFileName(context: Context, uri: Uri): String {
 }
 
 /** 文件大小（字节）；查不到返回 -1。用来做空间预检、显示和进度。 */
-private fun queryFileSize(context: Context, uri: Uri): Long {
+internal fun queryFileSize(context: Context, uri: Uri): Long {
     try {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
             if (c.moveToFirst() && !c.isNull(0)) {

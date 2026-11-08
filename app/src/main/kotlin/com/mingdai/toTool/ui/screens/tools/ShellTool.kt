@@ -550,8 +550,9 @@ private fun ScriptCard(
     }
 }
 
+/** 日志窗口。「执行 Shell 指令」和格式转换页的「FFmpeg 命令」共用。 */
 @Composable
-private fun LogPane(
+internal fun LogPane(
     lines: List<ShellLine>,
     dropped: Int,
     listState: LazyListState,
