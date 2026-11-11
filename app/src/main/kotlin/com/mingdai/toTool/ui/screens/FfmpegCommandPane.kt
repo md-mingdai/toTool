@@ -2,7 +2,6 @@ package com.mingdai.toTool.ui.screens
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -248,10 +247,7 @@ internal fun FfmpegCommandPane(
         if (text.isBlank()) return
         val ffmpeg = ffmpegBinary(context)
         if (ffmpeg == null) {
-            errorMsg = context.getString(
-                if (Build.SUPPORTED_ABIS.contains("arm64-v8a")) R.string.format_extract_fail
-                else R.string.format_unsupported_abi
-            )
+            errorMsg = ffmpegUnavailableMessage(context)
             return
         }
         if (text.length > FFMPEG_COMMAND_MAX_CHARS) {
@@ -667,7 +663,8 @@ internal fun FfmpegCommandPane(
                 "没写 -y / -n 时默认加 -y（覆盖同名输出）。"
         )
         HintText(
-            "内置的是精简版 ffmpeg，没有 libx264、libmp3lame 等外部编码器，视频可以用自带的 mpeg4。" +
+            "内置的是纯 LGPL 构建的 ffmpeg：音频有 libmp3lame（MP3）、libvorbis、libopus 和自带的 aac、flac；" +
+                "没有 GPL 的 libx264 / libx265，也没有 libvpx，视频编码可以用自带的 mpeg4。" +
                 "点上面的「编码器」「封装格式」「滤镜」示例，可以查看这个版本支持什么。"
         )
     }

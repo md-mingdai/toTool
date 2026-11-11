@@ -56,8 +56,8 @@
     <string name="format_type_other">其他</string>
     <string name="format_select_format">选择目标格式</string>
     <string name="format_min_api">需要 Android 9 (API 28) 或更高版本</string>
-    <string name="format_extract_fail">FFmpeg 初始化失败</string>
-    <string name="format_unsupported_abi">此设备不支持内置 FFmpeg（目前只打包了 arm64-v8a 版本）</string>
+    <string name="format_extract_fail">FFmpeg 初始化失败：这个安装包里没有适用于本机架构（%1$s）的 FFmpeg，或者它没有被正确解压</string>
+    <string name="format_unsupported_abi">此设备的处理器架构（%1$s）不在内置 FFmpeg 的支持范围内（支持 arm64-v8a、armeabi-v7a、x86_64、x86）</string>
     <string name="format_saved_to">已保存到：%s</string>
     <string name="format_copy_fail">无法读取输入文件</string>
     <string name="format_exit_code">退出代码：%d</string>

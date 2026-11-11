@@ -55,8 +55,8 @@ android {
     }
 
     packaging {
-        // ffmpeg 可执行文件以 libffmpeg.so 的形式放在 jniLibs 里，
-        // 必须在安装时解压到 nativeLibraryDir 才能被 exec（Android 10+ 禁止执行 filesDir 里的文件）。
+        // ffmpeg 可执行文件以 libffmpeg.so 的形式放在 jniLibs/<abi>/ 里（由 ffmpeg/build.sh 从源码编译，
+        // 不提交进仓库），必须在安装时解压到 nativeLibraryDir 才能被 exec（Android 10+ 禁止执行 filesDir 里的文件）。
         jniLibs {
             useLegacyPackaging = true
         }
@@ -72,6 +72,29 @@ android {
         }
     }
 }
+
+// ---- libffmpeg.so 检查 ------------------------------------------------------------
+// libffmpeg.so 不再提交进仓库：构建前由 ffmpeg/build.sh 从源码编译（CI 里是 workflow 的 ffmpeg 任务），
+// 放到 src/main/jniLibs/<abi>/ 下。缺哪个架构，那个架构的设备上格式转换和 ffmpeg 命令就用不了。
+// 这里只在构建日志里提醒，不拦截构建：只改界面代码时没必要先把 FFmpeg 编一遍。
+val ffmpegAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+val checkFfmpegLibs by tasks.registering {
+    group = "verification"
+    description = "检查 src/main/jniLibs/<abi>/libffmpeg.so 是否齐全"
+    val jniLibsDir = layout.projectDirectory.dir("src/main/jniLibs")
+    val abis = ffmpegAbis
+    doLast {
+        val missing = abis.filterNot { jniLibsDir.file("$it/libffmpeg.so").asFile.isFile }
+        if (missing.isNotEmpty()) {
+            logger.warn(
+                "警告：src/main/jniLibs 里缺少这些架构的 libffmpeg.so：${missing.joinToString()}。" +
+                    "这些架构的设备上，格式转换和 ffmpeg 命令将不可用。" +
+                    "编译方法见 ffmpeg/README.md（先运行 ffmpeg/build.sh <abi>），或者直接用 GitHub Actions 构建。"
+            )
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(checkFfmpegLibs) }
 
 kotlin {
     compilerOptions {

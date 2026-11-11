@@ -87,8 +87,10 @@ private val TIME_PATTERN = Pattern.compile("time=\\s*(\\d+):(\\d+):(\\d+)\\.(\\d
 
 /**
  * 一个目标格式需要的编码器（按优先级排列，取 ffmpeg 里第一个可用的）。
- * 内置的 ffmpeg 是不含 GPL/外部库的精简构建，没有 libmp3lame / libx264 / libvpx，
- * 所以这里只在“真的有对应编码器”时才提供该格式。
+ * 内置的 ffmpeg 是从源码编译的纯 LGPL 构建（见项目里的 ffmpeg/ 目录）：带 libmp3lame（MP3）、
+ * libvorbis / libopus（OGG），但没有 GPL 的 libx264，也没有 libvpx，所以视频只能用自带的 mpeg4，
+ * WebM 暂时不可用。libx264 / libvpx 这些名字留在列表里，只是为了自己编了带它们的版本时能被自动用上。
+ * 这里只在“真的有对应编码器”时才提供该格式。
  */
 private class FormatSpec(
     val audioOnly: Boolean,
@@ -98,7 +100,7 @@ private class FormatSpec(
 )
 
 private val FORMAT_SPECS: Map<String, FormatSpec> = mapOf(
-    "MP3" to FormatSpec(true, audioEncoders = listOf("libmp3lame", "libshine"), mime = "audio/mpeg"),
+    "MP3" to FormatSpec(true, audioEncoders = listOf("libmp3lame"), mime = "audio/mpeg"),
     "WAV" to FormatSpec(true, audioEncoders = listOf("pcm_s16le"), mime = "audio/x-wav"),
     "AAC" to FormatSpec(true, audioEncoders = listOf("aac"), mime = "audio/aac"),
     "M4A" to FormatSpec(true, audioEncoders = listOf("aac"), mime = "audio/mp4"),
@@ -119,7 +121,7 @@ private val REMUX_FRIENDLY = setOf("mp4", "m4v", "mov", "mkv")
 
 private fun encoderArgs(name: String): List<String> = when (name) {
     "libmp3lame" -> listOf("-q:a", "2")
-    "libshine", "aac", "ac3" -> listOf("-b:a", "192k")
+    "aac", "ac3" -> listOf("-b:a", "192k")
     "vorbis" -> listOf("-strict", "-2", "-q:a", "5")
     "libvorbis" -> listOf("-q:a", "5")
     "libopus" -> listOf("-b:a", "128k")
@@ -304,12 +306,7 @@ private fun QuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit
                 } else {
                     // ---- 视频 / 音频：ffmpeg 子进程，全程文件流，不进 Java 堆 ----
                     val ffmpeg = ffmpegBinary(context)
-                        ?: throw ConvertException(
-                            context.getString(
-                                if (Build.SUPPORTED_ABIS.contains("arm64-v8a")) R.string.format_extract_fail
-                                else R.string.format_unsupported_abi
-                            )
-                        )
+                        ?: throw ConvertException(ffmpegUnavailableMessage(context))
                     val spec = FORMAT_SPECS[fmt]
                     val attempts = buildAttempts(fmt, sourceExt, encoders)
                     if (attempts.isEmpty()) throw ConvertException("没有可用的 $fmt 编码器")
@@ -636,13 +633,27 @@ private sealed interface ConvertResult {
     data class Failure(val message: String) : ConvertResult
 }
 
+/** 安装包里带了内置 ffmpeg 的 CPU 架构，和 ffmpeg/build.sh 里的 ALL_ABIS 保持一致。 */
+internal val FFMPEG_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+
 /**
- * 内置 ffmpeg 以 libffmpeg.so 的名字放在 jniLibs/arm64-v8a 下，安装时被解压到 nativeLibraryDir。
+ * 内置 ffmpeg 是从源码编译的（见项目里的 ffmpeg/ 目录），每个架构一份，
+ * 以 libffmpeg.so 的名字放在 jniLibs/<架构>/ 下。安装时系统按本机架构挑一份解压到 nativeLibraryDir。
  * Android 10+ 禁止执行应用私有目录（filesDir）里的文件，只有 nativeLibraryDir 里的可执行。
  */
 internal fun ffmpegBinary(context: Context): File? {
     val f = File(context.applicationInfo.nativeLibraryDir, "libffmpeg.so")
     return if (f.exists() && f.canExecute()) f else null
+}
+
+/** [ffmpegBinary] 返回 null 时，给用户看的原因：本机架构不在支持范围内，还是这个安装包里缺了对应架构的那一份。 */
+internal fun ffmpegUnavailableMessage(context: Context): String {
+    val abis = Build.SUPPORTED_ABIS.joinToString(", ").ifEmpty { "未知" }
+    val supported = Build.SUPPORTED_ABIS.any { it in FFMPEG_ABIS }
+    return context.getString(
+        if (supported) R.string.format_extract_fail else R.string.format_unsupported_abi,
+        abis,
+    )
 }
 
 private fun probeEncoders(ffmpeg: File): Set<String>? = try {

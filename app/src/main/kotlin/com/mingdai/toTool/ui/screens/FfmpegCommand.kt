@@ -575,8 +575,8 @@ internal class FfmpegExample(val label: String, val command: String)
 
 /**
  * 输入框下面的示例，点一下填进去。
- * 内置的是精简版 ffmpeg（没有 libx264 / libmp3lame 等外部编码器），所以视频示例用的是自带的 mpeg4 编码器；
- * 前几个“查看”类的示例用来看这个版本到底支持什么。
+ * 内置的是纯 LGPL 构建的 ffmpeg：音频有 libmp3lame / libvorbis / libopus，但没有 GPL 的 libx264 和 libvpx，
+ * 所以视频示例用的是自带的 mpeg4 编码器；前几个“查看”类的示例用来看这个版本到底支持什么。
  */
 internal val FFMPEG_EXAMPLES = listOf(
     FfmpegExample("版本信息", "-version"),
@@ -586,6 +586,8 @@ internal val FFMPEG_EXAMPLES = listOf(
     FfmpegExample("滤镜", "-filters"),
     FfmpegExample("媒体信息", "-i {in1}"),
     FfmpegExample("提取音频", "-i {in1} -vn -c:a aac -b:a 192k audio.m4a"),
+    FfmpegExample("转 MP3", "-i {in1} -vn -c:a libmp3lame -q:a 2 audio.mp3"),
+    FfmpegExample("转 Opus", "-i {in1} -vn -c:a libopus -b:a 96k audio.opus"),
     FfmpegExample("截取片段", "-ss 00:00:10 -t 00:00:30 -i {in1} -c copy clip.mp4"),
     FfmpegExample("缩小到 720p", "-i {in1} -vf scale=-2:720 -c:v mpeg4 -q:v 4 -c:a aac scaled.mp4"),
     FfmpegExample("转 GIF", "-i {in1} -vf \"fps=10,scale=480:-1\" out.gif"),

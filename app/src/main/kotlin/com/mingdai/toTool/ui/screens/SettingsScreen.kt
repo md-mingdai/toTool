@@ -83,7 +83,9 @@ private val Licenses = listOf(
     LicenseItem("Jetpack Compose / AndroidX", "界面框架与基础库", "Apache License 2.0"),
     LicenseItem("Miuix", "小米风格的界面组件", "Apache License 2.0"),
     LicenseItem("ZXing", "二维码生成", "Apache License 2.0"),
-    LicenseItem("FFmpeg", "音视频格式转换（内置的可执行文件）", "LGPL 2.1+ / GPL，取决于具体构建"),
+    LicenseItem("FFmpeg", "音视频格式转换（内置的可执行文件，纯 LGPL 构建，不含 GPL / nonfree 组件）", "LGPL 2.1+"),
+    LicenseItem("LAME", "FFmpeg 里的 MP3 编码", "LGPL 2.0+"),
+    LicenseItem("Opus、libvorbis、libogg", "FFmpeg 里的 Opus / Vorbis 编码", "BSD 3-Clause"),
     LicenseItem("Onest 字体", "界面字体", "SIL Open Font License 1.1"),
 )
 
@@ -110,6 +112,7 @@ fun SettingsScreen(navController: NavHostController) {
     var showReset by remember { mutableStateOf(false) }
     var showLicenses by remember { mutableStateOf(false) }
     var showFontLicense by remember { mutableStateOf(false) }
+    var showFfmpegLicense by remember { mutableStateOf(false) }
 
     val themeOptions = listOf(
         ThemeMode.SYSTEM to R.string.theme_system,
@@ -264,6 +267,11 @@ fun SettingsScreen(navController: NavHostController) {
                     summary = "Onest · SIL OFL 1.1（点击查看许可全文）",
                     onClick = { showFontLicense = true },
                 )
+                ArrowPreference(
+                    title = "FFmpeg",
+                    summary = "纯 LGPL 构建 · 点击查看许可说明和源码获取方式",
+                    onClick = { showFfmpegLicense = true },
+                )
             }
             // 给底部手势条留出空间
             Column(modifier = Modifier.padding(bottom = 24.dp)) {}
@@ -381,6 +389,37 @@ fun SettingsScreen(navController: NavHostController) {
         ) {
             Text(
                 text = fontLicenseText,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+
+    // FFmpeg 的许可说明（含 LGPL 全文）同样随应用打包在 assets/licenses 里
+    val ffmpegLicenseText = remember(showFfmpegLicense) {
+        if (!showFfmpegLicense) {
+            ""
+        } else {
+            runCatching {
+                context.assets.open("licenses/FFMPEG.txt").bufferedReader().use { it.readText() }
+            }.getOrElse { "无法读取许可文本。" }
+        }
+    }
+    AppDialog(
+        show = showFfmpegLicense,
+        title = "FFmpeg · LGPL 2.1+",
+        onDismiss = { showFfmpegLicense = false },
+        confirmText = "关闭",
+        dismissText = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Text(
+                text = ffmpegLicenseText,
                 style = MiuixTheme.textStyles.footnote2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
