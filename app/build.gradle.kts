@@ -4,6 +4,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---- 架构 ------------------------------------------------------------------------
+// 内置的 ffmpeg 是个可执行文件，以 libffmpeg.so 的名字放在 src/main/jniLibs/<abi>/，
+// 由 ffmpeg/build.sh 从源码编译（不提交进仓库），每个架构一份、各约十几 MB。
+// 所以发布时每个架构各打一个 APK：加上 -PabiFilter=<abi> 就只打这一个架构（CI 里就是这样打的），
+// 不传的话，jniLibs 里有哪些架构就都打进同一个 APK（本地调试用，会比较大）。
+val ffmpegAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+val abiFilter: String = providers.gradleProperty("abiFilter").orNull?.trim().orEmpty()
+if (abiFilter.isNotEmpty() && abiFilter !in ffmpegAbis) {
+    throw GradleException("abiFilter 只能是 ${ffmpegAbis.joinToString()} 之一，现在是“$abiFilter”")
+}
+
 android {
     namespace = "com.mingdai.toTool"
     compileSdk {
@@ -16,6 +27,13 @@ android {
         targetSdk = 36
         versionCode = 41
         versionName = "1.1.1"
+
+        // 只打一个架构的 APK（见上面 abiFilter 的说明）；不限定时包含全部架构
+        if (abiFilter.isNotEmpty()) {
+            ndk {
+                abiFilters += abiFilter
+            }
+        }
     }
 
     // 签名：CI（GitHub Actions）通过环境变量传入固定的 release 密钥，
@@ -74,15 +92,13 @@ android {
 }
 
 // ---- libffmpeg.so 检查 ------------------------------------------------------------
-// libffmpeg.so 不再提交进仓库：构建前由 ffmpeg/build.sh 从源码编译（CI 里是 workflow 的 ffmpeg 任务），
-// 放到 src/main/jniLibs/<abi>/ 下。缺哪个架构，那个架构的设备上格式转换和 ffmpeg 命令就用不了。
+// 缺哪个架构的 libffmpeg.so，那个架构的设备上格式转换和 ffmpeg 命令就用不了。
 // 这里只在构建日志里提醒，不拦截构建：只改界面代码时没必要先把 FFmpeg 编一遍。
-val ffmpegAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 val checkFfmpegLibs by tasks.registering {
     group = "verification"
     description = "检查 src/main/jniLibs/<abi>/libffmpeg.so 是否齐全"
     val jniLibsDir = layout.projectDirectory.dir("src/main/jniLibs")
-    val abis = ffmpegAbis
+    val abis = if (abiFilter.isEmpty()) ffmpegAbis else listOf(abiFilter)
     doLast {
         val missing = abis.filterNot { jniLibsDir.file("$it/libffmpeg.so").asFile.isFile }
         if (missing.isNotEmpty()) {

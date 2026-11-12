@@ -332,8 +332,10 @@ build_opus() {
 # ---------------------------------- FFmpeg ------------------------------------
 
 build_ffmpeg() {
-    local bdir="$BUILD_DIR/ffmpeg" args
+    local bdir="$BUILD_DIR/ffmpeg" args opt
     rm -rf "$bdir"; mkdir -p "$bdir"
+    # 体积还是速度：FFMPEG_SMALL=1（默认，见 versions.env）按体积优化，和以前用的预编译包一致；0 则按速度优化
+    if [ "${FFMPEG_SMALL:-1}" = 1 ]; then opt=(--enable-small); else opt=(--optflags=-O2); fi
     args=(
         "$FFMPEG_SRC/configure"
         --prefix="$PREFIX/ffmpeg"
@@ -350,7 +352,7 @@ build_ffmpeg() {
         --enable-zlib --enable-iconv
         --enable-libmp3lame --enable-libopus --enable-libvorbis
         --pkg-config-flags=--static
-        --optflags=-O2
+        "${opt[@]}"
         --extra-cflags="-I$PREFIX/include $FF_EXTRA_CFLAGS"
         --extra-ldflags="-L$PREFIX/lib"
         # libvorbis.pc 里没写 -lm，而静态的 libvorbis.a 要用 sin / cos / exp 这些数学函数，

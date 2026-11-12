@@ -3,7 +3,7 @@
 toTool 的「格式转换」和「执行原始 ffmpeg 命令」都靠安装包里内置的 FFmpeg 工作。
 以前用的是别人编好的预编译包（只有 arm64-v8a），现在改成**构建时从源码编译**：
 
-- 覆盖 Android 的四种 CPU 架构：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`
+- 覆盖 Android 的四种 CPU 架构：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`，**每个架构各打一个 APK**
 - **纯 LGPL**：不带任何 GPL / nonfree 组件
 - FFmpeg 的库和外部库全部**静态链接**进一个可执行文件，只依赖系统自带的库
 
@@ -11,7 +11,7 @@ toTool 的「格式转换」和「执行原始 ffmpeg 命令」都靠安装包�
 | --- | --- |
 | `build.sh` | 编译脚本：下载源码 → 编外部库 → 编 FFmpeg → 瘦身 → 校验 |
 | `versions.env` | FFmpeg、各个库、NDK 的版本，以及来源校验值（提交哈希 / SHA-256） |
-| `../.github/workflows/build.yml` | CI：四个架构并行编译，再把产物放进 APK |
+| `../.github/workflows/build.yml` | CI：四个架构并行，每个架构编 FFmpeg → 打这个架构的 APK |
 | `../app/src/main/assets/licenses/FFMPEG.txt` | App 里「设置 → FFmpeg」显示的许可说明（含 LGPL 全文） |
 
 ## 它是怎么工作的
@@ -19,23 +19,28 @@ toTool 的「格式转换」和「执行原始 ffmpeg 命令」都靠安装包�
 `libffmpeg.so` 虽然叫 `.so`，其实是个可执行文件（PIE）。它放在 `app/src/main/jniLibs/<abi>/` 下，
 `packaging.jniLibs.useLegacyPackaging = true` 让系统安装时把它解压到 `nativeLibraryDir`
 （Android 10 起，只有这个目录里的文件允许被执行），App 再用 `ProcessBuilder` 把它当命令行程序启动。
-APK 里四个架构各带一份，系统安装时按本机架构挑一份用。
+所以每个架构打成独立的 APK，APK 里只带这个架构的那一份（手机基本都是 `arm64-v8a`）。
 
 ## 在 CI 里编译（日常用法）
 
-什么都不用做，推送代码后 `Build APK` 工作流会：
+什么都不用做，推送代码后 `Build APK` 工作流会为四个架构各开一个任务（并行），每个任务依次：
 
-1. `ffmpeg` 任务（四个架构并行）：装好固定版本的 NDK → 运行 `build.sh <abi>` → 上传 `ffmpeg-bin-<abi>`
-2. `build` 任务：把四个产物合并进 `app/src/main/jniLibs/` → `./gradlew :app:assembleRelease` → 上传 APK
+1. 还原这个架构编好的 `libffmpeg.so`（缓存）；没有缓存就装好固定版本的 NDK，运行 `build.sh <abi>` 编出来
+2. 把它放进 `app/src/main/jniLibs/<abi>/`
+3. `./gradlew :app:assembleRelease -PabiFilter=<abi>` 打出只含这个架构的 APK，检查里面确实带着 `libffmpeg.so`
+4. 上传 APK（名字是 `toTool-v<版本>-<提交>-<架构>`）
 
 要点：
 
+- **Artifacts 里只有 APK**，不会出现 libffmpeg 之类的中间产物（编好的 FFmpeg 只放在 Actions 缓存里）。
 - **有缓存**：缓存键是 `build.sh` 和 `versions.env` 的哈希。这两个文件没改，就直接复用上次编好的
   `libffmpeg.so`（只做一次校验），平时改应用代码的提交不会重新编 FFmpeg。第一次、或者改了这两个文件之后，
-  每个架构大约要 10～25 分钟（取决于 runner 的核数）。
-- 某个架构编失败，其它架构照常编完；APK 任务仍会用已经编好的架构打出 APK（整个流程会标红），
-  但缺 `arm64-v8a` 时会直接中止。推送 `v*` 标签的发布任务要求四个架构全部成功才会执行。
-- 失败时会上传 `ffmpeg-logs-<abi>`，里面是各组件的 configure / make 完整输出和 `config.log`，排查时先看它。
+  每个架构大约要 10～25 分钟（取决于 runner 的核数）。FFmpeg 编完会马上存缓存，之后 Gradle 步骤万一失败，
+  重跑也不用再编一遍。
+- 四个架构互不影响：某个架构编失败，其它架构照常出 APK（整个流程会标红）。
+  推送 `v*` 标签的发布任务要求四个 APK 全部成功才会执行，并把四个 APK 一起附到 Release 上。
+- 失败时会上传 `ffmpeg-logs-<abi>`（各组件的 configure / make 完整输出和 `config.log`）和
+  `build-reports-<abi>`，排查时先看它们。
 
 ## 在本地编译
 
@@ -55,6 +60,8 @@ ffmpeg/build.sh all         # 四个架构依次编
 - 产物：`ffmpeg/out/<abi>/libffmpeg.so`，旁边的 `build-info.txt` 记录了版本、configure 参数、依赖的系统库。
 - 默认编完会顺手复制到 `app/src/main/jniLibs/<abi>/libffmpeg.so`，接着 `./gradlew assembleDebug` 就能打进 APK
   （这个目录已经在 `.gitignore` 里）。不想复制就 `FFMPEG_INSTALL=0`。
+- 只想打某一个架构的 APK（和 CI 一样），加上 `-PabiFilter=<abi>`：
+  `./gradlew :app:assembleRelease -PabiFilter=arm64-v8a`。不加就把 `jniLibs` 里有的架构都打进同一个 APK，会比较大。
 - 只想调试 App、不需要 FFmpeg 时，什么都不用编：Gradle 在构建日志里会提醒缺哪些架构，
   这些架构上格式转换和 ffmpeg 命令会提示不可用，其它功能不受影响。
 - `ffmpeg/build.sh host` 用本机编译器编一份能在本机直接运行的版本，只用来快速验证配置和编码器
@@ -74,7 +81,7 @@ ffmpeg/build.sh all         # 四个架构依次编
 | `x86_64` | `x86_64-linux-android28-clang` | `--x86asmexe=nasm`，汇编优化 |
 | `x86` | `i686-linux-android28-clang` | `--disable-asm`：32 位 x86 的手写汇编会产生 text relocation，Android 不允许，所以关掉（只是慢一些） |
 
-所有架构共用：目标 API 28（与 `minSdk` 一致，FFmpeg 的 iconv 需要 28+）；
+所有架构共用：`--enable-small`（按体积优化，见下面的「体积」）；目标 API 28（与 `minSdk` 一致，FFmpeg 的 iconv 需要 28+）；
 `-pie`、`-Wl,-z,max-page-size=16384`（Android 15+ 的 16 KB 页大小设备要求 LOAD 段按 16 KB 对齐）；
 `--enable-jni --enable-mediacodec`（用 NDK 的 AMediaCodec 做硬件编解码，命令行里不需要 JavaVM）；
 `--disable-autodetect`（不随机器环境自动探测外部库，用到什么就显式启用，保证每次编出来的东西一样）。
@@ -123,12 +130,23 @@ LAME 没有官方 git 仓库，用 tar 包 + SHA-256 固定（并列了几个镜
 
 ## 体积
 
-每个架构的 `libffmpeg.so` 大约 20 MB（四个架构压缩进 APK 后合计几十 MB）。需要瘦身时可以：
+每个架构的 `libffmpeg.so` 在 APK 里是压缩存放的。下面是 arm64 交叉编译的实测（用 GNU 工具链代替 NDK 编的，
+NDK 的结果会略有出入；压缩后的数字是按 deflate 估的，约等于装进 APK 后的体积）：
 
-- 在 `build_ffmpeg` 里加 `--enable-small`，或者用 `--disable-encoder=…` / `--disable-decoder=…` 去掉用不到的编解码器
-- 在 `build.yml` 的 `matrix.abi` 和 `ffmpeg/build.sh` 的 `ALL_ABIS` 里去掉不需要的架构
-  （`x86` / `x86_64` 基本只在模拟器上用到）
-- 打包时按架构拆分 APK（Gradle 的 `splits.abi`）
+| 构建 | 原始 | 压缩后 |
+| --- | --- | --- |
+| 以前的预编译包（`--enable-small`，没有 LAME / Opus / Vorbis） | 15.5 MB | 8.1 MB |
+| 现在（`--enable-small`，带 LAME / Opus / Vorbis） | 17.2 MB | 8.3 MB |
+| 改成按速度优化（`FFMPEG_SMALL=0`，`-O2`） | 19.8 MB | 9.9 MB |
+
+所以默认用 `--enable-small`（`versions.env` 里的 `FFMPEG_SMALL=1`），体积和以前基本一样，代价是转码速度略慢。
+想要更快就改成 0，或者本地 `FFMPEG_SMALL=0 ffmpeg/build.sh <abi>` 试一下。
+
+每个架构的 APK 只带自己的那一份，所以单个 APK 和以前差不多大；如果把四个架构塞进同一个 APK，
+就会多出三份（三十多 MB），这也是 CI 里每个架构各打一个 APK 的原因。需要再瘦身时可以：
+
+- 用 `--disable-encoder=…` / `--disable-decoder=…` 去掉用不到的编解码器（会让「执行原始 ffmpeg 命令」少一些能力）
+- 去掉不需要的架构：`build.yml` 的 `matrix.abi` 和 `build.sh` 的 `ALL_ABIS`（`x86` / `x86_64` 基本只在模拟器上用到）
 
 ## 常见问题
 

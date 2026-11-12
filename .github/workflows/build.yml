@@ -17,41 +17,46 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 第一步：从源码交叉编译 FFmpeg（纯 LGPL），每个 CPU 架构一个任务，四个并行。
+  # 每个 CPU 架构各打一个 APK，四个架构并行。每个任务自己完成整条流程：
+  #   从源码交叉编译这个架构的 FFmpeg（纯 LGPL，有缓存，通常直接复用）→ 放进 jniLibs → 打这个架构的 APK
+  # 所以 Artifacts 里只有 APK，没有 libffmpeg 之类的中间产物。
   #
-  # 产物 libffmpeg.so 其实是个静态链接的 ffmpeg 可执行文件（见 ffmpeg/build.sh 开头的说明），
-  # 下一个任务会把它们放进 app/src/main/jniLibs/<abi>/ 再打包 APK。
   # 编译脚本、版本号、校验值都在 ffmpeg/ 目录下，升级 FFmpeg 只需要改 ffmpeg/versions.env。
   # ---------------------------------------------------------------------------
-  ffmpeg:
-    name: FFmpeg · ${{ matrix.abi }}
+  build:
+    name: APK · ${{ matrix.abi }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120      # 第一次要先编 FFmpeg（十几分钟到半小时），之后命中缓存就快了
 
     strategy:
-      fail-fast: false      # 某个架构失败时，其它架构继续编，方便一次看全问题
+      fail-fast: false        # 某个架构失败时，其它架构继续，方便一次看全问题
       matrix:
         abi: [arm64-v8a, armeabi-v7a, x86_64, x86]
 
     env:
       ABI: ${{ matrix.abi }}
-      FFMPEG_INSTALL: '0'   # CI 里不用把产物复制进 app/src/main/jniLibs，由下一个任务统一放
+      FFMPEG_INSTALL: '0'     # 下面统一把 libffmpeg.so 放进 jniLibs，不用 build.sh 再复制一遍
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
 
+      # ---------------- FFmpeg ----------------
       # 缓存键里带着编译脚本和版本文件的哈希：这两个文件没改，就直接复用上次编好的 libffmpeg.so，
-      # 平时只改应用代码的提交不会重新编译 FFmpeg（编一次要十几分钟）。
+      # 平时只改应用代码的提交不会重新编译 FFmpeg。
+      - name: 计算 FFmpeg 缓存键
+        id: key
+        run: echo "ffmpeg=ffmpeg-${ABI}-${{ hashFiles('ffmpeg/build.sh', 'ffmpeg/versions.env') }}" >> "$GITHUB_OUTPUT"
+
       - name: 还原已编好的 libffmpeg.so（缓存）
-        id: cache
-        uses: actions/cache@v6
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v6
         with:
           path: ffmpeg/out/${{ matrix.abi }}
-          key: ffmpeg-${{ matrix.abi }}-${{ hashFiles('ffmpeg/build.sh', 'ffmpeg/versions.env') }}
+          key: ${{ steps.key.outputs.ffmpeg }}
 
-      - name: 安装编译工具
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: 安装 FFmpeg 编译工具
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -qq
           # nasm：x86_64 的汇编优化要用；其余（git / curl / make / cmake / gcc / binutils）runner 上自带，
@@ -63,7 +68,7 @@ jobs:
           cmake --version | head -n 1
 
       - name: 准备 Android NDK
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           # NDK 版本固定在 ffmpeg/versions.env 里，保证每次编出来的东西一样
           source ffmpeg/versions.env
@@ -77,12 +82,20 @@ jobs:
           echo "ANDROID_NDK_ROOT=${NDK_DIR}" >> "$GITHUB_ENV"
 
       - name: 编译 FFmpeg
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: bash ffmpeg/build.sh "$ABI"
+
+      # 编完马上存缓存：后面的 Gradle 步骤万一失败，也不用把 FFmpeg 重新编一遍
+      - name: 保存编好的 libffmpeg.so（缓存）
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ffmpeg/out/${{ matrix.abi }}
+          key: ${{ steps.key.outputs.ffmpeg }}
 
       # 命中缓存时没有重新编译，这里单独再检查一遍（ELF 格式、16 KB 对齐、只依赖系统库、纯 LGPL）
       - name: 校验缓存里的 libffmpeg.so
-        if: steps.cache.outputs.cache-hit == 'true'
+        if: steps.ffmpeg-cache.outputs.cache-hit == 'true'
         run: |
           bash ffmpeg/build.sh verify "$ABI"
           {
@@ -92,81 +105,16 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 整理产物
-        run: |
-          mkdir -p "stage/$ABI"
-          cp "ffmpeg/out/$ABI/libffmpeg.so" "stage/$ABI/libffmpeg.so"
-          ls -l "stage/$ABI"
-
-      # 产物目录结构是 <abi>/libffmpeg.so，下载时合并在一起就是 jniLibs 的样子
-      - name: 上传 libffmpeg.so
-        uses: actions/upload-artifact@v7
-        with:
-          name: ffmpeg-bin-${{ matrix.abi }}
-          path: stage
-          if-no-files-found: error
-          retention-days: 7
-
-      # 编译失败时把完整日志传上来（各组件的 configure / make 输出，以及 config.log）
-      - name: 上传编译日志（仅失败时）
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ffmpeg-logs-${{ matrix.abi }}
-          path: ffmpeg/work/${{ matrix.abi }}/logs/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # ---------------------------------------------------------------------------
-  # 第二步：把各架构的 libffmpeg.so 放进 jniLibs，打 Release APK
-  # ---------------------------------------------------------------------------
-  build:
-    name: Build release APK
-    needs: ffmpeg
-    # 某个架构的 FFmpeg 编失败时（整个流程会标红），仍然用已经编好的架构打出 APK，
-    # 方便先拿到能用的包；缺 arm64-v8a 才直接中止。被取消时不再继续。
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v7
-
       # 以前仓库里提交过一份 arm64 的预编译 libffmpeg.so；万一还残留着，先清掉，
-      # 保证打进 APK 的全部是上一步从源码编出来的（某个架构没编出来就是缺，而不是悄悄用旧文件顶上）
-      - name: 清掉仓库里残留的 libffmpeg.so
-        run: rm -f app/src/main/jniLibs/*/libffmpeg.so
-
-      - name: 下载各架构的 libffmpeg.so
-        uses: actions/download-artifact@v8
-        with:
-          pattern: ffmpeg-bin-*
-          path: app/src/main/jniLibs
-          merge-multiple: true
-
-      - name: 检查 libffmpeg.so
+      # 保证打进 APK 的是上面从源码编出来的
+      - name: 把 libffmpeg.so 放进 jniLibs
         run: |
-          missing=""
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            f="app/src/main/jniLibs/$abi/libffmpeg.so"
-            if [ -s "$f" ]; then
-              chmod 755 "$f"
-            else
-              missing="$missing $abi"
-            fi
-          done
-          ls -l app/src/main/jniLibs/*/ || true
-          case " $missing " in
-            *" arm64-v8a "*)
-              echo "::error title=缺少 arm64-v8a 的 libffmpeg.so::FFmpeg 任务没有产出 arm64-v8a，请先看上面 FFmpeg 任务的日志。"
-              exit 1
-              ;;
-          esac
-          if [ -n "$missing" ]; then
-            echo "::warning title=APK 缺少部分架构的 libffmpeg.so::缺少：${missing}。这些架构的设备上，格式转换功能会提示不支持。"
-          fi
+          rm -f app/src/main/jniLibs/*/libffmpeg.so
+          mkdir -p "app/src/main/jniLibs/$ABI"
+          cp "ffmpeg/out/$ABI/libffmpeg.so" "app/src/main/jniLibs/$ABI/libffmpeg.so"
+          ls -l "app/src/main/jniLibs/$ABI"
 
+      # ---------------- APK ----------------
       - name: 安装 JDK 21
         uses: actions/setup-java@v6
         with:
@@ -201,31 +149,38 @@ jobs:
             echo "::notice title=未配置签名密钥::使用 debug 签名。每次构建的 debug 签名都不同，安装新版前需要先卸载旧版。"
           fi
 
-      - name: 构建 Release APK
+      # -PabiFilter：只打这一个架构（app/build.gradle.kts 里读取）
+      - name: 构建 Release APK（${{ matrix.abi }}）
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --stacktrace
+        run: ./gradlew :app:assembleRelease "-PabiFilter=$ABI" --stacktrace
 
       - name: 整理 APK
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
           SHORT_SHA=$(git rev-parse --short HEAD)
-          NAME="toTool-v${VERSION}-${SHORT_SHA}"
+          NAME="toTool-v${VERSION}-${SHORT_SHA}-${ABI}"
           mkdir -p dist
           SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           if [ -z "$SRC" ]; then echo "::error::没有找到构建出的 APK"; exit 1; fi
           cp "$SRC" "dist/${NAME}.apk"
           ls -lh dist
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "- \`${ABI}\`：$(du -h "dist/${NAME}.apk" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
-      # 确认 APK 里真的带上了各架构的 libffmpeg.so
-      - name: 检查 APK 里的 libffmpeg.so
+      # 确认 APK 里带着这个架构的 libffmpeg.so，并且没有混进其它架构的原生库
+      - name: 检查 APK 里的原生库
         run: |
           APK=$(find dist -name '*.apk' | head -n 1)
-          unzip -l "$APK" | grep -E 'lib/[^/]+/libffmpeg\.so' || { echo "::error::APK 里没有 libffmpeg.so"; exit 1; }
+          LIBS=$(unzip -Z1 "$APK" | grep -E '^lib/.+\.so$' || true)
+          echo "$LIBS"
+          echo "$LIBS" | grep -qx "lib/${ABI}/libffmpeg.so" || { echo "::error::APK 里没有 lib/${ABI}/libffmpeg.so"; exit 1; }
+          if echo "$LIBS" | grep -v "^lib/${ABI}/" | grep -q .; then
+            echo "::warning::APK 里混进了其它架构的原生库（-PabiFilter 没有生效？）"
+          fi
 
       - name: 上传 APK
         uses: actions/upload-artifact@v7
@@ -235,23 +190,33 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # 构建失败时，把详细报告传上来方便排查
+      # ---- 失败时，把详细报告传上来方便排查 ----
       - name: 上传构建报告（仅失败时）
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: build-reports
+          name: build-reports-${{ matrix.abi }}
           path: |
             app/build/reports/
             app/build/outputs/logs/
           if-no-files-found: ignore
           retention-days: 7
 
+      # FFmpeg 编译失败时的完整日志（各组件的 configure / make 输出，以及 config.log）
+      - name: 上传 FFmpeg 编译日志（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-logs-${{ matrix.abi }}
+          path: ffmpeg/work/${{ matrix.abi }}/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
   release:
     name: Publish GitHub Release
-    # 只有推送 v* 标签时才发布；FFmpeg 的四个架构必须都编成功，不发缺架构的包
+    # 只有推送 v* 标签时才发布；四个架构的 APK 必须都打成功才会发布，不发缺架构的版本
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ffmpeg, build]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write     # 创建 Release 需要写权限，只给这个 job
@@ -270,6 +235,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
+          ls -l dist
           gh release create "$TAG" dist/*.apk \
             --repo "$REPO" \
             --title "$TAG" \
