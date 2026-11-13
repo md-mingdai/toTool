@@ -71,7 +71,7 @@ class Rational private constructor(
 
     operator fun unaryMinus(): Rational = Rational(num.negate(), den)
 
-    operator fun compareTo(other: Rational): Int =
+    override operator fun compareTo(other: Rational): Int =
         (num * other.den).compareTo(other.num * den)
 
     fun pow(exponent: Int): Rational {
