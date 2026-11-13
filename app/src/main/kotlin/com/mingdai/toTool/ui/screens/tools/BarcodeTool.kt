@@ -396,7 +396,10 @@ private fun BarcodeScannerPane() {
             val now = System.currentTimeMillis()
             detections.keys.toList().forEach { key ->
                 val detection = detections[key]
-                if (detection != null && now - detection.lastSeen > 3000) detections.remove(key)
+                if (detection != null && now - detection.lastSeen > 3000) {
+                    detections.remove(key)
+                    if (autoShownKey == key) autoShownKey = null
+                }
             }
         }
     }
