@@ -77,6 +77,10 @@ object BarcodeRenderer {
         } catch (e: WriterException) {
             throw IllegalArgumentException(e.message ?: "无法生成，请检查内容格式")
         } catch (e: IllegalArgumentException) {
+            val message = e.message.orEmpty()
+            if (message.contains("checksum", ignoreCase = true)) {
+                throw IllegalArgumentException(checksumHint(type))
+            }
             throw e
         }
     }
@@ -86,12 +90,22 @@ object BarcodeRenderer {
         matrix: BitMatrix,
         quietZone: Int = 0,
         maxSize: Int = 1200,
+        oneDimensional: Boolean = false,
     ): Bitmap {
         val source = if (quietZone > 0) addQuietZone(matrix, quietZone) else matrix
-        val longest = maxOf(source.width, source.height)
-        val scale = if (longest >= maxSize) 1 else maxOf(1, maxSize / longest)
-        val width = source.width * scale
-        val height = source.height * scale
+        val scaleX: Int
+        val scaleY: Float
+        if (oneDimensional) {
+            // 一维码横向按需放大，纵向固定成一个较矮的条高，避免预览被拉成一根很高的柱子
+            scaleX = if (source.width >= maxSize) 1 else maxOf(1, maxSize / source.width)
+            scaleY = 220f / source.height
+        } else {
+            val longest = maxOf(source.width, source.height)
+            scaleX = if (longest >= maxSize) 1 else maxOf(1, maxSize / longest)
+            scaleY = scaleX.toFloat()
+        }
+        val width = source.width * scaleX
+        val height = (source.height * scaleY).toInt().coerceAtLeast(1)
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -107,10 +121,10 @@ object BarcodeRenderer {
                     val start = y
                     while (y < source.height && source[x, y]) y++
                     canvas.drawRect(
-                        (x * scale).toFloat(),
-                        (start * scale).toFloat(),
-                        ((x + 1) * scale).toFloat(),
-                        (y * scale).toFloat(),
+                        (x * scaleX).toFloat(),
+                        (start * scaleY),
+                        ((x + 1) * scaleX).toFloat(),
+                        (y * scaleY),
                         paint,
                     )
                 } else {
@@ -119,6 +133,14 @@ object BarcodeRenderer {
             }
         }
         return bitmap
+    }
+
+    private fun checksumHint(type: BarcodeType): String = when (type) {
+        BarcodeType.EAN13 -> "EAN-13 校验位不正确：请输入 12 位数字自动补校验位，或输入校验正确的 13 位"
+        BarcodeType.EAN8 -> "EAN-8 校验位不正确：示例 12345670"
+        BarcodeType.UPCA -> "UPC-A 校验位不正确：示例 012345678905"
+        BarcodeType.ITF -> "ITF 只支持数字，且长度需为偶数"
+        else -> "内容校验位不正确，请检查数字"
     }
 
     fun quietZone(type: BarcodeType): Int = when (type) {

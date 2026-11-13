@@ -17,6 +17,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.runtime.Composable
@@ -64,6 +67,7 @@ import com.mingdai.toTool.barcode.BarcodeRenderer
 import com.mingdai.toTool.barcode.BarcodeScanner
 import com.mingdai.toTool.barcode.BarcodeType
 import com.mingdai.toTool.barcode.ScanResult
+import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.ResultBox
@@ -146,7 +150,12 @@ private fun BarcodeGeneratorPane() {
         val result = withContext(Dispatchers.Default) {
             runCatching {
                 val matrix = BarcodeRenderer.encode(type, content, option)
-                BarcodeRenderer.render(matrix, BarcodeRenderer.quietZone(type), 1200)
+                BarcodeRenderer.render(
+                    matrix,
+                    BarcodeRenderer.quietZone(type),
+                    1200,
+                    oneDimensional = !type.isTwoD,
+                )
             }
         }
         result.onSuccess {
@@ -181,23 +190,15 @@ private fun BarcodeGeneratorPane() {
             .padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            BarcodeType.entries.forEach { candidate ->
-                SelectChip(
-                    selected = type == candidate,
-                    onClick = {
-                        val oldSample = type.sample
-                        type = candidate
-                        option = candidate.defaultOption
-                        if (content.isBlank() || content == oldSample) content = candidate.sample
-                    },
-                    label = candidate.label,
-                )
-            }
-        }
+        BarcodeTypeSelector(
+            selected = type,
+            onSelect = { candidate ->
+                val oldSample = type.sample
+                type = candidate
+                option = candidate.defaultOption
+                if (content.isBlank() || content == oldSample) content = candidate.sample
+            },
+        )
 
         TextField(
             value = content,
@@ -267,6 +268,81 @@ private fun BarcodeGeneratorPane() {
                 CircularProgressIndicator(size = 18.dp, strokeWidth = 2.dp)
             } else {
                 Text("保存到相册")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarcodeTypeSelector(
+    selected: BarcodeType,
+    onSelect: (BarcodeType) -> Unit,
+) {
+    var show by remember { mutableStateOf(false) }
+    val colors = MiuixTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { show = true },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "条码类型",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.onSurfaceVariantSummary,
+                )
+                Text(text = selected.label, style = MiuixTheme.textStyles.body1)
+            }
+            Icon(
+                imageVector = Icons.Filled.ExpandMore,
+                contentDescription = "选择类型",
+                tint = colors.onSurfaceVariantSummary,
+            )
+        }
+    }
+
+    AppDialog(
+        show = show,
+        title = "选择条码类型",
+        onDismiss = { show = false },
+        confirmText = null,
+        dismissText = "取消",
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            BarcodeType.entries.forEach { type ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onSelect(type)
+                            show = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = type.label,
+                        style = MiuixTheme.textStyles.body1,
+                        color = if (type == selected) colors.primary else colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (type == selected) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
     }

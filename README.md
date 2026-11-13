@@ -6,7 +6,7 @@
 
 一款面向 Android 的本地工具箱：45 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解和函数绘图。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.1.4-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.1.5-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [条码处理](#条码处理) · [方程求解](#方程求解) · [函数绘图](#函数绘图) · [构建](#构建) · [项目结构](#项目结构) · [许可证](#许可证)
 

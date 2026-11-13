@@ -1,5 +1,6 @@
 package com.mingdai.toTool.ui.components
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,10 +14,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -103,6 +109,7 @@ private fun KeypadRow(
                 modifier = Modifier.weight(1f),
                 accent = accent,
                 highlight = label in setOf("+", "−", "×", "÷"),
+                repeatOnPress = label == "⌫",
                 onClick = {
                     when {
                         label == "⌫" -> onBackspace()
@@ -121,6 +128,7 @@ private fun KeypadKey(
     modifier: Modifier = Modifier,
     accent: Boolean = false,
     highlight: Boolean = false,
+    repeatOnPress: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
@@ -129,24 +137,66 @@ private fun KeypadKey(
         highlight -> colors.primary
         else -> colors.onSurface
     }
-    Card(
-        modifier = modifier.height(46.dp),
-        insideMargin = PaddingValues(0.dp),
-        colors = CardDefaults.defaultColors(
-            color = if (accent) colors.primary else colors.surfaceContainer,
-            contentColor = textColor,
-        ),
-        onClick = onClick,
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+    val keyModifier = modifier.height(46.dp)
+    val keyColors = CardDefaults.defaultColors(
+        color = if (accent) colors.primary else colors.surfaceContainer,
+        contentColor = textColor,
+    )
+    if (repeatOnPress) {
+        Card(
+            modifier = keyModifier,
+            insideMargin = PaddingValues(0.dp),
+            colors = keyColors,
         ) {
-            Text(
-                text = label,
-                style = MiuixTheme.textStyles.title4,
-                color = textColor,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onPress = {
+                                coroutineScope {
+                                    var repeated = false
+                                    val repeatJob = launch {
+                                        delay(420)
+                                        repeated = true
+                                        while (isActive) {
+                                            onClick()
+                                            delay(65)
+                                        }
+                                    }
+                                    val released = tryAwaitRelease()
+                                    repeatJob.cancel()
+                                    if (released && !repeated) onClick()
+                                }
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MiuixTheme.textStyles.title4,
+                    color = textColor,
+                )
+            }
+        }
+    } else {
+        Card(
+            modifier = keyModifier,
+            insideMargin = PaddingValues(0.dp),
+            colors = keyColors,
+            onClick = onClick,
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MiuixTheme.textStyles.title4,
+                    color = textColor,
+                )
+            }
         }
     }
 }

@@ -62,7 +62,7 @@ enum class BarcodeType(
         "商品条码，12 或 13 位数字",
     ),
     EAN8(
-        "EAN-8", BarcodeGroup.ONE_D, "12345678", BarcodeFormat.EAN_8,
+        "EAN-8", BarcodeGroup.ONE_D, "12345670", BarcodeFormat.EAN_8,
         "短商品条码，7 或 8 位数字",
     ),
     UPCA(
