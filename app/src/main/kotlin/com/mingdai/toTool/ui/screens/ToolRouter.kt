@@ -36,7 +36,9 @@ import com.mingdai.toTool.ui.screens.tools.CompassTool
 import com.mingdai.toTool.ui.screens.tools.DateTool
 import com.mingdai.toTool.ui.screens.tools.DecibelTool
 import com.mingdai.toTool.ui.screens.tools.DeviceInfoTool
+import com.mingdai.toTool.ui.screens.tools.EquationSolverTool
 import com.mingdai.toTool.ui.screens.tools.FlashlightTool
+import com.mingdai.toTool.ui.screens.tools.FunctionPlotTool
 import com.mingdai.toTool.ui.screens.tools.HashTool
 import com.mingdai.toTool.ui.screens.tools.ImageBlurTool
 import com.mingdai.toTool.ui.screens.tools.ImageCompressTool
@@ -201,6 +203,8 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "calc_percent" -> PercentTool(padding)
             "calc_date" -> DateTool(padding)
             "calc_loan" -> LoanTool(padding)
+            "calc_equation" -> EquationSolverTool(padding)
+            "calc_plot" -> FunctionPlotTool(padding)
             // --- 设备工具 ---
             "dev_device" -> DeviceInfoTool(padding)
             "dev_battery" -> BatteryTool(padding)

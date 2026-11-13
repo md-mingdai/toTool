@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Highlight
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.RoundedCorner
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Terminal
@@ -97,6 +99,8 @@ object ToolRegistry {
         Tool("calc_percent", "百分比计算", "增减、占比、变化率", ToolCategory.CALC, Icons.Filled.Percent),
         Tool("calc_date", "日期计算", "作差求间隔，或推算目标日", ToolCategory.CALC, Icons.Filled.Event),
         Tool("calc_loan", "贷款计算", "等额本息月供与利息", ToolCategory.CALC, Icons.Filled.AttachMoney),
+        Tool("calc_equation", "方程求解", "输入含一个未知数的方程，数值扫描求实根", ToolCategory.CALC, Icons.Filled.Functions),
+        Tool("calc_plot", "函数绘图", "多条曲线、缩放平移与点按取值", ToolCategory.CALC, Icons.Filled.ShowChart),
         // --- 设备工具 ---
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
         Tool("dev_battery", "电池信息", "电量、状态与温度", ToolCategory.DEVICE, Icons.Filled.BatteryFull),
