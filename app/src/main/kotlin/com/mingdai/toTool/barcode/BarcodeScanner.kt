@@ -9,10 +9,8 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.Result
 import com.google.zxing.ResultPoint
-import com.google.zxing.aztec.detector.Detector as AztecDetector
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.datamatrix.detector.Detector as DataMatrixDetector
 import com.google.zxing.multi.GenericMultipleBarcodeReader
 import com.google.zxing.multi.qrcode.QRCodeMultiReader
 import com.google.zxing.multi.qrcode.detector.MultiDetector
@@ -184,6 +182,13 @@ object BarcodeScanner {
 
         fun add(points: Array<ResultPoint>?) {
             val bounds = boundsFromPoints(points, width, height) ?: return
+            val w = bounds.right - bounds.left
+            val h = bounds.bottom - bounds.top
+            if (w < 0.02f || h < 0.02f) return
+            if (w > 0.92f || h > 0.92f) return
+            val aspect = w / h.coerceAtLeast(1e-4f)
+            if (aspect < 0.45f || aspect > 2.2f) return
+            if (w * h > 0.58f) return
             val candidate = ScanCandidate(bounds, width, height)
             if (candidates.none { candidateKey(it.bounds) == candidateKey(bounds) }) {
                 candidates.add(candidate)
@@ -193,14 +198,6 @@ object BarcodeScanner {
         runCatching {
             MultiDetector(matrix).detectMulti(emptyMap<DecodeHintType, Any>())
         }.getOrNull()?.forEach { add(it.points) }
-
-        runCatching {
-            DataMatrixDetector(matrix).detect()
-        }.getOrNull()?.let { add(it.points) }
-
-        runCatching {
-            AztecDetector(matrix).detect(false)
-        }.getOrNull()?.let { add(it.points) }
 
         return candidates.take(12)
     }

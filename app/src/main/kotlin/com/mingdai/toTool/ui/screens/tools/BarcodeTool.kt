@@ -396,14 +396,18 @@ private data class TrackedCode(
     val result: ScanResult?,
     val lastSeen: Long,
     val lastCandidateSeen: Long,
+    val hits: Int,
 )
 
 private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
+    val areaA = (a.right - a.left) * (a.bottom - a.top)
+    val areaB = (b.right - b.left) * (b.bottom - b.top)
+    val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
+    // 尺寸差太多说明不是同一个码，避免把一个小结果挂到巨大的误检框上
+    if (sizeRatio < 0.28f) return 0f
     val ix = max(0f, min(a.right, b.right) - max(a.left, b.left))
     val iy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
     val intersection = ix * iy
-    val areaA = (a.right - a.left) * (a.bottom - a.top)
-    val areaB = (b.right - b.left) * (b.bottom - b.top)
     if (intersection > 0f) {
         val iou = intersection / (areaA + areaB - intersection).coerceAtLeast(1e-6f)
         if (iou > 0f) return iou
@@ -411,8 +415,7 @@ private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
     val dx = ((a.left + a.right) - (b.left + b.right)) / 2f
     val dy = ((a.top + a.bottom) - (b.top + b.bottom)) / 2f
     val distance = kotlin.math.hypot(dx, dy)
-    val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
-    return if (distance < 0.08f && sizeRatio > 0.2f) 0.015f else 0f
+    return if (distance < 0.07f) 0.015f else 0f
 }
 
 private data class OverlayRect(
@@ -469,7 +472,7 @@ private fun BarcodeScannerPane() {
             delay(300)
             val now = System.currentTimeMillis()
             tracked.entries.toList().forEach { (id, code) ->
-                val timeout = if (code.result == null) 1500L else 3000L
+                val timeout = if (code.result == null) 700L else 1000L
                 if (now - code.lastSeen > timeout) tracked.remove(id)
             }
         }
@@ -496,6 +499,7 @@ private fun BarcodeScannerPane() {
                     frameHeight = candidate.frameHeight,
                     lastSeen = now,
                     lastCandidateSeen = now,
+                    hits = (match.hits + 1).coerceAtMost(6),
                 )
             } else {
                 val id = nextTrackId
@@ -508,7 +512,15 @@ private fun BarcodeScannerPane() {
                     result = null,
                     lastSeen = now,
                     lastCandidateSeen = now,
+                    hits = 1,
                 )
+            }
+        }
+        // 这一帧没再检出的 QR 框立即进入过期倒计时，避免移出画面后还在乱跳
+        val cutoff = now - 450
+        tracked.entries.toList().forEach { (id, code) ->
+            if (id !in used && code.lastCandidateSeen in 1L..cutoff) {
+                tracked.remove(id)
             }
         }
     }
@@ -533,6 +545,7 @@ private fun BarcodeScannerPane() {
                     frameHeight = if (candidateBoundsFresh) match.frameHeight else result.frameHeight,
                     result = result,
                     lastSeen = now,
+                    hits = max(match.hits, 2),
                 )
             } else {
                 val id = nextTrackId
@@ -545,6 +558,7 @@ private fun BarcodeScannerPane() {
                     result = result,
                     lastSeen = now,
                     lastCandidateSeen = 0L,
+                    hits = 2,
                 )
             }
         }
@@ -736,10 +750,15 @@ private fun CameraScanner(
                         cameraError = "相机启动失败"
                     } else {
                         boundProvider = provider
-                        val preview = Preview.Builder().build().apply {
-                            setSurfaceProvider(previewView.surfaceProvider)
-                        }
+                        // 预览和分析统一成 4:3，保证 FILL_CENTER 下框与码严格对齐
+                        val preview = Preview.Builder()
+                            .setTargetResolution(android.util.Size(1280, 960))
+                            .build()
+                            .apply {
+                                setSurfaceProvider(previewView.surfaceProvider)
+                            }
                         val analysis = ImageAnalysis.Builder()
+                            .setTargetResolution(android.util.Size(1280, 960))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                             .build()
@@ -965,6 +984,8 @@ private fun TrackedCodeFrame(
     ) ?: return
 
     val decoded = tracked.result != null
+    // 候选框至少连续出现两帧才画，过滤掉只闪一下的误检
+    if (!decoded && tracked.hits < 2) return
     val frameAlpha by animateFloatAsState(
         targetValue = if (decoded) 1f else 0.62f,
         animationSpec = tween(durationMillis = 200),
