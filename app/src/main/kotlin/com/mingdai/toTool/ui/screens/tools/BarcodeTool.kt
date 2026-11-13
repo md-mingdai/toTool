@@ -565,7 +565,7 @@ private fun CameraScanner(
 
     val previewView = remember {
         PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FIT_CENTER
+            scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
     var camera by remember { mutableStateOf<Camera?>(null) }
@@ -761,10 +761,10 @@ private fun DetectionBoxes(
     detections.forEach { result ->
         val bounds = result.bounds ?: return@forEach
         if (result.frameWidth <= 0 || result.frameHeight <= 0) return@forEach
-        val frameAspect = result.frameWidth.toFloat() / result.frameHeight.toFloat()
-        val viewAspect = viewW / viewH
-        val displayW = if (frameAspect >= viewAspect) viewW else viewH * frameAspect
-        val displayH = displayW / frameAspect
+        // PreviewView 使用 FILL_CENTER：把整帧按较大比例铺满取景区域，边缘会被裁掉
+        val scale = max(viewW / result.frameWidth.toFloat(), viewH / result.frameHeight.toFloat())
+        val displayW = result.frameWidth * scale
+        val displayH = result.frameHeight * scale
         val offsetX = (viewW - displayW) / 2f
         val offsetY = (viewH - displayH) / 2f
         val groupLeft = offsetX + bounds.left * displayW
