@@ -53,7 +53,7 @@ fun solveEquation(
         throw MathParseException("只支持一个未知数（检测到 ${variables.joinToString("、")}）")
     }
 
-    fun f(x: Double): Double = left.eval(x) - right.eval(x)
+    val f: (Double) -> Double = { x -> left.eval(x) - right.eval(x) }
 
     if (variables.isEmpty()) {
         val value = f(0.0)
