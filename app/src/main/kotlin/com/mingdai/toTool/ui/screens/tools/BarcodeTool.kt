@@ -547,7 +547,7 @@ private fun CameraScanner(
         IconButton(
             onClick = {
                 torchOn = !torchOn
-                camera?.cameraControl?.enableTorch(torchOn)
+                runCatching { camera?.cameraControl?.enableTorch(torchOn) }
             },
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
         ) {

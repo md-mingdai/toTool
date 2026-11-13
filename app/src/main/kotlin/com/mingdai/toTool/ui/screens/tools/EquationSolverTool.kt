@@ -332,6 +332,8 @@ private fun solveSmart(
         // 含函数 / 根号 / π / e / 高次方程：退回数值扫描
     } catch (e: ExactSolveException) {
         return SolveOutcome.Error(e.message ?: "方程有误")
+    } catch (e: Exception) {
+        return SolveOutcome.Error("方程有误：${e.message ?: "无法解析"}")
     }
 
     val from = fromText.trim().toDoubleOrNull()
