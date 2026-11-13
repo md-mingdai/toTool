@@ -225,6 +225,8 @@ toTool/
 
 ## 许可证
 
+Copyright © 2026 mingdai
+
 本项目以 **GNU General Public License v3.0** 发布，详见 [LICENSE](./LICENSE)。
 
 你可以自由使用、修改和分发，但分发修改后的版本时需要以同一许可证开放源代码。第三方组件仍遵循各自的许可证。
