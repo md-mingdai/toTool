@@ -76,7 +76,14 @@ object BarcodeScanner {
             return ScanResult(
                 text = hit.text,
                 formatLabel = "汉信码",
-                bounds = normalize(hit.left, hit.top, hit.right, hit.bottom, matrix.width, matrix.height),
+                bounds = normalize(
+                    hit.left.toFloat(),
+                    hit.top.toFloat(),
+                    hit.right.toFloat(),
+                    hit.bottom.toFloat(),
+                    matrix.width,
+                    matrix.height,
+                ),
                 frameWidth = matrix.width,
                 frameHeight = matrix.height,
             )
@@ -85,7 +92,14 @@ object BarcodeScanner {
             return ScanResult(
                 text = hit.text,
                 formatLabel = "Code 49",
-                bounds = normalize(hit.left, hit.top, hit.right, hit.bottom, matrix.width, matrix.height),
+                bounds = normalize(
+                    hit.left.toFloat(),
+                    hit.top.toFloat(),
+                    hit.right.toFloat(),
+                    hit.bottom.toFloat(),
+                    matrix.width,
+                    matrix.height,
+                ),
                 frameWidth = matrix.width,
                 frameHeight = matrix.height,
             )
