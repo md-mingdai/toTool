@@ -6,7 +6,7 @@
 
 一款面向 Android 的本地工具箱：45 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解和函数绘图。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.1.5-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.1.6-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [条码处理](#条码处理) · [方程求解](#方程求解) · [函数绘图](#函数绘图) · [构建](#构建) · [项目结构](#项目结构) · [许可证](#许可证)
 
@@ -40,7 +40,7 @@ toTool 是一个单 APK 的 Android 工具箱，最低支持 Android 9（API 28�
 - **生成**：选择类型、输入内容、按需调整纠错级别，实时预览，一键保存到相册。
 - **扫描**：CameraX 实时预览，或从相册选图；常见格式由 ZXing 识别，汉信码与 Code 49 由项目内移植的解码器识别。
 - **汉信码 / Code 49**：编码与解码均在本项目内实现（矩阵排布、Reed–Solomon、载荷解析），生成时会做一次编码 → 解码自检，避免输出读不回来的码。
-- 相机扫描使用 Telegram 风格取景框：暗色遮罩、四角括号与扫描线；识别到的码会实时框出并显示「查看」，结果用二级弹窗展示，合法 URL 可直接打开。相册模式会先尝试整图，再尝试中间裁剪。
+- 相机扫描使用 Telegram 风格取景框：暗色遮罩、四角括号与扫描线；检测与解码分离，先实时框出候选码，解码完成后在框的几何中心显示自适应大小的「查看」。支持多码同时识别，弹窗只在点「查看」时打开，合法 URL 可直接打开。相册模式会先尝试整图，再尝试中间裁剪。
 - 汉信码 / Code 49 的识别采用外接框采样，适合清晰、尽量正对镜头的码；严重透视或倾斜时建议先用相册裁剪校正。汉信码中文按 UTF-8 二进制模式生成与识别。
 
 ### 方程求解

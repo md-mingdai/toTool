@@ -19,16 +19,22 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +43,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -59,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,26 +74,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mingdai.toTool.barcode.BarcodeRenderer
 import com.mingdai.toTool.barcode.BarcodeScanner
 import com.mingdai.toTool.barcode.BarcodeType
+import com.mingdai.toTool.barcode.ScanBounds
+import com.mingdai.toTool.barcode.ScanCandidate
 import com.mingdai.toTool.barcode.ScanResult
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
@@ -374,9 +386,71 @@ private fun BarcodeTypeSelector(
 
 /* ------------------------------ 扫描识别 ------------------------------ */
 
-private data class Detection(val result: ScanResult, val lastSeen: Long)
+private val ScanAccent = Color(0xFFFFDE07)
 
-private fun scanKey(result: ScanResult): String = result.formatLabel + "\u0000" + result.text
+private data class TrackedCode(
+    val id: Long,
+    val bounds: ScanBounds,
+    val frameWidth: Int,
+    val frameHeight: Int,
+    val result: ScanResult?,
+    val lastSeen: Long,
+    val lastCandidateSeen: Long,
+)
+
+private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
+    val ix = max(0f, min(a.right, b.right) - max(a.left, b.left))
+    val iy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
+    val intersection = ix * iy
+    val areaA = (a.right - a.left) * (a.bottom - a.top)
+    val areaB = (b.right - b.left) * (b.bottom - b.top)
+    if (intersection > 0f) {
+        val iou = intersection / (areaA + areaB - intersection).coerceAtLeast(1e-6f)
+        if (iou > 0f) return iou
+    }
+    val dx = ((a.left + a.right) - (b.left + b.right)) / 2f
+    val dy = ((a.top + a.bottom) - (b.top + b.bottom)) / 2f
+    val distance = kotlin.math.hypot(dx, dy)
+    val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
+    return if (distance < 0.08f && sizeRatio > 0.2f) 0.015f else 0f
+}
+
+private data class OverlayRect(
+    val left: Float,
+    val top: Float,
+    val width: Float,
+    val height: Float,
+)
+
+private fun mapBounds(
+    bounds: ScanBounds,
+    frameWidth: Int,
+    frameHeight: Int,
+    previewSize: IntSize,
+    minSide: Float,
+): OverlayRect? {
+    if (frameWidth <= 0 || frameHeight <= 0) return null
+    val viewW = previewSize.width.toFloat()
+    val viewH = previewSize.height.toFloat()
+    if (viewW <= 0f || viewH <= 0f) return null
+    // PreviewView 使用 FILL_CENTER：整帧按较大比例铺满，边缘会被裁掉
+    val scale = max(viewW / frameWidth.toFloat(), viewH / frameHeight.toFloat())
+    val displayW = frameWidth * scale
+    val displayH = frameHeight * scale
+    val offsetX = (viewW - displayW) / 2f
+    val offsetY = (viewH - displayH) / 2f
+    val groupLeft = offsetX + bounds.left * displayW
+    val groupTop = offsetY + bounds.top * displayH
+    val groupRight = offsetX + bounds.right * displayW
+    val groupBottom = offsetY + bounds.bottom * displayH
+    val centerX = (groupLeft + groupRight) / 2f
+    val centerY = (groupTop + groupBottom) / 2f
+    val boxW = max(groupRight - groupLeft, minSide).coerceAtMost(viewW)
+    val boxH = max(groupBottom - groupTop, minSide).coerceAtMost(viewH)
+    val left = (centerX - boxW / 2f).coerceIn(0f, (viewW - boxW).coerceAtLeast(0f))
+    val top = (centerY - boxH / 2f).coerceIn(0f, (viewH - boxH).coerceAtLeast(0f))
+    return OverlayRect(left, top, boxW, boxH)
+}
 
 @Composable
 private fun BarcodeScannerPane() {
@@ -387,24 +461,93 @@ private fun BarcodeScannerPane() {
     var scanning by remember { mutableStateOf(false) }
     var galleryResult by remember { mutableStateOf<ScanResult?>(null) }
     var selectedResult by remember { mutableStateOf<ScanResult?>(null) }
-    var autoShownKey by remember { mutableStateOf<String?>(null) }
-    val detections = remember { mutableStateMapOf<String, Detection>() }
+    val tracked = remember { mutableStateMapOf<Long, TrackedCode>() }
+    var nextTrackId by remember { mutableStateOf(1L) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(500)
+            delay(300)
             val now = System.currentTimeMillis()
-            detections.keys.toList().forEach { key ->
-                val detection = detections[key]
-                if (detection != null && now - detection.lastSeen > 3000) {
-                    detections.remove(key)
-                    if (autoShownKey == key) autoShownKey = null
-                }
+            tracked.entries.toList().forEach { (id, code) ->
+                val timeout = if (code.result == null) 1500L else 3000L
+                if (now - code.lastSeen > timeout) tracked.remove(id)
             }
         }
     }
     LaunchedEffect(mode) {
-        if (mode == 1) detections.clear()
+        if (mode == 1) tracked.clear()
+    }
+
+    fun onCandidates(candidates: List<ScanCandidate>) {
+        val now = System.currentTimeMillis()
+        val used = HashSet<Long>()
+        candidates.forEach { candidate ->
+            val match = tracked.values
+                .filter { it.id !in used }
+                .map { it to matchScore(it.bounds, candidate.bounds) }
+                .filter { it.second > 0.005f }
+                .maxByOrNull { it.second }
+                ?.first
+            if (match != null) {
+                used.add(match.id)
+                tracked[match.id] = match.copy(
+                    bounds = candidate.bounds,
+                    frameWidth = candidate.frameWidth,
+                    frameHeight = candidate.frameHeight,
+                    lastSeen = now,
+                    lastCandidateSeen = now,
+                )
+            } else {
+                val id = nextTrackId
+                nextTrackId += 1
+                tracked[id] = TrackedCode(
+                    id = id,
+                    bounds = candidate.bounds,
+                    frameWidth = candidate.frameWidth,
+                    frameHeight = candidate.frameHeight,
+                    result = null,
+                    lastSeen = now,
+                    lastCandidateSeen = now,
+                )
+            }
+        }
+    }
+
+    fun onResults(results: List<ScanResult>) {
+        val now = System.currentTimeMillis()
+        val used = HashSet<Long>()
+        results.forEach { result ->
+            val bounds = result.bounds ?: return@forEach
+            val match = tracked.values
+                .filter { it.id !in used }
+                .map { it to matchScore(it.bounds, bounds) }
+                .filter { it.second > 0.005f }
+                .maxByOrNull { it.second }
+                ?.first
+            if (match != null) {
+                used.add(match.id)
+                val candidateBoundsFresh = now - match.lastCandidateSeen < 1200
+                tracked[match.id] = match.copy(
+                    bounds = if (candidateBoundsFresh) match.bounds else bounds,
+                    frameWidth = if (candidateBoundsFresh) match.frameWidth else result.frameWidth,
+                    frameHeight = if (candidateBoundsFresh) match.frameHeight else result.frameHeight,
+                    result = result,
+                    lastSeen = now,
+                )
+            } else {
+                val id = nextTrackId
+                nextTrackId += 1
+                tracked[id] = TrackedCode(
+                    id = id,
+                    bounds = bounds,
+                    frameWidth = result.frameWidth,
+                    frameHeight = result.frameHeight,
+                    result = result,
+                    lastSeen = now,
+                    lastCandidateSeen = 0L,
+                )
+            }
+        }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -427,10 +570,6 @@ private fun BarcodeScannerPane() {
             }
             galleryResult = scan
             status = if (scan == null) "没有识别到条码，试试更清晰或裁剪后的图片" else null
-            if (scan != null) {
-                selectedResult = scan
-                autoShownKey = scanKey(scan)
-            }
             scanning = false
         }
     }
@@ -452,15 +591,9 @@ private fun BarcodeScannerPane() {
 
         if (mode == 0) {
             CameraScanner(
-                detections = detections.values.map { it.result },
-                onDetection = { result ->
-                    val key = scanKey(result)
-                    detections[key] = Detection(result, System.currentTimeMillis())
-                    if (selectedResult == null && autoShownKey != key) {
-                        autoShownKey = key
-                        selectedResult = result
-                    }
-                },
+                tracked = tracked.values.toList(),
+                onCandidates = ::onCandidates,
+                onResults = ::onResults,
                 onView = { selectedResult = it },
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
@@ -525,8 +658,9 @@ private fun BarcodeScannerPane() {
 
 @Composable
 private fun CameraScanner(
-    detections: List<ScanResult>,
-    onDetection: (ScanResult) -> Unit,
+    tracked: List<TrackedCode>,
+    onCandidates: (List<ScanCandidate>) -> Unit,
+    onResults: (List<ScanResult>) -> Unit,
     onView: (ScanResult) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -577,7 +711,8 @@ private fun CameraScanner(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var retryKey by remember { mutableStateOf(0) }
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    val callback = rememberUpdatedState(onDetection)
+    val candidatesCallback = rememberUpdatedState(onCandidates)
+    val resultsCallback = rememberUpdatedState(onResults)
 
     DisposableEffect(lifecycleOwner, retryKey) {
         camera = null
@@ -586,7 +721,10 @@ private fun CameraScanner(
         cameraError = null
         var disposed = false
         var boundProvider: ProcessCameraProvider? = null
-        val executor = Executors.newSingleThreadExecutor()
+        val active = AtomicBoolean(true)
+        val analysisExecutor = Executors.newSingleThreadExecutor()
+        val decodeExecutor = Executors.newSingleThreadExecutor()
+        val decodeInFlight = AtomicBoolean(false)
         val future = runCatching { ProcessCameraProvider.getInstance(context) }.getOrNull()
         if (future == null) {
             cameraError = "相机初始化失败"
@@ -605,25 +743,41 @@ private fun CameraScanner(
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                             .build()
-                        val decoding = AtomicBoolean(false)
-                        analysis.setAnalyzer(executor) { image ->
-                            if (!decoding.compareAndSet(false, true)) {
-                                image.close()
-                                return@setAnalyzer
-                            }
+                        analysis.setAnalyzer(analysisExecutor) { image ->
                             try {
                                 val rotation = image.imageInfo.rotationDegrees
                                 val upright = rotateBitmap(image.toBitmap(), rotation)
-                                val scaled = scaleDown(upright, 960)
-                                val result = BarcodeScanner.decode(scaled)
-                                if (result != null) {
-                                    Handler(Looper.getMainLooper()).post { callback.value(result) }
+                                val scaled = scaleDown(upright, 1280)
+
+                                // 定位只做轻量检测，每一帧都发候选框，框才能跟手
+                                val candidates = BarcodeScanner.detect(scaled)
+                                if (active.get()) {
+                                    Handler(Looper.getMainLooper()).post {
+                                        candidatesCallback.value(candidates)
+                                    }
+                                }
+
+                                // 解码放到独立线程，不阻塞下一帧的定位；同一时间只跑一帧解码
+                                if (decodeInFlight.compareAndSet(false, true)) {
+                                    decodeExecutor.execute {
+                                        try {
+                                            val results = BarcodeScanner.decodeAll(scaled)
+                                            if (active.get() && results.isNotEmpty()) {
+                                                Handler(Looper.getMainLooper()).post {
+                                                    resultsCallback.value(results)
+                                                }
+                                            }
+                                        } catch (e: Throwable) {
+                                            // 单帧失败不影响后续帧
+                                        } finally {
+                                            decodeInFlight.set(false)
+                                        }
+                                    }
                                 }
                             } catch (e: Throwable) {
                                 // 单帧失败不影响下一帧
                             } finally {
                                 image.close()
-                                decoding.set(false)
                             }
                         }
                         try {
@@ -646,8 +800,10 @@ private fun CameraScanner(
 
         onDispose {
             disposed = true
+            active.set(false)
             runCatching { boundProvider?.unbindAll() }
-            runCatching { executor.shutdown() }
+            runCatching { analysisExecutor.shutdown() }
+            runCatching { decodeExecutor.shutdown() }
         }
     }
 
@@ -671,7 +827,11 @@ private fun CameraScanner(
                 .padding(bottom = 18.dp),
         )
         if (previewSize != IntSize.Zero) {
-            DetectionBoxes(detections = detections, previewSize = previewSize, onView = onView)
+            TrackedCodeOverlays(
+                tracked = tracked,
+                previewSize = previewSize,
+                onView = onView,
+            )
         }
         IconButton(
             onClick = {
@@ -751,64 +911,145 @@ private fun ScanGuideOverlay(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DetectionBoxes(
-    detections: List<ScanResult>,
+private fun TrackedCodeOverlays(
+    tracked: List<TrackedCode>,
+    previewSize: IntSize,
+    onView: (ScanResult) -> Unit,
+) {
+    tracked.forEach { code ->
+        key(code.id) {
+            TrackedCodeFrame(tracked = code, previewSize = previewSize, onView = onView)
+        }
+    }
+}
+
+@Composable
+private fun TrackedCodeFrame(
+    tracked: TrackedCode,
     previewSize: IntSize,
     onView: (ScanResult) -> Unit,
 ) {
     val density = LocalDensity.current
-    val colors = MiuixTheme.colorScheme
-    val viewW = previewSize.width.toFloat()
-    val viewH = previewSize.height.toFloat()
-    if (viewW <= 0f || viewH <= 0f) return
+    val boundsAnimation = tween<Float>(
+        durationMillis = 180,
+        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+    )
+    val left by animateFloatAsState(
+        targetValue = tracked.bounds.left,
+        animationSpec = boundsAnimation,
+        label = "code-left",
+    )
+    val top by animateFloatAsState(
+        targetValue = tracked.bounds.top,
+        animationSpec = boundsAnimation,
+        label = "code-top",
+    )
+    val right by animateFloatAsState(
+        targetValue = tracked.bounds.right,
+        animationSpec = boundsAnimation,
+        label = "code-right",
+    )
+    val bottom by animateFloatAsState(
+        targetValue = tracked.bounds.bottom,
+        animationSpec = boundsAnimation,
+        label = "code-bottom",
+    )
 
-    detections.forEach { result ->
-        val bounds = result.bounds ?: return@forEach
-        if (result.frameWidth <= 0 || result.frameHeight <= 0) return@forEach
-        // PreviewView 使用 FILL_CENTER：把整帧按较大比例铺满取景区域，边缘会被裁掉
-        val scale = max(viewW / result.frameWidth.toFloat(), viewH / result.frameHeight.toFloat())
-        val displayW = result.frameWidth * scale
-        val displayH = result.frameHeight * scale
-        val offsetX = (viewW - displayW) / 2f
-        val offsetY = (viewH - displayH) / 2f
-        val groupLeft = offsetX + bounds.left * displayW
-        val groupTop = offsetY + bounds.top * displayH
-        val groupRight = offsetX + bounds.right * displayW
-        val groupBottom = offsetY + bounds.bottom * displayH
+    val minSide = with(density) { 48.dp.toPx() }
+    val rect = mapBounds(
+        bounds = ScanBounds(left, top, right, bottom),
+        frameWidth = tracked.frameWidth,
+        frameHeight = tracked.frameHeight,
+        previewSize = previewSize,
+        minSide = minSide,
+    ) ?: return
 
-        val minSide = with(density) { 48.dp.toPx() }
-        val centerX = (groupLeft + groupRight) / 2f
-        val centerY = (groupTop + groupBottom) / 2f
-        val boxW = max(groupRight - groupLeft, minSide).coerceAtMost(viewW)
-        val boxH = max(groupBottom - groupTop, minSide).coerceAtMost(viewH)
-        val left = (centerX - boxW / 2f).coerceIn(0f, (viewW - boxW).coerceAtLeast(0f))
-        val top = (centerY - boxH / 2f).coerceIn(0f, (viewH - boxH).coerceAtLeast(0f))
+    val decoded = tracked.result != null
+    val frameAlpha by animateFloatAsState(
+        targetValue = if (decoded) 1f else 0.62f,
+        animationSpec = tween(durationMillis = 200),
+        label = "code-alpha",
+    )
 
-        val pillBelow = top + boxH + with(density) { 44.dp.toPx() } <= viewH
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-                .size(
-                    width = with(density) { boxW.toDp() },
-                    height = with(density) { boxH.toDp() },
-                )
-                .border(2.dp, colors.primary, RoundedCornerShape(10.dp))
-                .clickable { onView(result) },
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(rect.left.roundToInt(), rect.top.roundToInt()) }
+            .size(
+                width = with(density) { rect.width.toDp() },
+                height = with(density) { rect.height.toDp() },
+            ),
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val stroke = 3.dp.toPx()
+            val color = ScanAccent.copy(alpha = frameAlpha)
+            drawRoundRect(
+                color = color.copy(alpha = 0.26f * frameAlpha),
+                topLeft = Offset(stroke / 2f, stroke / 2f),
+                size = Size(
+                    (w - stroke).coerceAtLeast(0f),
+                    (h - stroke).coerceAtLeast(0f),
+                ),
+                cornerRadius = CornerRadius(12.dp.toPx()),
+                style = Stroke(width = 1.dp.toPx()),
+            )
+            val corner = min(w, h) * 0.18f
+            drawLine(color, Offset(0f, 0f), Offset(corner, 0f), stroke, StrokeCap.Round)
+            drawLine(color, Offset(0f, 0f), Offset(0f, corner), stroke, StrokeCap.Round)
+            drawLine(color, Offset(w - corner, 0f), Offset(w, 0f), stroke, StrokeCap.Round)
+            drawLine(color, Offset(w, 0f), Offset(w, corner), stroke, StrokeCap.Round)
+            drawLine(color, Offset(0f, h - corner), Offset(0f, h), stroke, StrokeCap.Round)
+            drawLine(color, Offset(0f, h), Offset(corner, h), stroke, StrokeCap.Round)
+            drawLine(color, Offset(w - corner, h), Offset(w, h), stroke, StrokeCap.Round)
+            drawLine(color, Offset(w, h - corner), Offset(w, h), stroke, StrokeCap.Round)
+        }
+
+        AnimatedVisibility(
+            visible = decoded,
+            enter = fadeIn(tween(160)) + scaleIn(
+                initialScale = 0.55f,
+                animationSpec = tween(
+                    durationMillis = 190,
+                    easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+                ),
+            ),
+            exit = fadeOut(tween(120)) + scaleOut(
+                targetScale = 0.7f,
+                animationSpec = tween(120),
+            ),
+            modifier = Modifier.align(Alignment.Center),
         ) {
-            Box(
-                modifier = Modifier
-                    .align(if (pillBelow) Alignment.BottomCenter else Alignment.TopStart)
-                    .offset(y = if (pillBelow) 14.dp else 4.dp)
-                    .padding(horizontal = if (pillBelow) 0.dp else 4.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    text = "查看",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = colors.onPrimary,
-                )
+            val result = tracked.result
+            if (result != null) {
+                val sidePx = min(rect.width, rect.height)
+                val buttonWidth = with(density) {
+                    (sidePx * 0.58f).coerceIn(46.dp.toPx(), 120.dp.toPx()).toDp()
+                }
+                val buttonHeight = with(density) {
+                    (sidePx * 0.32f).coerceIn(28.dp.toPx(), 46.dp.toPx()).toDp()
+                }
+                val fontSize = with(density) {
+                    (sidePx * 0.15f).coerceIn(10.sp.toPx(), 16.sp.toPx()).toSp()
+                }
+                Box(
+                    modifier = Modifier
+                        .width(buttonWidth)
+                        .height(buttonHeight)
+                        .clip(RoundedCornerShape(50))
+                        .background(ScanAccent)
+                        .clickable { onView(result) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "查看",
+                        style = MiuixTheme.textStyles.footnote1.copy(
+                            fontSize = fontSize,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = Color.Black,
+                    )
+                }
             }
         }
     }
