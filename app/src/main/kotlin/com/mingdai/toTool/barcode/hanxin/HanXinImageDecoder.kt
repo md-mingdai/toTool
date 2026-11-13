@@ -14,11 +14,21 @@ import kotlin.math.roundToInt
  */
 object HanXinImageDecoder {
 
-    fun decode(binary: BitMatrix): String? {
+    data class Hit(
+        val text: String,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
+    fun decode(binary: BitMatrix): String? = decodeDetailed(binary)?.text
+
+    fun decodeDetailed(binary: BitMatrix): Hit? {
         return decodeOrientation(binary) ?: decodeOrientation(invert(binary))
     }
 
-    private fun decodeOrientation(binary: BitMatrix): String? {
+    private fun decodeOrientation(binary: BitMatrix): Hit? {
         val bounds = darkBounds(binary) ?: return null
         val width = bounds.right - bounds.left + 1
         val height = bounds.bottom - bounds.top + 1
@@ -43,7 +53,10 @@ object HanXinImageDecoder {
             val sampled = sample(binary, bounds, n)
             var rotated = sampled
             repeat(4) {
-                HanXinCodec.decode(rotated)?.let { return it }
+                val text = HanXinCodec.decode(rotated)
+                if (text != null) {
+                    return Hit(text, bounds.left, bounds.top, bounds.right, bounds.bottom)
+                }
                 rotated = rotate90(rotated)
             }
         }

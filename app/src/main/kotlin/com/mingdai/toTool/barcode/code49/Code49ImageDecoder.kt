@@ -12,20 +12,34 @@ import kotlin.math.min
  */
 object Code49ImageDecoder {
 
-    fun decode(binary: BitMatrix): String? =
+    data class Hit(
+        val text: String,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
+    fun decode(binary: BitMatrix): String? = decodeDetailed(binary)?.text
+
+    fun decodeDetailed(binary: BitMatrix): Hit? =
         decodeOrientation(binary) ?: decodeOrientation(invert(binary))
 
-    private fun decodeOrientation(binary: BitMatrix): String? {
+    private fun decodeOrientation(binary: BitMatrix): Hit? {
         val bounds = darkBounds(binary) ?: return null
         val width = bounds.right - bounds.left + 1
         val height = bounds.bottom - bounds.top + 1
         if (width < 10 || height < 4) return null
 
         sampleHorizontal(binary, bounds)?.let { matrix ->
-            tryVariants(matrix)?.let { return it }
+            tryVariants(matrix)?.let {
+                return Hit(it, bounds.left, bounds.top, bounds.right, bounds.bottom)
+            }
         }
         sampleVertical(binary, bounds)?.let { matrix ->
-            tryVariants(matrix)?.let { return it }
+            tryVariants(matrix)?.let {
+                return Hit(it, bounds.left, bounds.top, bounds.right, bounds.bottom)
+            }
         }
         return null
     }
