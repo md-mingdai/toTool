@@ -328,8 +328,12 @@ private fun QrColorDialog(
     }
 }
 
+/**
+ * 「二维码处理」页的内容：原来的二维码生成器，带颜色、中央图标等设置。
+ * 由「条码处理」的二维码页复用；单独打开时由 [QrTool] 套上标准 ToolBody。
+ */
 @Composable
-fun QrTool(padding: PaddingValues) {
+fun QrProcessPane() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val colors = MiuixTheme.colorScheme
@@ -414,7 +418,10 @@ fun QrTool(padding: PaddingValues) {
     val ratio = contrastRatio(fg.toArgb(), bg.toArgb())
     val inverted = relativeLuminance(fg.toArgb()) > relativeLuminance(bg.toArgb())
 
-    ToolBody(padding) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         TextField(
             value = text,
             onValueChange = { text = it },
@@ -567,6 +574,11 @@ fun QrTool(padding: PaddingValues) {
             pickingColor = null
         },
     )
+}
+
+@Composable
+fun QrTool(padding: PaddingValues) {
+    ToolBody(padding) { QrProcessPane() }
 }
 
 /* ------------------------------- 20. 颜色选择器 ----------------------------- */

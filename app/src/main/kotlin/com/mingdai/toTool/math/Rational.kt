@@ -32,6 +32,8 @@ class Rational private constructor(
             return Rational(n, d)
         }
 
+        fun of(value: Int): Rational = of(BigInteger.valueOf(value.toLong()))
+
         fun of(value: Long): Rational = of(BigInteger.valueOf(value))
 
         /** 解析十进制字面量（如 `12`、`0.25`、`.5`），解析失败返回 null。 */

@@ -73,7 +73,7 @@ data class Tool(
 object ToolRegistry {
     val all: List<Tool> = listOf(
         // --- 日常工具 ---
-        Tool("daily_qr", "二维码生成", "生成二维码，可换色、加中央图标并导出", ToolCategory.DAILY, Icons.Filled.QrCode),
+        Tool("daily_qr", "条码处理", "二维码、汉信码、Data Matrix、PDF 417、Code 49 与条形码的生成和扫描", ToolCategory.DAILY, Icons.Filled.QrCode),
         Tool("daily_color", "颜色选择器", "RGB 滑块取色与色值", ToolCategory.DAILY, Icons.Filled.Palette),
         Tool("daily_stopwatch", "秒表", "开始/暂停/分段计时", ToolCategory.DAILY, Icons.Filled.Timer),
         Tool("daily_flash", "手电筒", "常亮照明与 SOS 求救闪烁", ToolCategory.DAILY, Icons.Filled.Highlight),

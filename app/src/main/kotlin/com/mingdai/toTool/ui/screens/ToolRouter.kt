@@ -53,7 +53,7 @@ import com.mingdai.toTool.ui.screens.tools.PasswordTool
 import com.mingdai.toTool.ui.screens.tools.PercentTool
 import com.mingdai.toTool.ui.screens.tools.PixelCheckFullscreen
 import com.mingdai.toTool.ui.screens.tools.ProtractorTool
-import com.mingdai.toTool.ui.screens.tools.QrTool
+import com.mingdai.toTool.ui.screens.tools.BarcodeTool
 import com.mingdai.toTool.ui.screens.tools.RulerTool
 import com.mingdai.toTool.ui.screens.tools.ScoreboardTool
 import com.mingdai.toTool.ui.screens.tools.SensorListTool
@@ -219,7 +219,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)
             "dev_wallpaper_video" -> VideoWallpaperTool(padding)
             // --- 日常工具 ---
-            "daily_qr" -> QrTool(padding)
+            "daily_qr" -> BarcodeTool(padding)
             "daily_color" -> ColorTool(padding)
             "daily_stopwatch" -> StopwatchTool(padding)
             "daily_flash" -> FlashlightTool(padding)

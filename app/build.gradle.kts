@@ -25,8 +25,8 @@ android {
         applicationId = "com.mingdai.toTool"
         minSdk = 28
         targetSdk = 36
-        versionCode = 43
-        versionName = "1.1.3"
+        versionCode = 44
+        versionName = "1.1.4"
 
         // 只打一个架构的 APK（见上面 abiFilter 的说明）；不限定时包含全部架构
         if (abiFilter.isNotEmpty()) {
@@ -146,6 +146,13 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4")
 
     implementation("com.google.zxing:core:3.5.3")
+
+    // 条码扫描：CameraX 负责相机预览与逐帧分析
+    val cameraX = "1.4.2"
+    implementation("androidx.camera:camera-core:$cameraX")
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
 
     // Shizuku：「执行 Shell 指令」工具通过它以 shell / root 权限运行命令
     implementation("dev.rikka.shizuku:api:13.1.5")
