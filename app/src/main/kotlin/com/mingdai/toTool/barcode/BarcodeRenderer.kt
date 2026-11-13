@@ -66,7 +66,14 @@ object BarcodeRenderer {
             else -> 200
         }
         return try {
-            MultiFormatWriter().encode(text, format, width, height, hints)
+            val matrix = MultiFormatWriter().encode(text, format, width, height, hints)
+            if (type == BarcodeType.DATA_MATRIX) {
+                // DataMatrixWriter 不处理 MARGIN 提示，按最小模块宽度补两圈静区
+                val module = minimumRun(matrix)
+                addQuietZone(matrix, maxOf(2, module * 2))
+            } else {
+                matrix
+            }
         } catch (e: WriterException) {
             throw IllegalArgumentException(e.message ?: "无法生成，请检查内容格式")
         } catch (e: IllegalArgumentException) {
@@ -118,6 +125,24 @@ object BarcodeRenderer {
         BarcodeType.HANXIN -> 3
         BarcodeType.CODE49 -> 10
         else -> 0
+    }
+
+    /** 估计缩放后的最小模块宽度（最短的黑 / 白连续段）。 */
+    private fun minimumRun(matrix: BitMatrix): Int {
+        var minimum = Int.MAX_VALUE
+        for (y in 0 until matrix.height) {
+            var x = 0
+            while (x < matrix.width) {
+                val dark = matrix[x, y]
+                var run = 0
+                while (x < matrix.width && matrix[x, y] == dark) {
+                    run++
+                    x++
+                }
+                if (run < minimum) minimum = run
+            }
+        }
+        return if (minimum == Int.MAX_VALUE) 2 else minimum
     }
 
     private fun addQuietZone(matrix: BitMatrix, zone: Int): BitMatrix {
