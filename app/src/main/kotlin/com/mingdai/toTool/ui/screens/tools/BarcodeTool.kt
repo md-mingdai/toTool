@@ -578,6 +578,7 @@ private fun CameraScanner(
 
     DisposableEffect(lifecycleOwner, retryKey) {
         camera = null
+        torchOn = false
         cameraReady = false
         cameraError = null
         var disposed = false
@@ -780,6 +781,7 @@ private fun DetectionBoxes(
         val left = (centerX - boxW / 2f).coerceIn(0f, (viewW - boxW).coerceAtLeast(0f))
         val top = (centerY - boxH / 2f).coerceIn(0f, (viewH - boxH).coerceAtLeast(0f))
 
+        val pillBelow = top + boxH + with(density) { 44.dp.toPx() } <= viewH
         Box(
             modifier = Modifier
                 .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
@@ -792,8 +794,9 @@ private fun DetectionBoxes(
         ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = 14.dp)
+                    .align(if (pillBelow) Alignment.BottomCenter else Alignment.TopStart)
+                    .offset(y = if (pillBelow) 14.dp else 4.dp)
+                    .padding(horizontal = if (pillBelow) 0.dp else 4.dp)
                     .clip(RoundedCornerShape(50))
                     .background(colors.primary)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
