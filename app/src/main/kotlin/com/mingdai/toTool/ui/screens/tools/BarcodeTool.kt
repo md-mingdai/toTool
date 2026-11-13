@@ -396,6 +396,7 @@ private data class TrackedCode(
     val result: ScanResult?,
     val lastSeen: Long,
     val lastCandidateSeen: Long,
+    val lastResultSeen: Long,
     val hits: Int,
 )
 
@@ -472,8 +473,13 @@ private fun BarcodeScannerPane() {
             delay(300)
             val now = System.currentTimeMillis()
             tracked.entries.toList().forEach { (id, code) ->
-                val timeout = if (code.result == null) 700L else 1000L
-                if (now - code.lastSeen > timeout) tracked.remove(id)
+                val expired = if (code.result == null) {
+                    now - code.lastSeen > 700L
+                } else {
+                    // 解码结果只按“最近一次真正解码成功”计时，误检候选框不能无限续命
+                    now - code.lastResultSeen > 1200L
+                }
+                if (expired) tracked.remove(id)
             }
         }
     }
@@ -512,6 +518,7 @@ private fun BarcodeScannerPane() {
                     result = null,
                     lastSeen = now,
                     lastCandidateSeen = now,
+                    lastResultSeen = 0L,
                     hits = 1,
                 )
             }
@@ -519,7 +526,7 @@ private fun BarcodeScannerPane() {
         // 这一帧没再检出的 QR 框立即进入过期倒计时，避免移出画面后还在乱跳
         val cutoff = now - 450
         tracked.entries.toList().forEach { (id, code) ->
-            if (id !in used && code.lastCandidateSeen in 1L..cutoff) {
+            if (id !in used && code.result == null && code.lastCandidateSeen in 1L..cutoff) {
                 tracked.remove(id)
             }
         }
@@ -545,6 +552,7 @@ private fun BarcodeScannerPane() {
                     frameHeight = if (candidateBoundsFresh) match.frameHeight else result.frameHeight,
                     result = result,
                     lastSeen = now,
+                    lastResultSeen = now,
                     hits = max(match.hits, 2),
                 )
             } else {
@@ -558,6 +566,7 @@ private fun BarcodeScannerPane() {
                     result = result,
                     lastSeen = now,
                     lastCandidateSeen = 0L,
+                    lastResultSeen = now,
                     hits = 2,
                 )
             }
