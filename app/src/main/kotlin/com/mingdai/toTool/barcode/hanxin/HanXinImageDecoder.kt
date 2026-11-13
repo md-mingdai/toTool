@@ -122,7 +122,7 @@ object HanXinImageDecoder {
         val result = BitMatrix(matrix.height, matrix.width)
         for (y in 0 until matrix.height) {
             for (x in 0 until matrix.width) {
-                if (matrix[x, y]) result[matrix.height - 1 - y, x] = true
+                if (matrix[x, y]) result.set(matrix.height - 1 - y, x)
             }
         }
         return result

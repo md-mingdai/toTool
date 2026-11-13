@@ -425,7 +425,7 @@ internal object HanXinMatrixCodec {
         for (y in 0 until size) {
             for (x in 0 until size) {
                 if (functionGrid[y * size + x] == 0 && maskApplies(x, y, mask)) {
-                    matrix[x, y] = !matrix[x, y]
+                    matrix.flip(x, y)
                 }
             }
         }
@@ -444,7 +444,7 @@ internal object HanXinMatrixCodec {
     private fun toMatrix(grid: IntArray, size: Int): BitMatrix {
         val result = BitMatrix(size, size)
         for (i in grid.indices) {
-            if ((grid[i] and 1) != 0) result[i % size, i / size] = true
+            if ((grid[i] and 1) != 0) result.set(i % size, i / size)
         }
         return result
     }

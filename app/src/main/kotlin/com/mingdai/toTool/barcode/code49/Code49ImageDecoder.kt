@@ -22,10 +22,10 @@ object Code49ImageDecoder {
         if (width < 10 || height < 4) return null
 
         sampleHorizontal(binary, bounds)?.let { matrix ->
-            Code49Codec.decode(matrix)?.let { return it }
+            tryVariants(matrix)?.let { return it }
         }
         sampleVertical(binary, bounds)?.let { matrix ->
-            Code49Codec.decode(matrix)?.let { return it }
+            tryVariants(matrix)?.let { return it }
         }
         return null
     }
@@ -49,6 +49,35 @@ object Code49ImageDecoder {
         }
         if (right < left || bottom < top) return null
         return Bounds(left, top, right, bottom)
+    }
+
+    /** 旋转 180° 或翻转拍摄时，行序 / 列序会反过来；把四种方向都试一遍。 */
+    private fun tryVariants(matrix: BitMatrix): String? {
+        Code49Codec.decode(matrix)?.let { return it }
+        Code49Codec.decode(reverseColumns(matrix))?.let { return it }
+        Code49Codec.decode(reverseRows(matrix))?.let { return it }
+        Code49Codec.decode(reverseColumns(reverseRows(matrix)))?.let { return it }
+        return null
+    }
+
+    private fun reverseColumns(matrix: BitMatrix): BitMatrix {
+        val result = BitMatrix(matrix.width, matrix.height)
+        for (y in 0 until matrix.height) {
+            for (x in 0 until matrix.width) {
+                if (matrix[matrix.width - 1 - x, y]) result.set(x, y)
+            }
+        }
+        return result
+    }
+
+    private fun reverseRows(matrix: BitMatrix): BitMatrix {
+        val result = BitMatrix(matrix.width, matrix.height)
+        for (y in 0 until matrix.height) {
+            for (x in 0 until matrix.width) {
+                if (matrix[x, matrix.height - 1 - y]) result.set(x, y)
+            }
+        }
+        return result
     }
 
     private fun sampleHorizontal(matrix: BitMatrix, bounds: Bounds): BitMatrix? {

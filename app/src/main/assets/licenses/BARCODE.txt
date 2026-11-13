@@ -1,0 +1,45 @@
+条码处理（汉信码 / Code 49）实现的开源许可说明
+================================================
+
+本项目的汉信码（Han Xin Code）矩阵布局、纠错和数据段实现，以及 Code 49
+编码 / 解码实现，参考并移植自以下开源项目：
+
+1. CodeGlyphX
+   https://github.com/EvotecIT/CodeGlyphX
+   Copyright (c) Przemyslaw Klys / Evotec Services sp. z o.o.
+   Licensed under the Apache License, Version 2.0.
+   其中汉信码 / Code 49 的相关代码又改编自 Zint 后端。
+
+2. Zint / libzint
+   https://github.com/zint/zint
+   Copyright (C) 2009-2022 Robin Stuart and contributors.
+   The encoding library is licensed under the BSD 3-Clause License:
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions are met:
+
+   1. Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+   2. Redistributions in binary form must reproduce the above copyright notice,
+      this list of conditions and the following disclaimer in the documentation
+      and/or other materials provided with the distribution.
+   3. Neither the name of the project nor the names of its contributors may be
+      used to endorse or promote products derived from this software without
+      specific prior written permission.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+   POSSIBILITY OF SUCH DAMAGE.
+
+3. ZXing
+   https://github.com/zxing/zxing
+   Licensed under the Apache License, Version 2.0；用于 QR、Data Matrix、
+   PDF 417 和常见一维条码的生成与识别。

@@ -22,8 +22,19 @@ object BarcodeRenderer {
 
         if (type.isCustom) {
             return when (type) {
-                BarcodeType.HANXIN -> HanXinCodec.encode(text, (option + 1).coerceIn(1, 4))
-                BarcodeType.CODE49 -> Code49Codec.encode(text)
+                BarcodeType.HANXIN -> {
+                    val matrix = HanXinCodec.encode(text, (option + 1).coerceIn(1, 4))
+                    // 自检：编码结果必须能被本项目解码器读回，避免输出无法识别的码
+                    check(HanXinCodec.decode(matrix) == text) { "汉信码编码自检失败" }
+                    matrix
+                }
+
+                BarcodeType.CODE49 -> {
+                    val matrix = Code49Codec.encode(text)
+                    check(Code49Codec.decode(matrix) == text) { "Code 49 编码自检失败" }
+                    matrix
+                }
+
                 else -> throw IllegalArgumentException("不支持的条码类型")
             }
         }
@@ -47,8 +58,13 @@ object BarcodeRenderer {
             else -> Unit
         }
 
-        val width = 0
-        val height = if (type.isTwoD) 0 else 200
+        // DataMatrixWriter 在请求尺寸小于矩阵时会算出 0 倍缩放，必须给一个足够大的正尺寸
+        val width = if (type == BarcodeType.DATA_MATRIX) 1200 else 0
+        val height = when {
+            type == BarcodeType.DATA_MATRIX -> 1200
+            type.isTwoD -> 0
+            else -> 200
+        }
         return try {
             MultiFormatWriter().encode(text, format, width, height, hints)
         } catch (e: WriterException) {

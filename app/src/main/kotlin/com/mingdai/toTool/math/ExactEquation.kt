@@ -215,7 +215,7 @@ private fun tokenizeExact(source: String): List<ExactToken> {
                 i++
             }
 
-            ch == '√' || ch.isLetter() -> {
+            ch == '√' || ch == '%' || ch.isLetter() -> {
                 throw NotPolynomialException("方程含函数、根号或常数，改用数值求解")
             }
 
