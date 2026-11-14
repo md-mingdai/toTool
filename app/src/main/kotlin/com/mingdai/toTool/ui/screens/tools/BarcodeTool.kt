@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -75,10 +76,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -402,12 +407,12 @@ private data class TrackedCode(
     val lastResultSeen: Long,
 )
 
-private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
+private fun matchScore(a: ScanBounds, b: ScanBounds, minSizeRatio: Float = 0.18f): Float {
     val areaA = (a.right - a.left) * (a.bottom - a.top)
     val areaB = (b.right - b.left) * (b.bottom - b.top)
     val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
     // 尺寸差太多说明不是同一个码，避免把一个小结果挂到巨大的误检框上
-    if (sizeRatio < 0.18f) return 0f
+    if (sizeRatio < minSizeRatio) return 0f
     val ix = max(0f, min(a.right, b.right) - max(a.left, b.left))
     val iy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
     val intersection = ix * iy
@@ -539,7 +544,7 @@ private fun BarcodeScannerPane() {
             val bounds = result.bounds ?: return@forEach
             val match = tracked.values
                 .filter { it.id !in used }
-                .map { it to matchScore(it.bounds, bounds) }
+                .map { it to matchScore(it.bounds, bounds, minSizeRatio = 0.35f) }
                 .filter { it.second > 0.005f }
                 .maxByOrNull { it.second }
                 ?.first
@@ -844,15 +849,23 @@ private fun CameraScanner(
             factory = { previewView },
             modifier = Modifier.fillMaxSize(),
         )
-        ScanGuideOverlay(Modifier.fillMaxSize())
-        Text(
-            text = "将二维码或条码放入框内",
-            style = MiuixTheme.textStyles.footnote1,
-            color = Color.White.copy(alpha = 0.92f),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 18.dp),
-        )
+        ScanGuideOverlay(Modifier.fillMaxSize(), hasFound = tracked.isNotEmpty())
+        if (previewSize != IntSize.Zero) {
+            val density = LocalDensity.current
+            val side = min(previewSize.width, previewSize.height) * 0.66f
+            val frameTop = previewSize.height / 2f - with(density) { 20.dp.toPx() } - side / 2f
+            val titleY = (frameTop - with(density) { 42.dp.toPx() })
+                .coerceAtLeast(with(density) { 8.dp.toPx() })
+            Text(
+                text = "将二维码或条码放入框内",
+                style = MiuixTheme.textStyles.footnote1,
+                color = Color.White.copy(alpha = 0.92f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(0, titleY.roundToInt()) },
+            )
+        }
         if (previewSize != IntSize.Zero) {
             TrackedCodeOverlays(
                 tracked = tracked,
@@ -865,7 +878,11 @@ private fun CameraScanner(
                 torchOn = !torchOn
                 runCatching { camera?.cameraControl?.enableTorch(torchOn) }
             },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.28f)),
         ) {
             Icon(
                 imageVector = if (torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
@@ -887,53 +904,65 @@ private fun CameraScanner(
 }
 
 @Composable
-private fun ScanGuideOverlay(modifier: Modifier = Modifier) {
-    val primary = MiuixTheme.colorScheme.primary
-    val transition = rememberInfiniteTransition(label = "barcode-scan")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "scan-line",
+private fun ScanGuideOverlay(modifier: Modifier = Modifier, hasFound: Boolean) {
+    val guideAlpha by animateFloatAsState(
+        targetValue = if (hasFound) 0f else 1f,
+        animationSpec = tween(durationMillis = 180),
+        label = "guide-corners",
     )
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val side = min(w, h) * 0.74f
+        // Telegram：取景框为短边的 66%，中心上移 20dp，圆角 14dp
+        val side = min(w, h) * 0.66f
+        val centerY = h / 2f - 20.dp.toPx()
         val left = (w - side) / 2f
-        val top = (h - side) / 2f
+        val top = centerY - side / 2f
         val right = left + side
         val bottom = top + side
+        val radius = 14.dp.toPx()
 
-        val scrim = Color.Black.copy(alpha = 0.28f)
-        drawRect(scrim, topLeft = Offset(0f, 0f), size = Size(w, top))
-        drawRect(scrim, topLeft = Offset(0f, bottom), size = Size(w, h - bottom))
-        drawRect(scrim, topLeft = Offset(0f, top), size = Size(left, side))
-        drawRect(scrim, topLeft = Offset(right, top), size = Size(w - right, side))
+        // 25% 黑遮罩，中间挖一个圆角矩形
+        val scrim = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRect(Rect(0f, 0f, w, h))
+            addRoundRect(RoundRect(Rect(left, top, right, bottom), CornerRadius(radius)))
+        }
+        drawPath(scrim, Color.Black.copy(alpha = 0.28f))
 
-        val corner = side * 0.12f
-        val stroke = 3.dp.toPx()
-        val white = Color.White.copy(alpha = 0.95f)
-        drawLine(white, Offset(left, top), Offset(left + corner, top), stroke, StrokeCap.Round)
-        drawLine(white, Offset(left, top), Offset(left, top + corner), stroke, StrokeCap.Round)
-        drawLine(white, Offset(right - corner, top), Offset(right, top), stroke, StrokeCap.Round)
-        drawLine(white, Offset(right, top), Offset(right, top + corner), stroke, StrokeCap.Round)
-        drawLine(white, Offset(left, bottom - corner), Offset(left, bottom), stroke, StrokeCap.Round)
-        drawLine(white, Offset(left, bottom), Offset(left + corner, bottom), stroke, StrokeCap.Round)
-        drawLine(white, Offset(right - corner, bottom), Offset(right, bottom), stroke, StrokeCap.Round)
-        drawLine(white, Offset(right, bottom - corner), Offset(right, bottom), stroke, StrokeCap.Round)
+        if (guideAlpha > 0.01f) {
+            val arm = 28.dp.toPx()
+            val guide = Path().apply {
+                moveTo(left, top + arm)
+                lineTo(left, top + radius)
+                quadraticTo(left, top, left + radius, top)
+                lineTo(left + arm, top)
 
-        val lineY = top + side * progress
-        drawLine(
-            color = primary.copy(alpha = 0.8f),
-            start = Offset(left + 10.dp.toPx(), lineY),
-            end = Offset(right - 10.dp.toPx(), lineY),
-            strokeWidth = 2.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
+                moveTo(right - arm, top)
+                lineTo(right - radius, top)
+                quadraticTo(right, top, right, top + radius)
+                lineTo(right, top + arm)
+
+                moveTo(right, bottom - arm)
+                lineTo(right, bottom - radius)
+                quadraticTo(right, bottom, right - radius, bottom)
+                lineTo(right - arm, bottom)
+
+                moveTo(left + arm, bottom)
+                lineTo(left + radius, bottom)
+                quadraticTo(left, bottom, left, bottom - radius)
+                lineTo(left, bottom - arm)
+            }
+            drawPath(
+                path = guide,
+                color = Color.White.copy(alpha = guideAlpha),
+                style = Stroke(
+                    width = 4.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
+        }
     }
 }
 
@@ -1016,7 +1045,7 @@ private fun TrackedCodeFrame(
                 height = with(density) { rect.height.toDp() },
             )
             .graphicsLayer {
-                val scale = 0.80f + 0.20f * appearance.value
+                val scale = 0.60f + 0.40f * appearance.value
                 alpha = appearance.value
                 scaleX = scale
                 scaleY = scale
@@ -1026,12 +1055,13 @@ private fun TrackedCodeFrame(
             val w = size.width
             val h = size.height
             // Telegram 的角标：每个角画两条 18% 长的边，圆角连接，不画完整矩形
-            val arm = min(w, h) * 0.18f
+            val armX = w * 0.18f
+            val armY = h * 0.18f
             val path = Path().apply {
-                moveTo(arm, 0f); lineTo(0f, 0f); lineTo(0f, arm)
-                moveTo(w - arm, 0f); lineTo(w, 0f); lineTo(w, arm)
-                moveTo(0f, h - arm); lineTo(0f, h); lineTo(arm, h)
-                moveTo(w, h - arm); lineTo(w, h); lineTo(w - arm, h)
+                moveTo(armX, 0f); lineTo(0f, 0f); lineTo(0f, armY)
+                moveTo(w - armX, 0f); lineTo(w, 0f); lineTo(w, armY)
+                moveTo(0f, h - armY); lineTo(0f, h); lineTo(armX, h)
+                moveTo(w, h - armY); lineTo(w, h); lineTo(w - armX, h)
             }
             val stroke = 6.dp.toPx()
             drawPath(
