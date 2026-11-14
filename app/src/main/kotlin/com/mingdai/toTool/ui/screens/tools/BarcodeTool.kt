@@ -20,6 +20,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -74,12 +75,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -397,7 +400,6 @@ private data class TrackedCode(
     val lastSeen: Long,
     val lastCandidateSeen: Long,
     val lastResultSeen: Long,
-    val hits: Int,
 )
 
 private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
@@ -405,7 +407,7 @@ private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
     val areaB = (b.right - b.left) * (b.bottom - b.top)
     val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
     // 尺寸差太多说明不是同一个码，避免把一个小结果挂到巨大的误检框上
-    if (sizeRatio < 0.28f) return 0f
+    if (sizeRatio < 0.18f) return 0f
     val ix = max(0f, min(a.right, b.right) - max(a.left, b.left))
     val iy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
     val intersection = ix * iy
@@ -416,7 +418,7 @@ private fun matchScore(a: ScanBounds, b: ScanBounds): Float {
     val dx = ((a.left + a.right) - (b.left + b.right)) / 2f
     val dy = ((a.top + a.bottom) - (b.top + b.bottom)) / 2f
     val distance = kotlin.math.hypot(dx, dy)
-    return if (distance < 0.07f) 0.015f else 0f
+    return if (distance < 0.10f) 0.015f else 0f
 }
 
 private data class OverlayRect(
@@ -477,7 +479,7 @@ private fun BarcodeScannerPane() {
                     now - code.lastSeen > 700L
                 } else {
                     // 解码结果只按“最近一次真正解码成功”计时，误检候选框不能无限续命
-                    now - code.lastResultSeen > 1200L
+                    now - code.lastResultSeen > 1000L
                 }
                 if (expired) tracked.remove(id)
             }
@@ -505,7 +507,6 @@ private fun BarcodeScannerPane() {
                     frameHeight = candidate.frameHeight,
                     lastSeen = now,
                     lastCandidateSeen = now,
-                    hits = (match.hits + 1).coerceAtMost(6),
                 )
             } else {
                 val id = nextTrackId
@@ -519,12 +520,11 @@ private fun BarcodeScannerPane() {
                     lastSeen = now,
                     lastCandidateSeen = now,
                     lastResultSeen = 0L,
-                    hits = 1,
                 )
             }
         }
         // 这一帧没再检出的 QR 框立即进入过期倒计时，避免移出画面后还在乱跳
-        val cutoff = now - 450
+        val cutoff = now - 350
         tracked.entries.toList().forEach { (id, code) ->
             if (id !in used && code.result == null && code.lastCandidateSeen in 1L..cutoff) {
                 tracked.remove(id)
@@ -553,7 +553,6 @@ private fun BarcodeScannerPane() {
                     result = result,
                     lastSeen = now,
                     lastResultSeen = now,
-                    hits = max(match.hits, 2),
                 )
             } else {
                 val id = nextTrackId
@@ -567,7 +566,6 @@ private fun BarcodeScannerPane() {
                     lastSeen = now,
                     lastCandidateSeen = 0L,
                     lastResultSeen = now,
-                    hits = 2,
                 )
             }
         }
@@ -761,13 +759,13 @@ private fun CameraScanner(
                         boundProvider = provider
                         // 预览和分析统一成 4:3，保证 FILL_CENTER 下框与码严格对齐
                         val preview = Preview.Builder()
-                            .setTargetResolution(android.util.Size(1280, 960))
+                            .setTargetResolution(android.util.Size(960, 720))
                             .build()
                             .apply {
                                 setSurfaceProvider(previewView.surfaceProvider)
                             }
                         val analysis = ImageAnalysis.Builder()
-                            .setTargetResolution(android.util.Size(1280, 960))
+                            .setTargetResolution(android.util.Size(960, 720))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                             .build()
@@ -776,9 +774,10 @@ private fun CameraScanner(
                                 val rotation = image.imageInfo.rotationDegrees
                                 val upright = rotateBitmap(image.toBitmap(), rotation)
                                 val scaled = scaleDown(upright, 1280)
+                                val detectBitmap = scaleDown(upright, 720)
 
                                 // 定位只做轻量检测，每一帧都发候选框，框才能跟手
-                                val candidates = BarcodeScanner.detect(scaled)
+                                val candidates = BarcodeScanner.detect(detectBitmap)
                                 if (active.get()) {
                                     Handler(Looper.getMainLooper()).post {
                                         candidatesCallback.value(candidates)
@@ -909,7 +908,7 @@ private fun ScanGuideOverlay(modifier: Modifier = Modifier) {
         val right = left + side
         val bottom = top + side
 
-        val scrim = Color.Black.copy(alpha = 0.46f)
+        val scrim = Color.Black.copy(alpha = 0.28f)
         drawRect(scrim, topLeft = Offset(0f, 0f), size = Size(w, top))
         drawRect(scrim, topLeft = Offset(0f, bottom), size = Size(w, h - bottom))
         drawRect(scrim, topLeft = Offset(0f, top), size = Size(left, side))
@@ -959,9 +958,19 @@ private fun TrackedCodeFrame(
 ) {
     val density = LocalDensity.current
     val boundsAnimation = tween<Float>(
-        durationMillis = 180,
+        durationMillis = 140,
         easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
     )
+    val appearance = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appearance.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = 180,
+                easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+            ),
+        )
+    }
     val left by animateFloatAsState(
         targetValue = tracked.bounds.left,
         animationSpec = boundsAnimation,
@@ -993,8 +1002,6 @@ private fun TrackedCodeFrame(
     ) ?: return
 
     val decoded = tracked.result != null
-    // 候选框至少连续出现两帧才画，过滤掉只闪一下的误检
-    if (!decoded && tracked.hits < 2) return
     val frameAlpha by animateFloatAsState(
         targetValue = if (decoded) 1f else 0.62f,
         animationSpec = tween(durationMillis = 200),
@@ -1007,32 +1014,44 @@ private fun TrackedCodeFrame(
             .size(
                 width = with(density) { rect.width.toDp() },
                 height = with(density) { rect.height.toDp() },
-            ),
+            )
+            .graphicsLayer {
+                val scale = 0.80f + 0.20f * appearance.value
+                alpha = appearance.value
+                scaleX = scale
+                scaleY = scale
+            },
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            val stroke = 3.dp.toPx()
-            val color = ScanAccent.copy(alpha = frameAlpha)
-            drawRoundRect(
-                color = color.copy(alpha = 0.26f * frameAlpha),
-                topLeft = Offset(stroke / 2f, stroke / 2f),
-                size = Size(
-                    (w - stroke).coerceAtLeast(0f),
-                    (h - stroke).coerceAtLeast(0f),
+            // Telegram 的角标：每个角画两条 18% 长的边，圆角连接，不画完整矩形
+            val arm = min(w, h) * 0.18f
+            val path = Path().apply {
+                moveTo(arm, 0f); lineTo(0f, 0f); lineTo(0f, arm)
+                moveTo(w - arm, 0f); lineTo(w, 0f); lineTo(w, arm)
+                moveTo(0f, h - arm); lineTo(0f, h); lineTo(arm, h)
+                moveTo(w, h - arm); lineTo(w, h); lineTo(w - arm, h)
+            }
+            val stroke = 6.dp.toPx()
+            drawPath(
+                path = path,
+                color = Color.Black.copy(alpha = 0.18f * frameAlpha),
+                style = Stroke(
+                    width = stroke * 1.7f,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
                 ),
-                cornerRadius = CornerRadius(12.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx()),
             )
-            val corner = min(w, h) * 0.18f
-            drawLine(color, Offset(0f, 0f), Offset(corner, 0f), stroke, StrokeCap.Round)
-            drawLine(color, Offset(0f, 0f), Offset(0f, corner), stroke, StrokeCap.Round)
-            drawLine(color, Offset(w - corner, 0f), Offset(w, 0f), stroke, StrokeCap.Round)
-            drawLine(color, Offset(w, 0f), Offset(w, corner), stroke, StrokeCap.Round)
-            drawLine(color, Offset(0f, h - corner), Offset(0f, h), stroke, StrokeCap.Round)
-            drawLine(color, Offset(0f, h), Offset(corner, h), stroke, StrokeCap.Round)
-            drawLine(color, Offset(w - corner, h), Offset(w, h), stroke, StrokeCap.Round)
-            drawLine(color, Offset(w, h - corner), Offset(w, h), stroke, StrokeCap.Round)
+            drawPath(
+                path = path,
+                color = ScanAccent.copy(alpha = frameAlpha),
+                style = Stroke(
+                    width = stroke,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
         }
 
         AnimatedVisibility(

@@ -25,8 +25,8 @@ android {
         applicationId = "com.mingdai.toTool"
         minSdk = 28
         targetSdk = 36
-        versionCode = 48
-        versionName = "1.1.8"
+        versionCode = 49
+        versionName = "1.1.9"
 
         // 只打一个架构的 APK（见上面 abiFilter 的说明）；不限定时包含全部架构
         if (abiFilter.isNotEmpty()) {

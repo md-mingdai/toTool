@@ -184,11 +184,11 @@ object BarcodeScanner {
             val bounds = boundsFromPoints(points, width, height) ?: return
             val w = bounds.right - bounds.left
             val h = bounds.bottom - bounds.top
-            if (w < 0.02f || h < 0.02f) return
-            if (w > 0.92f || h > 0.92f) return
+            if (w < 0.015f || h < 0.015f) return
+            if (w > 0.96f || h > 0.96f) return
             val aspect = w / h.coerceAtLeast(1e-4f)
-            if (aspect < 0.45f || aspect > 2.2f) return
-            if (w * h > 0.58f) return
+            if (aspect < 0.35f || aspect > 2.8f) return
+            if (w * h > 0.75f) return
             val candidate = ScanCandidate(bounds, width, height)
             if (candidates.none { candidateKey(it.bounds) == candidateKey(bounds) }) {
                 candidates.add(candidate)
@@ -196,7 +196,7 @@ object BarcodeScanner {
         }
 
         runCatching {
-            MultiDetector(matrix).detectMulti(emptyMap<DecodeHintType, Any>())
+            MultiDetector(matrix).detectMulti(mapOf(DecodeHintType.TRY_HARDER to true))
         }.getOrNull()?.forEach { add(it.points) }
 
         return candidates.take(12)
