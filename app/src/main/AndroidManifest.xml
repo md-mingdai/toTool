@@ -33,6 +33,7 @@
          Android 13+          -> only MANAGE_EXTERNAL_STORAGE ("All files access") returns the real
                                  wallpaper; without it the system hands back the default wallpaper or throws. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
 
     <application
@@ -43,6 +44,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ToolyBox"
         android:enableOnBackInvokedCallback="true"
+        android:requestLegacyExternalStorage="true"
         tools:targetApi="36">
 
         <activity

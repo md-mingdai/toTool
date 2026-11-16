@@ -139,9 +139,34 @@ class Prefs(context: Context) {
         sp.edit().remove(KEY_FFMPEG_HISTORY).apply()
     }
 
+    /** 隔空闪传：是否使用用户自定义的 6 位配对码。 */
+    fun flashDropCustomCodeEnabled(): Boolean = sp.getBoolean(KEY_FLASHDROP_CUSTOM_ENABLED, false)
+
+    fun setFlashDropCustomCodeEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_FLASHDROP_CUSTOM_ENABLED, value).apply()
+    }
+
+    /** 隔空闪传：用户自定义的 6 位配对码；未设置或格式不对时返回空串。 */
+    fun flashDropCustomCode(): String =
+        (sp.getString(KEY_FLASHDROP_CUSTOM_CODE, "") ?: "").filter(Char::isDigit).take(6)
+
+    fun setFlashDropCustomCode(value: String) {
+        sp.edit().putString(KEY_FLASHDROP_CUSTOM_CODE, value.filter(Char::isDigit).take(6)).apply()
+    }
+
+    /** 隔空闪传：文件内容是否使用配对码派生的密钥做 AES-GCM 加密。 */
+    fun flashDropEncryptionEnabled(): Boolean = sp.getBoolean(KEY_FLASHDROP_ENCRYPTION, false)
+
+    fun setFlashDropEncryptionEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_FLASHDROP_ENCRYPTION, value).apply()
+    }
+
     private companion object {
         const val KEY_FFMPEG_DRAFT = "ffmpeg_draft"
         const val KEY_FFMPEG_HISTORY = "ffmpeg_history"
+        const val KEY_FLASHDROP_CUSTOM_ENABLED = "flashdrop_custom_code_enabled"
+        const val KEY_FLASHDROP_CUSTOM_CODE = "flashdrop_custom_code"
+        const val KEY_FLASHDROP_ENCRYPTION = "flashdrop_encryption"
 
         /** 历史命令之间的分隔符：命令里可能有换行、空格，用一个不会出现在命令里的控制字符隔开。 */
         const val HISTORY_SEPARATOR = '\u0001'

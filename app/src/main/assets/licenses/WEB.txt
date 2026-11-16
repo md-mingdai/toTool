@@ -1,0 +1,32 @@
+隔空闪传网页前端的开源许可说明
+==================================
+
+网页前端位于仓库 web/，构建后由手机端的隔空闪传服务提供。
+
+1. React
+   https://react.dev
+   MIT License
+
+2. Vite
+   https://vite.dev
+   MIT License
+
+3. Phosphor Icons
+   https://phosphoricons.com
+   MIT License
+
+4. @noble/ciphers、@noble/hashes
+   https://github.com/paulmillr/noble-ciphers
+   https://github.com/paulmillr/noble-hashes
+   MIT License
+
+5. Space Grotesk、JetBrains Mono
+   https://fonts.google.com/specimen/Space+Grotesk
+   https://www.jetbrains.com/lp/mono/
+   SIL Open Font License 1.1
+
+6. NanoHTTPD
+   https://github.com/NanoHttpd/nanohttpd
+   BSD 3-Clause License
+
+完整的许可证文本可在各自的软件包中查看。

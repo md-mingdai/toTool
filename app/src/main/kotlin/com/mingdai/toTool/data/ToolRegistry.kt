@@ -102,6 +102,7 @@ object ToolRegistry {
         Tool("calc_equation", "方程求解", "输入含一个未知数的方程，数值扫描求实根", ToolCategory.CALC, Icons.Filled.Functions),
         Tool("calc_plot", "函数绘图", "多条曲线、缩放平移与点按取值", ToolCategory.CALC, Icons.Filled.ShowChart),
         // --- 设备工具 ---
+        Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.DEVICE, Icons.Filled.Devices),
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
         Tool("dev_battery", "电池信息", "电量、状态与温度", ToolCategory.DEVICE, Icons.Filled.BatteryFull),
         Tool("dev_network", "网络信息", "连接类型与本地 IP", ToolCategory.DEVICE, Icons.Filled.Wifi),

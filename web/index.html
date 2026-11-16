@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f2f3ec" />
+    <meta name="description" content="隔空闪传：用电脑浏览器管理手机文件。手机作为后端，配对码直连，不经过云端。" />
+    <title>隔空闪传 · 手机文件</title>
+    <script>
+      try {
+        const storedTheme = localStorage.getItem('flashdrop-theme')
+        if (storedTheme === 'light' || storedTheme === 'dark') {
+          document.documentElement.dataset.theme = storedTheme
+          document.documentElement.style.colorScheme = storedTheme
+        }
+      } catch (error) {
+        // 隐私模式下无法读取 localStorage，保持默认亮色
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
