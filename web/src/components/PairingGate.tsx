@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import {
   ArrowRight,
   CircleNotch,
@@ -25,6 +26,8 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [shake, setShake] = useState(0)
+  const [lit, setLit] = useState(false)
+  const lightRef = useRef<HTMLSpanElement>(null)
   const inputRefs = useRef<Array<HTMLInputElement | null>>([])
 
   useEffect(() => {
@@ -32,6 +35,7 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
     setDigits(Array(CODE_LENGTH).fill(''))
     setError('')
     setSubmitting(false)
+    setLit(false)
     const timer = window.setTimeout(() => inputRefs.current[0]?.focus(), 60)
     return () => window.clearTimeout(timer)
   }, [open])
@@ -94,12 +98,50 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
     }
   }
 
+  function handlePointerEnter(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'touch') return
+    setLit(true)
+    event.currentTarget.style.transition = 'transform 0.3s ease-out'
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'touch') return
+    const card = event.currentTarget
+    const light = lightRef.current
+    if (!light) return
+    const rect = card.getBoundingClientRect()
+    const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
+    const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height)
+    const size = 220
+    light.style.left = `${x - size / 2}px`
+    light.style.top = `${y - size / 2}px`
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const rotateX = ((y - rect.height / 2) / (rect.height / 2)) * 3
+    const rotateY = -((x - rect.width / 2) / (rect.width / 2)) * 3
+    card.style.transition = 'transform 0.1s ease-out'
+    card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`
+  }
+
+  function handlePointerLeave(event: ReactPointerEvent<HTMLDivElement>) {
+    setLit(false)
+    event.currentTarget.style.transition = 'transform 0.5s ease-out'
+    event.currentTarget.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg)'
+  }
+
   const host = typeof window !== 'undefined' ? window.location.host : ''
   const service = port ? `${host.split(':')[0]}:${port}` : host
 
   return (
     <div className="pair-overlay" role="dialog" aria-modal="true" aria-labelledby="pair-title">
-      <div className={`pair-card${shake ? ' is-shaking' : ''}`} key={shake}>
+      <div
+        className={`pair-card${shake ? ' is-shaking' : ''}${lit ? ' is-lit' : ''}`}
+        key={shake}
+        onPointerEnter={handlePointerEnter}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
+        <span className={`pair-light${lit ? ' is-active' : ''}`} ref={lightRef} aria-hidden="true" />
+        <div className="pair-content">
         <div className="pair-top">
           <span className="pair-brand">
             <BrandMark size={38} />
@@ -238,6 +280,7 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
           <ShieldCheck size={13} weight="regular" aria-hidden="true" />
           手机端在 2233-2333 中自动选择可用端口
         </p>
+        </div>
       </div>
     </div>
   )

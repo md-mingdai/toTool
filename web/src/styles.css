@@ -1952,6 +1952,45 @@ input[type='checkbox'] {
   background: var(--surface);
   box-shadow: var(--shadow);
   animation: modal-in 0.3s var(--ease-soft);
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.pair-card.is-lit {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.pair-light {
+  position: absolute;
+  left: -100px;
+  top: -100px;
+  z-index: 0;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: var(--accent);
+  background: radial-gradient(
+    circle,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 72%, #78b83f) 52%,
+    transparent 74%
+  );
+  filter: blur(70px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease-out;
+  will-change: left, top, opacity;
+}
+
+.pair-light.is-active {
+  opacity: 0.76;
+}
+
+.pair-content {
+  position: relative;
+  z-index: 1;
 }
 
 .pair-card.is-shaking {
@@ -3386,6 +3425,10 @@ input[type='checkbox'] {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .pair-card {
+    transform: none !important;
   }
 }
 
