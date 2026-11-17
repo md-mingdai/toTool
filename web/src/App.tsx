@@ -472,8 +472,8 @@ export default function App() {
               const modified = first && 'modified' in first ? first.modified : previous.modified
               return {
                 ...previous,
-                itemCount: previous.itemCount || result.length,
-                size: previous.size || loadedSize,
+                itemCount: result.length,
+                size: loadedSize,
                 modified: previous.modified || modified,
               }
             })
@@ -900,7 +900,7 @@ export default function App() {
       <div
         className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${!paired ? ' is-locked' : ''}`}
         aria-hidden={!paired || undefined}
-        inert={!paired || Boolean(selected) || undefined}
+        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || undefined}
       >
         <Sidebar
           activeCategory={category}
