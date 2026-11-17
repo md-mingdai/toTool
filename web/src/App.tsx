@@ -977,6 +977,12 @@ export default function App() {
     }
   }, [handleDownload])
 
+  const handleCopyText = useCallback((text: string, label: string) => {
+    void copyToClipboard(text).then((copied) => {
+      setNotice(copied ? `已复制${label}` : '浏览器拒绝了剪贴板访问')
+    })
+  }, [])
+
   const handleCopy = useCallback((entry: FileEntry) => {
     const text = entry.text ?? entry.name
     void copyToClipboard(text).then((copied) => {
@@ -1147,7 +1153,9 @@ export default function App() {
               onGoUp={handleGoUp}
               onNavigatePath={handleNavigatePath}
               onOpenEntry={setSelected}
+              onOpenMedia={openMedia}
               onDownload={(entry) => void handleDownload(entry)}
+              onCopyText={handleCopyText}
               onUpload={() => openUploadQueue()}
               onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}

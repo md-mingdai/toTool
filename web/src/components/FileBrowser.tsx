@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   CaretRight,
   Check,
+  Copy,
   DownloadSimple,
   File as FileIcon,
   FileArchive,
@@ -14,7 +15,9 @@ import {
   FileX,
   Folder,
   Image as ImageIcon,
+  Info,
   Package,
+  PlayCircle,
   Plus,
   Trash,
   UploadSimple,
@@ -24,6 +27,8 @@ import {
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { categories, entryKindLabel, formatBytes, formatSpeed, totalBytes, transferPhaseLabel } from '../data'
+import { ContextMenu } from './ContextMenu'
+import type { ContextMenuItem } from './ContextMenu'
 import { Pagination } from './Pagination'
 import type {
   AppCounts,
@@ -62,7 +67,9 @@ interface FileBrowserProps {
   onGoUp: () => void
   onNavigatePath: (path: string) => void
   onOpenEntry: (entry: Entry) => void
+  onOpenMedia: (entry: FileEntry) => void
   onDownload: (entry: Entry) => void
+  onCopyText: (text: string, label: string) => void
   onUpload: () => void
   onClearQuery: () => void
   onRetry: () => void
@@ -235,6 +242,7 @@ function TransferList({
   onCancel,
   onDelete,
   onDeleteFile,
+  onCopyText,
 }: {
   transfers: TransferRecord[]
   onUpload: () => void
@@ -244,7 +252,9 @@ function TransferList({
   onCancel: (id: string) => void
   onDelete: (id: string) => void
   onDeleteFile: (record: TransferRecord) => void
+  onCopyText: (text: string, label: string) => void
 }) {
+  const [menu, setMenu] = useState<{ x: number; y: number; record: TransferRecord } | null>(null)
   if (transfers.length === 0) {
     return (
       <div className="empty-state">
@@ -265,6 +275,28 @@ function TransferList({
     )
   }
 
+  function transferContextItems(record: TransferRecord): ContextMenuItem[] {
+    const active = record.status === 'active'
+    const items: ContextMenuItem[] = [
+      { label: '复制文件名', icon: <Copy size={15} weight="regular" />, onSelect: () => onCopyText(record.name, '文件名') },
+      { label: '', separator: true, onSelect: () => {} },
+    ]
+    if (active) {
+      items.push({ label: '取消任务', icon: <X size={15} weight="regular" />, danger: true, onSelect: () => onCancel(record.id) })
+    } else {
+      if (record.direction === 'upload' && record.path) {
+        items.push({
+          label: '删除手机文件',
+          icon: <FileX size={15} weight="regular" />,
+          danger: true,
+          onSelect: () => onDeleteFile(record),
+        })
+      }
+      items.push({ label: '删除记录', icon: <Trash size={15} weight="regular" />, danger: true, onSelect: () => onDelete(record.id) })
+    }
+    return items
+  }
+
   return (
     <ul className="entry-list transfer-list">
       {transfers.map((record) => {
@@ -281,7 +313,15 @@ function TransferList({
               ? '已取消'
               : '失败'
         return (
-          <li className="entry-row transfer-row" key={record.id}>
+          <li
+            className="entry-row transfer-row"
+            key={record.id}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setMenu({ x: event.clientX, y: event.clientY, record })
+            }}
+          >
             <span className={`entry-tile transfer-tile ${uploading ? 'is-upload' : 'is-download'}`} aria-hidden="true">
               {record.status === 'done'
                 ? <Check size={19} weight="bold" />
@@ -340,6 +380,14 @@ function TransferList({
           </li>
         )
       })}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={transferContextItems(menu.record)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </ul>
   )
 }
@@ -366,7 +414,9 @@ export function FileBrowser({
   onGoUp,
   onNavigatePath,
   onOpenEntry,
+  onOpenMedia,
   onDownload,
+  onCopyText,
   onUpload,
   onClearQuery,
   onRetry,
@@ -383,6 +433,7 @@ export function FileBrowser({
 }: FileBrowserProps) {
   const categoryMeta = categories.find((item) => item.id === category)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [entryMenu, setEntryMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null)
   const sortedEntries = useMemo(() => {
     const list = [...entries]
     list.sort((a, b) => {
@@ -442,6 +493,47 @@ export function FileBrowser({
         : isClipboard
           ? `${visibleClipboard.length} 条剪贴板消息`
           : `${totalItems.toLocaleString('zh-CN')} 项${totalItems === entries.length ? ` · ${formatBytes(total)}` : ''}`
+
+  function entryContextItems(entry: Entry): ContextMenuItem[] {
+    const items: ContextMenuItem[] = []
+    if (entry.type === 'folder') {
+      items.push({ label: '打开文件夹', icon: <Folder size={15} weight="regular" />, onSelect: () => onOpenFolder(entry) })
+    } else if (entry.type === 'app') {
+      items.push({ label: '查看详情', icon: <Info size={15} weight="regular" />, onSelect: () => onOpenEntry(entry) })
+      items.push({ label: '下载 APK', icon: <DownloadSimple size={15} weight="regular" />, onSelect: () => onDownload(entry) })
+    } else if (entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'audio') {
+      items.push({
+        label: entry.kind === 'image' ? '查看图片' : entry.kind === 'video' ? '播放视频' : '播放音频',
+        icon: <PlayCircle size={15} weight="regular" />,
+        onSelect: () => onOpenMedia(entry),
+      })
+      items.push({ label: '下载到电脑', icon: <DownloadSimple size={15} weight="regular" />, onSelect: () => onDownload(entry) })
+    } else if (entry.kind === 'text') {
+      items.push({ label: '预览文本', icon: <FileText size={15} weight="regular" />, onSelect: () => onOpenEntry(entry) })
+      items.push({ label: '下载到电脑', icon: <DownloadSimple size={15} weight="regular" />, onSelect: () => onDownload(entry) })
+    } else {
+      items.push({ label: '查看详情', icon: <Info size={15} weight="regular" />, onSelect: () => onOpenEntry(entry) })
+      items.push({ label: '下载到电脑', icon: <DownloadSimple size={15} weight="regular" />, onSelect: () => onDownload(entry) })
+    }
+    if (entry.type === 'folder') {
+      items.push({ label: '打包下载', icon: <DownloadSimple size={15} weight="regular" />, onSelect: () => onDownload(entry) })
+    }
+    items.push({ label: '', separator: true, onSelect: () => {} })
+    items.push({ label: '复制名称', icon: <Copy size={15} weight="regular" />, onSelect: () => onCopyText(entry.name, '名称') })
+    if (entry.type === 'app') {
+      items.push({ label: '复制包名', icon: <Copy size={15} weight="regular" />, onSelect: () => onCopyText(entry.packageName, '包名') })
+    } else {
+      items.push({ label: '复制路径', icon: <Copy size={15} weight="regular" />, onSelect: () => onCopyText(entry.path, '路径') })
+      items.push({ label: '', separator: true, onSelect: () => {} })
+      items.push({
+        label: '删除手机文件',
+        icon: <Trash size={15} weight="regular" />,
+        danger: true,
+        onSelect: () => onDeleteFile(entry),
+      })
+    }
+    return items
+  }
 
   return (
     <div className="content-inner">
@@ -594,6 +686,7 @@ export function FileBrowser({
           onCancel={onCancelTask}
           onDelete={onDeleteTask}
           onDeleteFile={onDeleteTransferFile}
+          onCopyText={onCopyText}
         />
       ) : isClipboard ? (
         <ClipboardChat
@@ -606,7 +699,15 @@ export function FileBrowser({
           {sortedEntries.map((entry) => {
             const action = rowAction(entry)
             return (
-              <li className="entry-row" key={entry.id}>
+              <li
+                className="entry-row"
+                key={entry.id}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setEntryMenu({ x: event.clientX, y: event.clientY, entry })
+                }}
+              >
                 {entry.type === 'folder' ? (
                   <span className="row-check-spacer" />
                 ) : (
@@ -718,6 +819,15 @@ export function FileBrowser({
           pageSize={pageSize}
           total={totalItems}
           onChange={onPageChange}
+        />
+      )}
+
+      {entryMenu && (
+        <ContextMenu
+          x={entryMenu.x}
+          y={entryMenu.y}
+          items={entryContextItems(entryMenu.entry)}
+          onClose={() => setEntryMenu(null)}
         />
       )}
     </div>
