@@ -140,7 +140,9 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
       >
-        <span className={`pair-light${lit ? ' is-active' : ''}`} ref={lightRef} aria-hidden="true" />
+        <span className="pair-light-clip" aria-hidden="true">
+          <span className={`pair-light${lit ? ' is-active' : ''}`} ref={lightRef} />
+        </span>
         <div className="pair-content">
         <div className="pair-top">
           <span className="pair-brand">
