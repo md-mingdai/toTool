@@ -24,11 +24,17 @@ object HanXinImageDecoder {
 
     fun decode(binary: BitMatrix): String? = decodeDetailed(binary)?.text
 
-    fun decodeDetailed(binary: BitMatrix): Hit? {
-        return decodeOrientation(binary) ?: decodeOrientation(invert(binary))
+    /**
+     * [deadlineNs]（System.nanoTime 时间基）用于实时扫描：画面里没有汉信码时，下面会把 84 个版本逐个采样、
+     * 每个再转 4 个方向解码，耗时可以到秒级。超过截止时间就放弃这一帧。相册识别不传，行为不变。
+     */
+    fun decodeDetailed(binary: BitMatrix, deadlineNs: Long = Long.MAX_VALUE): Hit? {
+        decodeOrientation(binary, deadlineNs)?.let { return it }
+        if (System.nanoTime() > deadlineNs) return null
+        return decodeOrientation(invert(binary), deadlineNs)
     }
 
-    private fun decodeOrientation(binary: BitMatrix): Hit? {
+    private fun decodeOrientation(binary: BitMatrix, deadlineNs: Long): Hit? {
         val bounds = darkBounds(binary) ?: return null
         val width = bounds.right - bounds.left + 1
         val height = bounds.bottom - bounds.top + 1
@@ -50,6 +56,7 @@ object HanXinImageDecoder {
         }
 
         for (n in candidates) {
+            if (System.nanoTime() > deadlineNs) return null
             val sampled = sample(binary, bounds, n)
             var rotated = sampled
             repeat(4) {

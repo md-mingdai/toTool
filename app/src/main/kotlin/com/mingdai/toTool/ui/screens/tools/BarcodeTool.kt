@@ -5,17 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.os.Handler
 import android.net.Uri
-import android.os.Looper
+import android.os.SystemClock
 import android.util.Patterns
+import android.view.Surface
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -37,6 +37,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,12 +68,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -87,12 +88,20 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -106,9 +115,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mingdai.toTool.barcode.BarcodeRenderer
 import com.mingdai.toTool.barcode.BarcodeScanner
 import com.mingdai.toTool.barcode.BarcodeType
-import com.mingdai.toTool.barcode.ScanBounds
-import com.mingdai.toTool.barcode.ScanCandidate
 import com.mingdai.toTool.barcode.ScanResult
+import com.mingdai.toTool.barcode.ScanEngine
+import com.mingdai.toTool.barcode.ScanSnapshot
+import com.mingdai.toTool.barcode.TRACK_FADE_NS
+import com.mingdai.toTool.barcode.TrackSnap
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.PrimaryButton
@@ -119,8 +130,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
@@ -128,9 +138,13 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.exp
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 private val barcodeTabs = listOf("二维码处理", "条码生成", "扫描识别")
 
@@ -394,75 +408,6 @@ private fun BarcodeTypeSelector(
 
 /* ------------------------------ 扫描识别 ------------------------------ */
 
-private val ScanAccent = Color(0xFFFFDE07)
-
-private data class TrackedCode(
-    val id: Long,
-    val bounds: ScanBounds,
-    val frameWidth: Int,
-    val frameHeight: Int,
-    val result: ScanResult?,
-    val lastSeen: Long,
-    val lastCandidateSeen: Long,
-    val lastResultSeen: Long,
-)
-
-private fun matchScore(a: ScanBounds, b: ScanBounds, minSizeRatio: Float = 0.18f): Float {
-    val areaA = (a.right - a.left) * (a.bottom - a.top)
-    val areaB = (b.right - b.left) * (b.bottom - b.top)
-    val sizeRatio = min(areaA, areaB) / max(areaA, areaB).coerceAtLeast(1e-6f)
-    // 尺寸差太多说明不是同一个码，避免把一个小结果挂到巨大的误检框上
-    if (sizeRatio < minSizeRatio) return 0f
-    val ix = max(0f, min(a.right, b.right) - max(a.left, b.left))
-    val iy = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
-    val intersection = ix * iy
-    if (intersection > 0f) {
-        val iou = intersection / (areaA + areaB - intersection).coerceAtLeast(1e-6f)
-        if (iou > 0f) return iou
-    }
-    val dx = ((a.left + a.right) - (b.left + b.right)) / 2f
-    val dy = ((a.top + a.bottom) - (b.top + b.bottom)) / 2f
-    val distance = kotlin.math.hypot(dx, dy)
-    return if (distance < 0.10f) 0.015f else 0f
-}
-
-private data class OverlayRect(
-    val left: Float,
-    val top: Float,
-    val width: Float,
-    val height: Float,
-)
-
-private fun mapBounds(
-    bounds: ScanBounds,
-    frameWidth: Int,
-    frameHeight: Int,
-    previewSize: IntSize,
-    minSide: Float,
-): OverlayRect? {
-    if (frameWidth <= 0 || frameHeight <= 0) return null
-    val viewW = previewSize.width.toFloat()
-    val viewH = previewSize.height.toFloat()
-    if (viewW <= 0f || viewH <= 0f) return null
-    // PreviewView 使用 FILL_CENTER：整帧按较大比例铺满，边缘会被裁掉
-    val scale = max(viewW / frameWidth.toFloat(), viewH / frameHeight.toFloat())
-    val displayW = frameWidth * scale
-    val displayH = frameHeight * scale
-    val offsetX = (viewW - displayW) / 2f
-    val offsetY = (viewH - displayH) / 2f
-    val groupLeft = offsetX + bounds.left * displayW
-    val groupTop = offsetY + bounds.top * displayH
-    val groupRight = offsetX + bounds.right * displayW
-    val groupBottom = offsetY + bounds.bottom * displayH
-    val centerX = (groupLeft + groupRight) / 2f
-    val centerY = (groupTop + groupBottom) / 2f
-    val boxW = max(groupRight - groupLeft, minSide).coerceAtMost(viewW)
-    val boxH = max(groupBottom - groupTop, minSide).coerceAtMost(viewH)
-    val left = (centerX - boxW / 2f).coerceIn(0f, (viewW - boxW).coerceAtLeast(0f))
-    val top = (centerY - boxH / 2f).coerceIn(0f, (viewH - boxH).coerceAtLeast(0f))
-    return OverlayRect(left, top, boxW, boxH)
-}
-
 @Composable
 private fun BarcodeScannerPane() {
     val context = LocalContext.current
@@ -472,110 +417,6 @@ private fun BarcodeScannerPane() {
     var scanning by remember { mutableStateOf(false) }
     var galleryResult by remember { mutableStateOf<ScanResult?>(null) }
     var selectedResult by remember { mutableStateOf<ScanResult?>(null) }
-    val tracked = remember { mutableStateMapOf<Long, TrackedCode>() }
-    var nextTrackId by remember { mutableStateOf(1L) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(300)
-            val now = System.currentTimeMillis()
-            tracked.entries.toList().forEach { (id, code) ->
-                val expired = if (code.result == null) {
-                    now - code.lastSeen > 700L
-                } else {
-                    // 解码结果只按“最近一次真正解码成功”计时，误检候选框不能无限续命
-                    now - code.lastResultSeen > 1000L
-                }
-                if (expired) tracked.remove(id)
-            }
-        }
-    }
-    LaunchedEffect(mode) {
-        if (mode == 1) tracked.clear()
-    }
-
-    fun onCandidates(candidates: List<ScanCandidate>) {
-        val now = System.currentTimeMillis()
-        val used = HashSet<Long>()
-        candidates.forEach { candidate ->
-            val match = tracked.values
-                .filter { it.id !in used }
-                .map { it to matchScore(it.bounds, candidate.bounds) }
-                .filter { it.second > 0.005f }
-                .maxByOrNull { it.second }
-                ?.first
-            if (match != null) {
-                used.add(match.id)
-                tracked[match.id] = match.copy(
-                    bounds = candidate.bounds,
-                    frameWidth = candidate.frameWidth,
-                    frameHeight = candidate.frameHeight,
-                    lastSeen = now,
-                    lastCandidateSeen = now,
-                )
-            } else {
-                val id = nextTrackId
-                nextTrackId += 1
-                tracked[id] = TrackedCode(
-                    id = id,
-                    bounds = candidate.bounds,
-                    frameWidth = candidate.frameWidth,
-                    frameHeight = candidate.frameHeight,
-                    result = null,
-                    lastSeen = now,
-                    lastCandidateSeen = now,
-                    lastResultSeen = 0L,
-                )
-            }
-        }
-        // 这一帧没再检出的 QR 框立即进入过期倒计时，避免移出画面后还在乱跳
-        val cutoff = now - 350
-        tracked.entries.toList().forEach { (id, code) ->
-            if (id !in used && code.result == null && code.lastCandidateSeen in 1L..cutoff) {
-                tracked.remove(id)
-            }
-        }
-    }
-
-    fun onResults(results: List<ScanResult>) {
-        val now = System.currentTimeMillis()
-        val used = HashSet<Long>()
-        results.forEach { result ->
-            val bounds = result.bounds ?: return@forEach
-            val match = tracked.values
-                .filter { it.id !in used }
-                .map { it to matchScore(it.bounds, bounds, minSizeRatio = 0.35f) }
-                .filter { it.second > 0.005f }
-                .maxByOrNull { it.second }
-                ?.first
-            if (match != null) {
-                used.add(match.id)
-                val candidateBoundsFresh = now - match.lastCandidateSeen < 1200
-                tracked[match.id] = match.copy(
-                    bounds = if (candidateBoundsFresh) match.bounds else bounds,
-                    frameWidth = if (candidateBoundsFresh) match.frameWidth else result.frameWidth,
-                    frameHeight = if (candidateBoundsFresh) match.frameHeight else result.frameHeight,
-                    result = result,
-                    lastSeen = now,
-                    lastResultSeen = now,
-                )
-            } else {
-                val id = nextTrackId
-                nextTrackId += 1
-                tracked[id] = TrackedCode(
-                    id = id,
-                    bounds = bounds,
-                    frameWidth = result.frameWidth,
-                    frameHeight = result.frameHeight,
-                    result = result,
-                    lastSeen = now,
-                    lastCandidateSeen = 0L,
-                    lastResultSeen = now,
-                )
-            }
-        }
-    }
-
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -617,14 +458,11 @@ private fun BarcodeScannerPane() {
 
         if (mode == 0) {
             CameraScanner(
-                tracked = tracked.values.toList(),
-                onCandidates = ::onCandidates,
-                onResults = ::onResults,
                 onView = { selectedResult = it },
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
             Spacer(Modifier.height(8.dp))
-            HintText("识别到的码会用方框标出；点「查看」打开结果，扫码会持续进行。")
+            HintText("码会被方框标出并跟着移动；解出内容后点「查看」打开结果，扫码会持续进行。")
         } else {
             Column(
                 modifier = Modifier
@@ -679,14 +517,10 @@ private fun BarcodeScannerPane() {
 
     ScanResultDialog(result = selectedResult, onDismiss = { selectedResult = null })
 }
-
 /* ------------------------------ 相机预览 ------------------------------ */
 
 @Composable
 private fun CameraScanner(
-    tracked: List<TrackedCode>,
-    onCandidates: (List<ScanCandidate>) -> Unit,
-    onResults: (List<ScanResult>) -> Unit,
     onView: (ScanResult) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -737,20 +571,25 @@ private fun CameraScanner(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var retryKey by remember { mutableStateOf(0) }
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    val candidatesCallback = rememberUpdatedState(onCandidates)
-    val resultsCallback = rememberUpdatedState(onResults)
+    var hasFound by remember { mutableStateOf(false) }
+    var frameTick by remember { mutableStateOf(0L) }
+    val sensorDegrees = remember { AtomicInteger(-1) }
+    // 一次相机绑定对应一个引擎：重试时换新的，旧的由 onDispose 停掉
+    val engine = remember(lifecycleOwner, retryKey) { ScanEngine() }
+    val animator = remember { OverlayAnimator() }
+    val textMeasurer = rememberTextMeasurer()
+    val chipStyle = MiuixTheme.textStyles.footnote1
+    val onViewState = rememberUpdatedState(onView)
 
     DisposableEffect(lifecycleOwner, retryKey) {
         camera = null
         torchOn = false
         cameraReady = false
         cameraError = null
+        sensorDegrees.set(-1)
         var disposed = false
         var boundProvider: ProcessCameraProvider? = null
-        val active = AtomicBoolean(true)
-        val analysisExecutor = Executors.newSingleThreadExecutor()
-        val decodeExecutor = Executors.newSingleThreadExecutor()
-        val decodeInFlight = AtomicBoolean(false)
+        val analysisExecutor = engine.start()
         val future = runCatching { ProcessCameraProvider.getInstance(context) }.getOrNull()
         if (future == null) {
             cameraError = "相机初始化失败"
@@ -769,57 +608,27 @@ private fun CameraScanner(
                             .apply {
                                 setSurfaceProvider(previewView.surfaceProvider)
                             }
+                        // 直接要 YUV：只取 Y 平面当灰度，不再让 CameraX 先转一份 RGBA 再转 Bitmap
                         val analysis = ImageAnalysis.Builder()
                             .setTargetResolution(android.util.Size(960, 720))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                             .build()
                         analysis.setAnalyzer(analysisExecutor) { image ->
-                            try {
-                                val rotation = image.imageInfo.rotationDegrees
-                                val upright = rotateBitmap(image.toBitmap(), rotation)
-                                val scaled = scaleDown(upright, 1280)
-                                val detectBitmap = scaleDown(upright, 720)
-
-                                // 定位只做轻量检测，每一帧都发候选框，框才能跟手
-                                val candidates = BarcodeScanner.detect(detectBitmap)
-                                if (active.get()) {
-                                    Handler(Looper.getMainLooper()).post {
-                                        candidatesCallback.value(candidates)
-                                    }
-                                }
-
-                                // 解码放到独立线程，不阻塞下一帧的定位；同一时间只跑一帧解码
-                                if (decodeInFlight.compareAndSet(false, true)) {
-                                    decodeExecutor.execute {
-                                        try {
-                                            val results = BarcodeScanner.decodeAll(scaled)
-                                            if (active.get() && results.isNotEmpty()) {
-                                                Handler(Looper.getMainLooper()).post {
-                                                    resultsCallback.value(results)
-                                                }
-                                            }
-                                        } catch (e: Throwable) {
-                                            // 单帧失败不影响后续帧
-                                        } finally {
-                                            decodeInFlight.set(false)
-                                        }
-                                    }
-                                }
-                            } catch (e: Throwable) {
-                                // 单帧失败不影响下一帧
-                            } finally {
-                                image.close()
+                            engine.analyze(image) { frame ->
+                                frameRotation(previewView, sensorDegrees.get(), frame)
                             }
                         }
                         try {
                             provider.unbindAll()
-                            camera = provider.bindToLifecycle(
+                            val bound = provider.bindToLifecycle(
                                 lifecycleOwner,
                                 CameraSelector.DEFAULT_BACK_CAMERA,
                                 preview,
                                 analysis,
                             )
+                            camera = bound
+                            sensorDegrees.set(bound.cameraInfo.sensorRotationDegrees)
                             cameraReady = true
                         } catch (e: Exception) {
                             cameraReady = false
@@ -832,10 +641,25 @@ private fun CameraScanner(
 
         onDispose {
             disposed = true
-            active.set(false)
             runCatching { boundProvider?.unbindAll() }
-            runCatching { analysisExecutor.shutdown() }
-            runCatching { decodeExecutor.shutdown() }
+            engine.stop()
+        }
+    }
+
+    // 每个 vsync 把引擎的最新快照外推到「此刻」再画：状态只在绘制阶段读取，所以只重绘、不重组
+    LaunchedEffect(engine) {
+        while (true) {
+            withFrameNanos { }
+            val nowNs = SystemClock.elapsedRealtimeNanos()
+            animator.update(
+                nowNs,
+                engine.snapshot,
+                previewSize.width.toFloat(),
+                previewSize.height.toFloat(),
+            )
+            val found = animator.items.isNotEmpty()
+            if (found != hasFound) hasFound = found
+            frameTick = nowNs
         }
     }
 
@@ -843,13 +667,18 @@ private fun CameraScanner(
         modifier = modifier
             .background(Color.Black)
             .clip(RoundedCornerShape(16.dp))
-            .onSizeChanged { previewSize = it },
+            .onSizeChanged { previewSize = it }
+            .pointerInput(Unit) {
+                detectTapGestures { tap ->
+                    animator.hit(tap.x, tap.y, 10.dp.toPx())?.let { onViewState.value(it) }
+                }
+            },
     ) {
         AndroidView(
             factory = { previewView },
             modifier = Modifier.fillMaxSize(),
         )
-        ScanGuideOverlay(Modifier.fillMaxSize(), hasFound = tracked.isNotEmpty())
+        ScanGuideOverlay(Modifier.fillMaxSize(), hasFound = hasFound)
         if (previewSize != IntSize.Zero) {
             val density = LocalDensity.current
             val side = min(previewSize.width, previewSize.height) * 0.66f
@@ -866,12 +695,8 @@ private fun CameraScanner(
                     .offset { IntOffset(0, titleY.roundToInt()) },
             )
         }
-        if (previewSize != IntSize.Zero) {
-            TrackedCodeOverlays(
-                tracked = tracked,
-                previewSize = previewSize,
-                onView = onView,
-            )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (frameTick >= 0L) drawLensTracks(animator.items, textMeasurer, chipStyle)
         }
         IconButton(
             onClick = {
@@ -902,6 +727,24 @@ private fun CameraScanner(
         }
     }
 }
+
+/**
+ * 让这一帧转正所需的顺时针角度。不直接用 image.imageInfo.rotationDegrees：它相对的是分析用例创建时的屏幕方向，
+ * 而本应用自己处理了屏幕旋转（不重建 Activity），转屏后它会过期，框就对不上码了。这里用传感器方向和「此刻」的屏幕方向算。
+ */
+private fun frameRotation(previewView: PreviewView, sensorDegrees: Int, image: ImageProxy): Int {
+    val fallback = image.imageInfo.rotationDegrees
+    if (sensorDegrees < 0) return fallback
+    val display = previewView.display ?: return fallback
+    val displayDegrees = when (display.rotation) {
+        Surface.ROTATION_90 -> 90
+        Surface.ROTATION_180 -> 180
+        Surface.ROTATION_270 -> 270
+        else -> 0
+    }
+    return (sensorDegrees - displayDegrees + 360) % 360
+}
+
 
 @Composable
 private fun ScanGuideOverlay(modifier: Modifier = Modifier, hasFound: Boolean) {
@@ -966,172 +809,446 @@ private fun ScanGuideOverlay(modifier: Modifier = Modifier, hasFound: Boolean) {
     }
 }
 
-@Composable
-private fun TrackedCodeOverlays(
-    tracked: List<TrackedCode>,
-    previewSize: IntSize,
-    onView: (ScanResult) -> Unit,
+/* ------------------------------ 跟随框（智能镜头风格） ------------------------------ */
+
+/**
+ * 框怎么跟手的几个可调参数。
+ *
+ * PREVIEW_EXTRA_LATENCY_S：预览画面比分析线程拿到的同一帧「多出来」的延迟（显示管线、缓冲），不同机型大约在 0~0.06 之间。
+ * 外推量 = 这一帧的年龄 − 这个值：
+ * 移动手机时框跑到码前面去了 → 调大它；框落在码后面 → 调小它。
+ * 合成数据里它在 0~0.08 范围内对误差影响很小（平均误差只变 ±1 像素），所以默认值不用太纠结。
+ */
+private object OverlayTuning {
+    const val PREVIEW_EXTRA_LATENCY_S = 0.03f
+    const val MAX_LEAD_S = 0.2f
+    /** 新快照到来时的位置跳变按这个时间常数衰减掉，框的运动才连续。 */
+    const val SMOOTH_TAU_S = 0.045f
+    /** 速度小于 LOW 不外推（手抖的速度估计是噪声），大于 HIGH 全额外推；单位 px/s，按 960 宽的帧换算。 */
+    const val DEADBAND_LOW = 40f
+    const val DEADBAND_HIGH = 160f
+    /** 分析线程超过这么久没出新结果，就把框全部撤掉。 */
+    const val STALE_NS = 1_500_000_000L
+}
+
+private val LensInk = Color(0xFF202124)
+
+/** 一个码在这一帧要画出来的样子，坐标已经是 View 像素。 */
+private class OverlayItem(
+    val quad: FloatArray,
+    val cx: Float,
+    val cy: Float,
+    /** 码的边长（面积的平方根） */
+    val side: Float,
+    /** 水平 / 竖直方向上，框里能放下多大的东西（按码的朝向换算） */
+    val availW: Float,
+    val availH: Float,
+    val boxAlpha: Float,
+    val boxScale: Float,
+    val chipAlpha: Float,
+    val chipScale: Float,
+    val result: ScanResult?,
+)
+
+/**
+ * 把引擎发布的快照（分析帧时刻的位置 + 速度）变成每个 vsync 的画面：
+ * 1. 外推：位置 + 速度 × 补偿时间，抵消「分析 → 显示」的延迟；
+ * 2. 误差平滑：新快照到来时新旧预测会有一点差，把差值记成偏移再指数衰减掉，框就不会一抽一抽地跳。
+ * 只在主线程用。
+ */
+private class OverlayAnimator {
+
+    private class Memo(var snap: TrackSnap, var frameNs: Long) {
+        val offset = FloatArray(8)
+        var lastNs = 0L
+    }
+
+    private val memos = HashMap<Long, Memo>()
+
+    var items: List<OverlayItem> = emptyList()
+        private set
+
+    fun update(nowNs: Long, snapshot: ScanSnapshot?, viewW: Float, viewH: Float) {
+        if (snapshot == null || viewW <= 0f || viewH <= 0f ||
+            snapshot.frameWidth <= 0 || snapshot.frameHeight <= 0 ||
+            nowNs - snapshot.frameNs > OverlayTuning.STALE_NS
+        ) {
+            memos.clear()
+            items = emptyList()
+            return
+        }
+        val fw = snapshot.frameWidth.toFloat()
+        val fh = snapshot.frameHeight.toFloat()
+        // PreviewView 使用 FILL_CENTER：整帧按较大的比例铺满，边缘会被裁掉
+        val viewScale = max(viewW / fw, viewH / fh)
+        val ox = (viewW - fw * viewScale) / 2f
+        val oy = (viewH - fh * viewScale) / 2f
+        val widthScale = fw / 960f
+
+        val out = ArrayList<OverlayItem>(snapshot.tracks.size)
+        val seen = HashSet<Long>()
+        for (track in snapshot.tracks) {
+            seen.add(track.id)
+            var memo = memos[track.id]
+            if (memo == null) {
+                memo = Memo(track, snapshot.frameNs)
+                memos[track.id] = memo
+            }
+            if (memo.frameNs != snapshot.frameNs) {
+                // 新快照到了：新旧两个预测在此刻的差，变成一个会衰减的偏移
+                val before = predict(memo.snap, memo.frameNs, nowNs, widthScale, fw)
+                val after = predict(track, snapshot.frameNs, nowNs, widthScale, fw)
+                for (i in 0 until 8) memo.offset[i] += before[i] - after[i]
+                memo.snap = track
+                memo.frameNs = snapshot.frameNs
+            }
+            if (memo.lastNs != 0L) {
+                val dt = ((nowNs - memo.lastNs) / 1e9f).coerceIn(0f, 0.1f)
+                val keep = exp(-dt / OverlayTuning.SMOOTH_TAU_S)
+                for (i in 0 until 8) memo.offset[i] *= keep
+            }
+            memo.lastNs = nowNs
+
+            val q = predict(track, snapshot.frameNs, nowNs, widthScale, fw)
+            var sx = 0f
+            var sy = 0f
+            for (i in 0 until 4) {
+                q[i * 2] = ox + (q[i * 2] + memo.offset[i * 2]) * viewScale
+                q[i * 2 + 1] = oy + (q[i * 2 + 1] + memo.offset[i * 2 + 1]) * viewScale
+                sx += q[i * 2]
+                sy += q[i * 2 + 1]
+            }
+
+            // 框的宽高（对边取平均）和长边方向；按朝向估计横向 / 纵向各能放多大
+            val w = (hypot(q[2] - q[0], q[3] - q[1]) + hypot(q[6] - q[4], q[7] - q[5])) / 2f
+            val h = (hypot(q[4] - q[2], q[5] - q[3]) + hypot(q[0] - q[6], q[1] - q[7])) / 2f
+            val longSide = max(w, h)
+            val shortSide = min(w, h)
+            val lx: Float
+            val ly: Float
+            if (w >= h) {
+                lx = (q[2] - q[0]) + (q[4] - q[6])
+                ly = (q[3] - q[1]) + (q[5] - q[7])
+            } else {
+                lx = (q[4] - q[2]) + (q[6] - q[0])
+                ly = (q[5] - q[3]) + (q[7] - q[1])
+            }
+            val ll = hypot(lx, ly).coerceAtLeast(1e-3f)
+            val cos2 = (lx / ll) * (lx / ll)
+
+            val shown = if (track.shownNs != 0L) track.shownNs else snapshot.frameNs
+            val fade = if (track.deathNs == 0L) {
+                1f
+            } else {
+                ((track.deathNs - nowNs) / TRACK_FADE_NS.toFloat()).coerceIn(0f, 1f)
+            }
+            val boxT = easeOut((((nowNs - shown) / 1e6f) / 160f).coerceIn(0f, 1f))
+            // 还没解出内容的框缓慢「呼吸」：告诉用户它在识别，不是卡住了
+            val pulse = if (track.result == null) {
+                // 先对周期取模再转 Float：elapsedRealtimeNanos 很大，直接除会让 Float 精度只剩零点几秒，呼吸会一卡一卡
+                0.82f + 0.18f * sin((nowNs % 1_200_000_000L) / 1.2e9f * 6.2831855f)
+            } else {
+                1f
+            }
+            val chipT = if (track.result != null && track.confirmedNs != 0L) {
+                easeOut((((nowNs - track.confirmedNs) / 1e6f - 40f) / 200f).coerceIn(0f, 1f))
+            } else {
+                0f
+            }
+            out.add(
+                OverlayItem(
+                    quad = q,
+                    cx = sx / 4f,
+                    cy = sy / 4f,
+                    side = sqrt(w * h),
+                    availW = shortSide + (longSide - shortSide) * cos2,
+                    availH = shortSide + (longSide - shortSide) * (1f - cos2),
+                    boxAlpha = boxT * fade * pulse,
+                    boxScale = 0.94f + 0.06f * boxT,
+                    chipAlpha = chipT * fade,
+                    chipScale = 0.6f + 0.4f * chipT,
+                    result = track.result,
+                ),
+            )
+        }
+        memos.keys.retainAll(seen)
+        items = out
+    }
+
+    /** 点中了哪个码的方框（只有已经解出内容的才响应），没点中返回 null。 */
+    fun hit(x: Float, y: Float, slop: Float): ScanResult? {
+        for (i in items.indices.reversed()) {
+            val item = items[i]
+            val result = item.result ?: continue
+            if (item.chipAlpha < 0.4f) continue
+            var l = Float.MAX_VALUE
+            var t = Float.MAX_VALUE
+            var r = -Float.MAX_VALUE
+            var b = -Float.MAX_VALUE
+            for (k in 0 until 4) {
+                val px = item.quad[k * 2]
+                val py = item.quad[k * 2 + 1]
+                if (px < l) l = px
+                if (px > r) r = px
+                if (py < t) t = py
+                if (py > b) b = py
+            }
+            if (x >= l - slop && x <= r + slop && y >= t - slop && y <= b + slop) return result
+        }
+        return null
+    }
+
+    /** 快照里的四个角 + 速度 × 补偿时间（帧坐标）。 */
+    private fun predict(t: TrackSnap, frameNs: Long, nowNs: Long, widthScale: Float, frameWidth: Float): FloatArray {
+        val age = (nowNs - frameNs) / 1e9f
+        val lead = (age - OverlayTuning.PREVIEW_EXTRA_LATENCY_S).coerceIn(0f, OverlayTuning.MAX_LEAD_S)
+        val speed = hypot(t.vx, t.vy)
+        val low = OverlayTuning.DEADBAND_LOW * widthScale
+        val high = OverlayTuning.DEADBAND_HIGH * widthScale
+        val gain = ((speed - low) / (high - low)).coerceIn(0f, 1f)
+        var dx = t.vx * lead * gain
+        var dy = t.vy * lead * gain
+        val limit = 0.2f * frameWidth
+        val len = hypot(dx, dy)
+        if (len > limit) {
+            dx *= limit / len
+            dy *= limit / len
+        }
+        val q = FloatArray(8)
+        for (i in 0 until 4) {
+            q[i * 2] = t.quad[i * 2] + dx
+            q[i * 2 + 1] = t.quad[i * 2 + 1] + dy
+        }
+        return q
+    }
+
+    private fun easeOut(t: Float): Float {
+        val u = 1f - t
+        return 1f - u * u * u
+    }
+}
+
+/* ---- 绘制：白色圆角描边框 + 居中的白色胶囊按钮（Google 智能镜头的样子） ---- */
+
+private fun DrawScope.drawLensTracks(
+    items: List<OverlayItem>,
+    textMeasurer: TextMeasurer,
+    textStyle: TextStyle,
 ) {
-    tracked.forEach { code ->
-        key(code.id) {
-            TrackedCodeFrame(tracked = code, previewSize = previewSize, onView = onView)
+    for (item in items) {
+        drawLensBox(item)
+        drawLensChip(item, textMeasurer, textStyle)
+    }
+}
+
+/** 贴着码的圆角描边框：跟随码的朝向和透视，而不是屏幕对齐的矩形。 */
+private fun DrawScope.drawLensBox(item: OverlayItem) {
+    val alpha = item.boxAlpha
+    if (alpha <= 0.01f) return
+    val dp = 1.dp.toPx()
+    // 向外扩一圈，让描边落在码的外面，不压在条上
+    val corners = outsetQuad(item.quad, max(5f * dp, item.side * 0.04f))
+    val radius = (minEdge(corners) * 0.2f).coerceIn(4f * dp, 12f * dp)
+    val path = roundedQuadPath(corners, radius)
+    val stroke = 3f * dp
+    scale(item.boxScale, item.boxScale, pivot = Offset(item.cx, item.cy)) {
+        // 柔和的阴影：垫两层更宽更淡的深色描边，浅色背景上白框也看得清
+        drawPath(
+            path,
+            Color.Black.copy(alpha = 0.08f * alpha),
+            style = Stroke(width = stroke + 10f * dp, join = StrokeJoin.Round),
+        )
+        drawPath(
+            path,
+            Color.Black.copy(alpha = 0.14f * alpha),
+            style = Stroke(width = stroke + 4.5f * dp, join = StrokeJoin.Round),
+        )
+        drawPath(
+            path,
+            Color.White.copy(alpha = alpha),
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
+    }
+}
+
+/**
+ * 框正中的白色胶囊：放大镜图标 + 「查看二维码 / 查看条形码」。
+ * 码太小放不下就依次退化成「查看」、只有图标；再小就不画。只有解出内容的码才有胶囊。
+ */
+private fun DrawScope.drawLensChip(
+    item: OverlayItem,
+    textMeasurer: TextMeasurer,
+    textStyle: TextStyle,
+) {
+    val result = item.result ?: return
+    val alpha = item.chipAlpha
+    if (alpha <= 0.01f) return
+    val dp = 1.dp.toPx()
+    val margin = 2f * dp
+    val availW = item.availW - 2f * margin
+    val availH = item.availH - 2f * margin
+    if (availH < 22f * dp || availW < 22f * dp) return
+
+    val fullHeight = 40f * dp
+    val height = min(fullHeight, availH)
+    val k = height / fullHeight
+    val icon = 18f * dp * k
+    val gap = 8f * dp * k
+    val padding = 16f * dp * k
+    val style = textStyle.copy(
+        fontSize = (15.sp.toPx() * k).toSp(),
+        fontWeight = FontWeight.Medium,
+        color = LensInk,
+    )
+
+    var chosen: TextLayoutResult? = null
+    var width = 0f
+    for (text in arrayOf(chipLabel(result), "查看")) {
+        val measured = textMeasurer.measure(text, style)
+        val need = padding * 2f + icon + gap + measured.size.width
+        if (need <= availW) {
+            chosen = measured
+            width = need
+            break
+        }
+    }
+    // 两种文案都放不下：退化成只有放大镜的圆形按钮
+    val labelLayout: TextLayoutResult? = chosen
+    if (labelLayout == null) {
+        width = min(height, availW)
+        if (width < 22f * dp) return
+    }
+
+    val left = item.cx - width / 2f
+    val top = item.cy - height / 2f
+    scale(item.chipScale, item.chipScale, pivot = Offset(item.cx, item.cy)) {
+        drawRoundRect(
+            Color.Black.copy(alpha = 0.10f * alpha),
+            topLeft = Offset(left - 3f * dp, top - 1f * dp),
+            size = Size(width + 6f * dp, height + 6f * dp),
+            cornerRadius = CornerRadius(height / 2f + 3f * dp),
+        )
+        drawRoundRect(
+            Color.Black.copy(alpha = 0.16f * alpha),
+            topLeft = Offset(left - 1.2f * dp, top + 0.2f * dp),
+            size = Size(width + 2.4f * dp, height + 2.4f * dp),
+            cornerRadius = CornerRadius(height / 2f + 1.2f * dp),
+        )
+        drawRoundRect(
+            Color.White.copy(alpha = alpha),
+            topLeft = Offset(left, top),
+            size = Size(width, height),
+            cornerRadius = CornerRadius(height / 2f),
+        )
+        val ink = LensInk.copy(alpha = alpha)
+        if (labelLayout == null) {
+            drawMagnifier(item.cx, item.cy, height * 0.5f, ink)
+        } else {
+            drawMagnifier(left + padding + icon / 2f, item.cy, icon, ink)
+            drawText(
+                labelLayout,
+                topLeft = Offset(left + padding + icon + gap, item.cy - labelLayout.size.height / 2f),
+                alpha = alpha,
+            )
         }
     }
 }
 
-@Composable
-private fun TrackedCodeFrame(
-    tracked: TrackedCode,
-    previewSize: IntSize,
-    onView: (ScanResult) -> Unit,
-) {
-    val density = LocalDensity.current
-    val boundsAnimation = tween<Float>(
-        durationMillis = 140,
-        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+private fun DrawScope.drawMagnifier(cx: Float, cy: Float, size: Float, color: Color) {
+    val radius = size * 0.30f
+    val width = (size * 0.12f).coerceAtLeast(1.6f)
+    val ox = cx - size * 0.06f
+    val oy = cy - size * 0.06f
+    drawCircle(color = color, radius = radius, center = Offset(ox, oy), style = Stroke(width = width))
+    val d = radius * 0.7071f
+    drawLine(
+        color = color,
+        start = Offset(ox + d, oy + d),
+        end = Offset(ox + d + size * 0.27f, oy + d + size * 0.27f),
+        strokeWidth = width * 1.05f,
+        cap = StrokeCap.Round,
     )
-    val appearance = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        appearance.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(
-                durationMillis = 180,
-                easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
-            ),
-        )
+}
+
+private fun chipLabel(result: ScanResult): String = when (result.formatLabel) {
+    "QR 码", "Data Matrix", "Aztec", "汉信码" -> "查看二维码"
+    else -> "查看条形码"
+}
+
+/** 四个角各沿「远离两条邻边」的方向推出去 [outset]，使每条边向外平移 outset。 */
+private fun outsetQuad(q: FloatArray, outset: Float): FloatArray {
+    val out = FloatArray(8)
+    var cx = 0f
+    var cy = 0f
+    for (i in 0 until 4) {
+        cx += q[i * 2]
+        cy += q[i * 2 + 1]
     }
-    val left by animateFloatAsState(
-        targetValue = tracked.bounds.left,
-        animationSpec = boundsAnimation,
-        label = "code-left",
-    )
-    val top by animateFloatAsState(
-        targetValue = tracked.bounds.top,
-        animationSpec = boundsAnimation,
-        label = "code-top",
-    )
-    val right by animateFloatAsState(
-        targetValue = tracked.bounds.right,
-        animationSpec = boundsAnimation,
-        label = "code-right",
-    )
-    val bottom by animateFloatAsState(
-        targetValue = tracked.bounds.bottom,
-        animationSpec = boundsAnimation,
-        label = "code-bottom",
-    )
-
-    val minSide = with(density) { 48.dp.toPx() }
-    val rect = mapBounds(
-        bounds = ScanBounds(left, top, right, bottom),
-        frameWidth = tracked.frameWidth,
-        frameHeight = tracked.frameHeight,
-        previewSize = previewSize,
-        minSide = minSide,
-    ) ?: return
-
-    val decoded = tracked.result != null
-    val frameAlpha by animateFloatAsState(
-        targetValue = if (decoded) 1f else 0.62f,
-        animationSpec = tween(durationMillis = 200),
-        label = "code-alpha",
-    )
-
-    Box(
-        modifier = Modifier
-            .offset { IntOffset(rect.left.roundToInt(), rect.top.roundToInt()) }
-            .size(
-                width = with(density) { rect.width.toDp() },
-                height = with(density) { rect.height.toDp() },
-            )
-            .graphicsLayer {
-                val scale = 0.60f + 0.40f * appearance.value
-                alpha = appearance.value
-                scaleX = scale
-                scaleY = scale
-            },
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            // Telegram 的角标：每个角画两条 18% 长的边，圆角连接，不画完整矩形
-            val armX = w * 0.18f
-            val armY = h * 0.18f
-            val path = Path().apply {
-                moveTo(armX, 0f); lineTo(0f, 0f); lineTo(0f, armY)
-                moveTo(w - armX, 0f); lineTo(w, 0f); lineTo(w, armY)
-                moveTo(0f, h - armY); lineTo(0f, h); lineTo(armX, h)
-                moveTo(w, h - armY); lineTo(w, h); lineTo(w - armX, h)
-            }
-            val stroke = 6.dp.toPx()
-            drawPath(
-                path = path,
-                color = Color.Black.copy(alpha = 0.18f * frameAlpha),
-                style = Stroke(
-                    width = stroke * 1.7f,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
-            )
-            drawPath(
-                path = path,
-                color = ScanAccent.copy(alpha = frameAlpha),
-                style = Stroke(
-                    width = stroke,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
-            )
+    cx /= 4f
+    cy /= 4f
+    for (i in 0 until 4) {
+        val prev = (i + 3) % 4
+        val next = (i + 1) % 4
+        val x = q[i * 2]
+        val y = q[i * 2 + 1]
+        var ax = x - q[prev * 2]
+        var ay = y - q[prev * 2 + 1]
+        var qx = x - q[next * 2]
+        var qy = y - q[next * 2 + 1]
+        val al = hypot(ax, ay).coerceAtLeast(1e-3f)
+        val bl = hypot(qx, qy).coerceAtLeast(1e-3f)
+        ax /= al
+        ay /= al
+        qx /= bl
+        qy /= bl
+        var dx = ax + qx
+        var dy = ay + qy
+        var dl = hypot(dx, dy)
+        if (dl < 1e-3f) {
+            dx = x - cx
+            dy = y - cy
+            dl = hypot(dx, dy).coerceAtLeast(1e-3f)
         }
-
-        AnimatedVisibility(
-            visible = decoded,
-            enter = fadeIn(tween(160)) + scaleIn(
-                initialScale = 0.55f,
-                animationSpec = tween(
-                    durationMillis = 190,
-                    easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
-                ),
-            ),
-            exit = fadeOut(tween(120)) + scaleOut(
-                targetScale = 0.7f,
-                animationSpec = tween(120),
-            ),
-            modifier = Modifier.align(Alignment.Center),
-        ) {
-            val result = tracked.result
-            if (result != null) {
-                val sidePx = min(rect.width, rect.height)
-                val buttonWidth = with(density) {
-                    (sidePx * 0.58f).coerceIn(46.dp.toPx(), 120.dp.toPx()).toDp()
-                }
-                val buttonHeight = with(density) {
-                    (sidePx * 0.32f).coerceIn(28.dp.toPx(), 46.dp.toPx()).toDp()
-                }
-                val fontSize = with(density) {
-                    (sidePx * 0.15f).coerceIn(10.sp.toPx(), 16.sp.toPx()).toSp()
-                }
-                Box(
-                    modifier = Modifier
-                        .width(buttonWidth)
-                        .height(buttonHeight)
-                        .clip(RoundedCornerShape(50))
-                        .background(ScanAccent)
-                        .clickable { onView(result) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "查看",
-                        style = MiuixTheme.textStyles.footnote1.copy(
-                            fontSize = fontSize,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = Color.Black,
-                    )
-                }
-            }
-        }
+        val push = outset * 1.4142135f
+        out[i * 2] = x + dx / dl * push
+        out[i * 2 + 1] = y + dy / dl * push
     }
+    return out
+}
+
+private fun minEdge(q: FloatArray): Float {
+    var shortest = Float.MAX_VALUE
+    for (i in 0 until 4) {
+        val j = (i + 1) % 4
+        shortest = min(shortest, hypot(q[j * 2] - q[i * 2], q[j * 2 + 1] - q[i * 2 + 1]))
+    }
+    return shortest
+}
+
+/** 四边形的圆角路径：每个角在两条边上各退 [radius]，用二次曲线连起来。 */
+private fun roundedQuadPath(q: FloatArray, radius: Float): Path {
+    val path = Path()
+    for (i in 0 until 4) {
+        val prev = (i + 3) % 4
+        val next = (i + 1) % 4
+        val cx = q[i * 2]
+        val cy = q[i * 2 + 1]
+        val px = q[prev * 2] - cx
+        val py = q[prev * 2 + 1] - cy
+        val nx = q[next * 2] - cx
+        val ny = q[next * 2 + 1] - cy
+        val pl = hypot(px, py).coerceAtLeast(1e-3f)
+        val nl = hypot(nx, ny).coerceAtLeast(1e-3f)
+        val r = min(radius, min(pl, nl) * 0.5f)
+        val startX = cx + px / pl * r
+        val startY = cy + py / pl * r
+        val endX = cx + nx / nl * r
+        val endY = cy + ny / nl * r
+        if (i == 0) path.moveTo(startX, startY) else path.lineTo(startX, startY)
+        path.quadraticTo(cx, cy, endX, endY)
+    }
+    path.close()
+    return path
 }
 
 @Composable
@@ -1223,24 +1340,6 @@ private fun openUrl(context: Context, url: String) {
 }
 
 /* ------------------------------ 位图工具 ------------------------------ */
-
-private fun rotateBitmap(source: Bitmap, degrees: Int): Bitmap {
-    if (degrees == 0) return source
-    val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
-    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-}
-
-private fun scaleDown(source: Bitmap, maxSide: Int): Bitmap {
-    val longest = max(source.width, source.height)
-    if (longest <= maxSide) return source
-    val factor = maxSide.toFloat() / longest
-    return Bitmap.createScaledBitmap(
-        source,
-        (source.width * factor).toInt().coerceAtLeast(1),
-        (source.height * factor).toInt().coerceAtLeast(1),
-        true,
-    )
-}
 
 private fun cropCenterSquare(source: Bitmap, fraction: Float): Bitmap {
     val side = (minOf(source.width, source.height) * fraction).toInt().coerceAtLeast(1)
