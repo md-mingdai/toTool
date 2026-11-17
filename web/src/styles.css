@@ -220,6 +220,25 @@ mark {
   background-clip: content-box;
 }
 
+.global-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  height: 3px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  pointer-events: none;
+}
+
+.global-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.18s linear;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
 /* App shell */
 
 .app-shell {

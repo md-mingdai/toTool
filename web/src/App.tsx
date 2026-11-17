@@ -664,7 +664,7 @@ export default function App() {
       name: file.name,
       size: file.size,
       direction: 'upload',
-      progress: 0,
+      progress: 1,
       status: 'active',
       createdAt: '正在传输',
       local: true,
@@ -722,7 +722,7 @@ export default function App() {
       name: entry.name,
       size: entry.size,
       direction: 'download',
-      progress: 0,
+      progress: 1,
       status: 'active',
       createdAt: '正在下载',
       phase: 'download',
@@ -844,6 +844,10 @@ export default function App() {
   const categoryLabel = categories.find((item) => item.id === category)?.label ?? '手机文件'
   const pageLabel = folder?.name || categoryLabel
   const port = info?.port ?? (Number(window.location.port) || null)
+  const activeTasks = transfers.filter((task) => task.status === 'active')
+  const activeProgress = activeTasks.length > 0
+    ? Math.round(activeTasks.reduce((total, task) => total + task.progress, 0) / activeTasks.length)
+    : 0
 
   useEffect(() => {
     document.title = paired ? `隔空闪传 · ${pageLabel}` : '隔空闪传 · 配对'
@@ -851,6 +855,18 @@ export default function App() {
 
   return (
     <>
+      {paired && activeTasks.length > 0 && (
+        <div
+          className="global-progress"
+          role="progressbar"
+          aria-label="当前传输进度"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={activeProgress}
+        >
+          <span style={{ width: `${activeProgress}%` }} />
+        </div>
+      )}
       <div
         className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${!paired ? ' is-locked' : ''}`}
         aria-hidden={!paired || undefined}
