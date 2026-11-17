@@ -83,7 +83,7 @@ private val Licenses = listOf(
     LicenseItem("Jetpack Compose / AndroidX", "界面框架与基础库", "Apache License 2.0"),
     LicenseItem("Miuix", "小米风格的界面组件", "Apache License 2.0"),
     LicenseItem("ZXing", "二维码生成", "Apache License 2.0"),
-    LicenseItem("NanoHTTPD", "隔空闪传的局域网 HTTP 服务", "BSD 3-Clause"),
+    LicenseItem("Ktor", "隔空闪传的局域网 HTTP 服务", "Apache License 2.0"),
     LicenseItem("React / Vite / Phosphor / noble", "隔空闪传网页前端", "MIT / ISC"),
     LicenseItem("Space Grotesk / JetBrains Mono", "隔空闪传网页字体", "SIL Open Font License 1.1"),
     LicenseItem("FFmpeg", "音视频格式转换（内置的可执行文件，纯 LGPL 构建，不含 GPL / nonfree 组件）", "LGPL 2.1+"),

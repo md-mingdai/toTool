@@ -148,7 +148,10 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
 
     // 隔空闪传：手机上的轻量 HTTP 服务（静态页面 + 同源 API）
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
+    val ktorVersion = "3.6.1"
+    implementation("io.ktor:ktor-server-core-jvm:$ktorVersion")
+    implementation("io.ktor:ktor-server-cio-jvm:$ktorVersion")
+    implementation("org.slf4j:slf4j-nop:2.0.19")
 
     // 条码扫描：CameraX 负责相机预览与逐帧分析
     val cameraX = "1.4.2"

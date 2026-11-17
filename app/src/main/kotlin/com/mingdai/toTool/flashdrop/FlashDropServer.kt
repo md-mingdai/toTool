@@ -20,13 +20,28 @@ import android.util.LruCache
 import androidx.core.content.ContextCompat
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.graphics.drawable.toBitmap
-import fi.iki.elonen.NanoHTTPD
-import fi.iki.elonen.NanoHTTPD.IHTTPSession
-import fi.iki.elonen.NanoHTTPD.Method
-import fi.iki.elonen.NanoHTTPD.Response
+import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.request.contentLength
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
+import io.ktor.server.request.receiveChannel
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondOutputStream
+import io.ktor.server.response.respondText
+import io.ktor.server.response.header
+import io.ktor.server.routing.route
+import io.ktor.server.routing.routing
+import io.ktor.utils.io.jvm.javaio.copyTo
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -34,7 +49,8 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.io.SequenceInputStream
+import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -56,22 +72,22 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * 隔空闪传的手机端服务。
+ * 隔空闪传的手机端服务（Ktor CIO）。
  *
- * - 只监听局域网，端口从 [PORT_START] 开始递增到 [PORT_END]
+ * - 端口从 [PORT_START] 递增到 [PORT_END]
  * - 静态页面来自 assets/flashdrop（CI 构建 web/dist 后放进来）
- * - 所有 /api 接口同源；除配对/信息/健康检查外都需要 Bearer token
+ * - 所有 /api 接口同源；除配对、信息、健康检查外都需要 Bearer token
  * - 配对码默认每次成功配对后轮换；自定义配对码不轮换
  * - 可选的 AES-GCM 文件内容加密，密钥由配对码 + 随机 salt 经 PBKDF2 派生
  */
-class FlashDropServer(
+class FlashDropServer private constructor(
     context: Context,
     private val port: Int,
     initialCustomCodeEnabled: Boolean,
     initialCustomCode: String,
     initialEncryptionEnabled: Boolean,
     private val listener: Listener,
-) : NanoHTTPD(port) {
+) {
 
     interface Listener {
         fun onCodeChanged(code: String)
@@ -92,6 +108,9 @@ class FlashDropServer(
 
     @Volatile
     private var appsCacheAt = 0L
+
+    @Volatile
+    private var engine: EmbeddedServer<*, *>? = null
 
     @Volatile
     private var customCodeEnabled = initialCustomCodeEnabled
@@ -127,22 +146,11 @@ class FlashDropServer(
     val encryptionActive: Boolean get() = encryptionEnabled
     val pairedCount: Int get() = sessions.size
 
-    override fun serve(session: IHTTPSession): Response {
-        return try {
-            val path = session.uri.substringBefore('?')
-            if (path.startsWith("/api/")) handleApi(session, path) else serveStatic(path)
-        } catch (error: Exception) {
-            Log.w(TAG, "request failed: ${session.uri}", error)
-            jsonResponse(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "server-error"))
-        }
-    }
-
-    /* ------------------------------ 配对与设置 ------------------------------ */
-
-    override fun stop() {
+    fun stop() {
         sessions.clear()
         listener.onClientsChanged(0)
-        super.stop()
+        runCatching { engine?.stop(0, 0) }
+        engine = null
     }
 
     fun updateCustomCode(enabled: Boolean, value: String) {
@@ -161,29 +169,58 @@ class FlashDropServer(
         listener.onClientsChanged(0)
     }
 
-    private fun handlePair(session: IHTTPSession): Response {
-        if (session.method != Method.POST) return methodNotAllowed()
-        val body = runCatching { readJson(session) }.getOrNull()
-            ?: return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", "bad-json"))
+    private fun Application.configureServer() {
+        routing {
+            route("/") { handle { dispatch(call) } }
+            route("/{path...}") { handle { dispatch(call) } }
+        }
+    }
+
+    private suspend fun dispatch(call: ApplicationCall) {
+        try {
+            val path = call.request.path()
+            if (path.startsWith("/api/")) handleApi(call, path) else serveStatic(call, path)
+        } catch (error: Exception) {
+            Log.w(TAG, "request failed: ${call.request.path()}", error)
+            if (!call.response.isSent) {
+                respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "server-error"))
+            }
+        }
+    }
+
+    /* ------------------------------ 配对与设置 ------------------------------ */
+
+    private suspend fun handlePair(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
+        }
+        val body = runCatching { readJson(call) }.getOrNull()
+        if (body == null) {
+            respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-json"))
+            return
+        }
         val code = body.optString("code").replace(" ", "").trim()
         if (code.length != 6 || code.any { !it.isDigit() }) {
-            return pairingRejected()
+            pairingRejected(call)
+            return
         }
 
-        synchronized(failedAttempts) {
+        val rateLimited = synchronized(failedAttempts) {
             val now = System.currentTimeMillis()
             failedAttempts.removeAll { it < now - ATTEMPT_WINDOW_MS }
-            if (failedAttempts.size >= MAX_ATTEMPTS) {
-                return jsonResponse(
-                    Response.Status.TOO_MANY_REQUESTS,
-                    JSONObject().put("error", "rate-limited"),
-                ).apply { addHeader("Retry-After", "60") }
-            }
+            failedAttempts.size >= MAX_ATTEMPTS
+        }
+        if (rateLimited) {
+            call.response.header("Retry-After", "60")
+            respondJson(call, HttpStatusCode.TooManyRequests, JSONObject().put("error", "rate-limited"))
+            return
         }
 
         if (!MessageDigest.isEqual(currentCode.toByteArray(), code.toByteArray())) {
             synchronized(failedAttempts) { failedAttempts += System.currentTimeMillis() }
-            return pairingRejected()
+            pairingRejected(call)
+            return
         }
 
         synchronized(failedAttempts) { failedAttempts.clear() }
@@ -212,58 +249,71 @@ class FlashDropServer(
                 .put("iterations", PBKDF2_ITERATIONS)
         }
         response.put("encryption", encryptionJson)
-        return jsonResponse(Response.Status.OK, response)
+        respondJson(call, HttpStatusCode.OK, response)
     }
 
-    private fun handleSession(session: IHTTPSession): Response {
-        val authenticated = authenticated(session) ?: return unauthorized()
-        return jsonResponse(
-            Response.Status.OK,
+    private suspend fun handleSession(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        val authenticated = authenticated(call) ?: return unauthorized(call)
+        respondJson(
+            call,
+            HttpStatusCode.OK,
             JSONObject()
                 .put("paired", true)
                 .put("encryptionEnabled", authenticated.encryptionKey != null),
         )
     }
 
-    private fun handleLogout(session: IHTTPSession): Response {
-        if (session.method != Method.POST) return methodNotAllowed()
-        val token = header(session, "authorization")?.removePrefix("Bearer ")?.trim()
-            ?: return unauthorized()
-        if (sessions.remove(token) == null) return unauthorized()
+    private suspend fun handleLogout(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
+        }
+        val token = header(call, "Authorization")?.removePrefix("Bearer ")?.trim()
+        if (token.isNullOrEmpty() || sessions.remove(token) == null) {
+            unauthorized(call)
+            return
+        }
         listener.onClientsChanged(sessions.size)
-        return jsonResponse(Response.Status.OK, JSONObject().put("ok", true))
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("ok", true))
     }
 
-    private fun pairingRejected(): Response =
-        jsonResponse(Response.Status.UNAUTHORIZED, JSONObject().put("error", "invalid-code"))
+    private suspend fun pairingRejected(call: ApplicationCall) {
+        respondJson(call, HttpStatusCode.Unauthorized, JSONObject().put("error", "invalid-code"))
+    }
 
     /* -------------------------------- API -------------------------------- */
 
-    private fun handleApi(session: IHTTPSession, path: String): Response {
-        return when {
-            path == "/api/info" -> infoResponse()
-            path == "/api/health" -> jsonResponse(
-                Response.Status.OK,
+    private suspend fun handleApi(call: ApplicationCall, path: String) {
+        when {
+            path == "/api/info" -> infoResponse(call)
+            path == "/api/health" -> respondJson(
+                call,
+                HttpStatusCode.OK,
                 JSONObject().put("ok", true).put("service", "flashdrop"),
             )
-            path == "/api/pair" -> handlePair(session)
-            path == "/api/session" -> handleSession(session)
-            path == "/api/logout" -> handleLogout(session)
-            path == "/api/apps" -> handleApps(session)
-            path == "/api/files" -> handleFiles(session)
-            path == "/api/transfers" -> handleTransfers(session)
-            path == "/api/clipboard" -> handleClipboard(session)
-            path == "/api/upload" -> handleUpload(session)
-            path == "/api/download" -> handleDownload(session)
-            path == "/api/icon" -> handleIcon(session)
-            path == "/api/thumb" -> handleThumb(session)
-            else -> jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "not-found"))
+            path == "/api/pair" -> handlePair(call)
+            path == "/api/session" -> handleSession(call)
+            path == "/api/logout" -> handleLogout(call)
+            path == "/api/apps" -> handleApps(call)
+            path == "/api/files" -> handleFiles(call)
+            path == "/api/transfers" -> handleTransfers(call)
+            path == "/api/clipboard" -> handleClipboard(call)
+            path == "/api/upload" -> handleUpload(call)
+            path == "/api/download" -> handleDownload(call)
+            path == "/api/icon" -> handleIcon(call)
+            path == "/api/thumb" -> handleThumb(call)
+            else -> respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "not-found"))
         }
     }
 
-    private fun infoResponse(): Response {
-        return jsonResponse(
-            Response.Status.OK,
+    private suspend fun infoResponse(call: ApplicationCall) {
+        respondJson(
+            call,
+            HttpStatusCode.OK,
             JSONObject()
                 .put("port", port)
                 .put("device", deviceJson())
@@ -271,10 +321,14 @@ class FlashDropServer(
         )
     }
 
-    private fun handleApps(session: IHTTPSession): Response {
-        if (authenticated(session) == null) return unauthorized()
-        val scope = session.parameters["scope"]?.firstOrNull().orEmpty()
-        val query = session.parameters["q"]?.firstOrNull().orEmpty().trim()
+    private suspend fun handleApps(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call) == null) return unauthorized(call)
+        val scope = call.request.queryParameters["scope"].orEmpty()
+        val query = call.request.queryParameters["q"].orEmpty().trim()
         val all = installedApps()
         val filtered = all.asSequence()
             .filter { scope == "all" || scope.isEmpty() || it.scope == scope }
@@ -303,29 +357,41 @@ class FlashDropServer(
                     .put("iconUrl", "/api/icon?package=${urlEncode(app.packageName)}"),
             )
         }
-        return jsonResponse(Response.Status.OK, JSONObject().put("items", items).put("counts", counts))
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items).put("counts", counts))
     }
 
-    private fun handleFiles(session: IHTTPSession): Response {
-        if (authenticated(session) == null) return unauthorized()
-        if (!hasStorageAccess()) {
-            return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "storage-permission"))
+    private suspend fun handleFiles(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
         }
-        val category = session.parameters["category"]?.firstOrNull().orEmpty()
-        val path = session.parameters["path"]?.firstOrNull().orEmpty()
-        val query = session.parameters["q"]?.firstOrNull().orEmpty().trim()
+        if (authenticated(call) == null) return unauthorized(call)
+        if (!hasStorageAccess()) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
+            return
+        }
+        val category = call.request.queryParameters["category"].orEmpty()
+        val path = call.request.queryParameters["path"].orEmpty()
+        val query = call.request.queryParameters["q"].orEmpty().trim()
 
         val items = when (category) {
             "storage" -> listStorage(path, query)
             "photos", "videos", "audio", "documents", "archives", "apks", "downloads" ->
                 scanCategory(category, query)
-            else -> return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", "bad-category"))
+            else -> {
+                respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-category"))
+                return
+            }
         }
-        return jsonResponse(Response.Status.OK, JSONObject().put("items", items))
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
     }
 
-    private fun handleTransfers(session: IHTTPSession): Response {
-        if (authenticated(session) == null) return unauthorized()
+    private suspend fun handleTransfers(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call) == null) return unauthorized(call)
         val items = JSONArray()
         synchronized(transfers) {
             transfers.take(80).forEach { transfer ->
@@ -341,20 +407,28 @@ class FlashDropServer(
                 )
             }
         }
-        return jsonResponse(Response.Status.OK, JSONObject().put("items", items))
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
     }
 
-    private fun handleClipboard(session: IHTTPSession): Response {
-        if (authenticated(session) == null) return unauthorized()
-        if (session.method == Method.POST) {
-            val body = runCatching { readJson(session) }.getOrNull()
-                ?: return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", "bad-json"))
-            val text = body.optString("text")
-            return if (writeClipboard(text)) {
-                jsonResponse(Response.Status.OK, JSONObject().put("ok", true))
-            } else {
-                jsonResponse(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "clipboard-denied"))
+    private suspend fun handleClipboard(call: ApplicationCall) {
+        if (authenticated(call) == null) return unauthorized(call)
+        if (call.request.httpMethod == HttpMethod.Post) {
+            val body = runCatching { readJson(call) }.getOrNull()
+            if (body == null) {
+                respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-json"))
+                return
             }
+            val text = body.optString("text")
+            if (writeClipboard(text)) {
+                respondJson(call, HttpStatusCode.OK, JSONObject().put("ok", true))
+            } else {
+                respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "clipboard-denied"))
+            }
+            return
+        }
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
         }
 
         val text = readClipboard().orEmpty()
@@ -372,7 +446,7 @@ class FlashDropServer(
                     .put("text", text),
             )
         }
-        return jsonResponse(Response.Status.OK, JSONObject().put("items", items))
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
     }
 
     /* ------------------------------ 文件列表 ------------------------------ */
@@ -515,12 +589,22 @@ class FlashDropServer(
         return result
     }
 
-    private fun handleIcon(session: IHTTPSession): Response {
-        if (authenticated(session, allowQuery = true) == null) return unauthorized()
-        val packageName = session.parameters["package"]?.firstOrNull().orEmpty()
-        if (packageName.isEmpty()) return jsonResponse(Response.Status.BAD_REQUEST, JSONObject().put("error", "missing-package"))
+    private suspend fun handleIcon(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call, allowQuery = true) == null) return unauthorized(call)
+        val packageName = call.request.queryParameters["package"].orEmpty()
+        if (packageName.isEmpty()) {
+            respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "missing-package"))
+            return
+        }
         val cached = iconCache.get(packageName)
-        if (cached != null) return bytesResponse("image/png", cached)
+        if (cached != null) {
+            bytesResponse(call, ContentType.Image.PNG, cached)
+            return
+        }
         val pm = appContext.packageManager
         val bytes = runCatching {
             val info = pm.getApplicationInfo(packageName, 0)
@@ -530,20 +614,31 @@ class FlashDropServer(
                 out.toByteArray()
             }
         }.getOrNull()
-        if (bytes == null) return jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "icon-not-found"))
+        if (bytes == null) {
+            respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "icon-not-found"))
+            return
+        }
         iconCache.put(packageName, bytes)
-        return bytesResponse("image/png", bytes)
+        bytesResponse(call, ContentType.Image.PNG, bytes)
     }
 
-    private fun handleThumb(session: IHTTPSession): Response {
-        if (authenticated(session, allowQuery = true) == null) return unauthorized()
-        val path = session.parameters["path"]?.firstOrNull().orEmpty()
-        val file = safeFile(path)?.takeIf { it.isFile } ?: return jsonResponse(
-            Response.Status.NOT_FOUND,
-            JSONObject().put("error", "file-not-found"),
-        )
+    private suspend fun handleThumb(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call, allowQuery = true) == null) return unauthorized(call)
+        val path = call.request.queryParameters["path"].orEmpty()
+        val file = safeFile(path)?.takeIf { it.isFile }
+        if (file == null) {
+            respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "file-not-found"))
+            return
+        }
         val key = "${file.absolutePath}:${file.lastModified()}"
-        thumbCache.get(key)?.let { return bytesResponse("image/jpeg", it) }
+        thumbCache.get(key)?.let {
+            bytesResponse(call, ContentType.Image.JPEG, it)
+            return
+        }
         val bytes = runCatching {
             val bitmap = when (kindFor(file.name)) {
                 "image" -> decodeSampledBitmap(file, 240)
@@ -555,38 +650,55 @@ class FlashDropServer(
                 out.toByteArray()
             }
         }.getOrNull()
-        if (bytes == null) return jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "thumb-not-found"))
+        if (bytes == null) {
+            respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "thumb-not-found"))
+            return
+        }
         thumbCache.put(key, bytes)
-        return bytesResponse("image/jpeg", bytes)
+        bytesResponse(call, ContentType.Image.JPEG, bytes)
     }
 
     /* ------------------------------ 上传下载 ------------------------------ */
 
-    private fun handleUpload(session: IHTTPSession): Response {
-        if (session.method != Method.POST) return methodNotAllowed()
-        val authenticated = authenticated(session) ?: return unauthorized()
-        if (!hasStorageAccess()) {
-            return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "storage-permission"))
+    private suspend fun handleUpload(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
         }
-        val name = header(session, "x-flashdrop-name")
+        val authenticated = authenticated(call) ?: return unauthorized(call)
+        if (!hasStorageAccess()) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
+            return
+        }
+        val name = header(call, "X-FlashDrop-Name")
             ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrNull() }
             ?.takeIf { it.isNotBlank() }
             ?: "upload.bin"
-        val encrypted = header(session, "x-flashdrop-encrypted") == "1"
+        val encrypted = header(call, "X-FlashDrop-Encrypted") == "1"
         if (encrypted != (authenticated.encryptionKey != null)) {
-            return jsonResponse(
-                Response.Status.BAD_REQUEST,
+            respondJson(
+                call,
+                HttpStatusCode.BadRequest,
                 JSONObject().put("error", if (encrypted) "encryption-not-enabled" else "encryption-required"),
             )
+            return
         }
 
         val temp = File.createTempFile("flashdrop-", ".upload", appContext.cacheDir)
         var target: File? = null
         try {
-            FileOutputStream(temp).use { output -> copyRequestBody(session, output) }
-            val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val contentLength = call.request.contentLength()
+            val output = FileOutputStream(temp)
+            try {
+                call.receiveChannel().copyTo(output, contentLength ?: Long.MAX_VALUE)
+            } finally {
+                output.close()
+            }
+            val downloadsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = File(downloadsRoot, "toTool/FlashDrop")
             if (!targetDir.exists() && !targetDir.mkdirs()) {
-                return jsonResponse(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "download-dir"))
+                respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "download-dir"))
+                return
             }
             val saved = uniqueTarget(targetDir, sanitizeName(name))
             target = saved
@@ -596,67 +708,78 @@ class FlashDropServer(
                 temp.copyTo(saved, overwrite = true)
             }
             addTransfer(saved.name, saved.length(), "upload")
-            return jsonResponse(Response.Status.OK, JSONObject().put("item", fileJson(saved)))
+            respondJson(call, HttpStatusCode.OK, JSONObject().put("item", fileJson(saved)))
         } catch (error: Exception) {
             target?.delete()
             Log.w(TAG, "upload failed", error)
-            return jsonResponse(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "upload-failed"))
+            respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "upload-failed"))
         } finally {
             temp.delete()
         }
     }
 
-    private fun handleDownload(session: IHTTPSession): Response {
-        val authenticated = authenticated(session) ?: return unauthorized()
-        val packageName = session.parameters["package"]?.firstOrNull()
+    private suspend fun handleDownload(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        val authenticated = authenticated(call) ?: return unauthorized(call)
+        val packageName = call.request.queryParameters["package"]
         if (packageName.isNullOrBlank() && !hasStorageAccess()) {
-            return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "storage-permission"))
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
+            return
         }
         val file: File
         val downloadName: String
         if (!packageName.isNullOrBlank()) {
             val app = installedApps().firstOrNull { it.packageName == packageName }
-                ?: return jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "app-not-found"))
+            if (app == null) {
+                respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "app-not-found"))
+                return
+            }
             file = File(app.sourceDir)
             downloadName = "${sanitizeName(app.name)}.apk"
         } else {
-            val path = session.parameters["path"]?.firstOrNull().orEmpty()
-            file = safeFile(path)?.takeIf { it.isFile }
-                ?: return jsonResponse(Response.Status.NOT_FOUND, JSONObject().put("error", "file-not-found"))
+            val path = call.request.queryParameters["path"].orEmpty()
+            val resolved = safeFile(path)?.takeIf { it.isFile }
+            if (resolved == null) {
+                respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "file-not-found"))
+                return
+            }
+            file = resolved
             downloadName = file.name
         }
         if (!file.canRead()) {
-            return jsonResponse(Response.Status.FORBIDDEN, JSONObject().put("error", "cannot-read"))
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
+            return
         }
         addTransfer(downloadName, file.length(), "download")
-        val response = if (authenticated.encryptionKey != null) {
-            encryptFileResponse(file, authenticated.encryptionKey!!)
+        call.response.header("Content-Disposition", contentDisposition(downloadName))
+        call.response.header("Cache-Control", "no-store")
+        addSecurityHeaders(call)
+        val key = authenticated.encryptionKey
+        if (key != null) {
+            call.response.header("X-FlashDrop-Encrypted", "1")
+            val iv = ByteArray(GCM_IV_BYTES).also(secureRandom::nextBytes)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+            call.respondOutputStream(
+                ContentType.Application.OctetStream,
+                HttpStatusCode.OK,
+                file.length() + GCM_IV_BYTES + GCM_TAG_BYTES,
+            ) { output ->
+                output.write(iv)
+                CipherInputStream(FileInputStream(file), cipher).use { it.copyTo(output) }
+            }
         } else {
-            NanoHTTPD.newFixedLengthResponse(
-                Response.Status.OK,
-                "application/octet-stream",
-                FileInputStream(file),
+            call.respondOutputStream(
+                ContentType.Application.OctetStream,
+                HttpStatusCode.OK,
                 file.length(),
-            )
+            ) { output ->
+                FileInputStream(file).use { it.copyTo(output) }
+            }
         }
-        response.addHeader("Content-Disposition", contentDisposition(downloadName))
-        response.addHeader("Cache-Control", "no-store")
-        if (authenticated.encryptionKey != null) response.addHeader("X-FlashDrop-Encrypted", "1")
-        return response
-    }
-
-    private fun encryptFileResponse(file: File, key: SecretKey): Response {
-        val iv = ByteArray(GCM_IV_BYTES).also(secureRandom::nextBytes)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
-        val encrypted = CipherInputStream(FileInputStream(file), cipher)
-        val body = SequenceInputStream(ByteArrayInputStream(iv), encrypted)
-        return NanoHTTPD.newFixedLengthResponse(
-            Response.Status.OK,
-            "application/octet-stream",
-            body,
-            file.length() + GCM_IV_BYTES + GCM_TAG_BYTES,
-        )
     }
 
     private fun decryptToFile(source: File, target: File, key: SecretKey) {
@@ -673,10 +796,15 @@ class FlashDropServer(
 
     /* ------------------------------ 静态资源 ------------------------------ */
 
-    private fun serveStatic(path: String): Response {
+    private suspend fun serveStatic(call: ApplicationCall, path: String) {
+        if (call.request.httpMethod != HttpMethod.Get && call.request.httpMethod != HttpMethod.Head) {
+            methodNotAllowed(call)
+            return
+        }
         val clean = path.trimStart('/').ifBlank { "index.html" }
         if (clean.contains("..")) {
-            return NanoHTTPD.newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "Forbidden")
+            call.respondText("Forbidden", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+            return
         }
         val candidates = if (clean == "index.html" || !clean.contains('.')) {
             listOf(clean, "index.html")
@@ -685,26 +813,30 @@ class FlashDropServer(
         }
         for (candidate in candidates) {
             val stream = runCatching { appContext.assets.open("flashdrop/$candidate") }.getOrNull() ?: continue
-            val mime = mimeType(candidate)
-            val response = NanoHTTPD.newChunkedResponse(Response.Status.OK, mime, stream)
-            response.addHeader("Cache-Control", if (candidate.startsWith("assets/")) "public, max-age=31536000, immutable" else "no-store")
-            addSecurityHeaders(response)
-            return response
+            call.response.header(
+                "Cache-Control",
+                if (candidate.startsWith("assets/")) "public, max-age=31536000, immutable" else "no-store",
+            )
+            addSecurityHeaders(call)
+            call.respondOutputStream(ContentType.parse(mimeType(candidate)), HttpStatusCode.OK) { output ->
+                stream.use { it.copyTo(output) }
+            }
+            return
         }
-        return NanoHTTPD.newFixedLengthResponse(
-            Response.Status.NOT_FOUND,
-            "text/plain; charset=utf-8",
+        call.respondText(
             "Web 资源还没有打包进 APK",
+            ContentType.Text.Plain,
+            HttpStatusCode.NotFound,
         )
     }
 
     /* ------------------------------ 工具函数 ------------------------------ */
 
-    private fun authenticated(session: IHTTPSession, allowQuery: Boolean = false): Session? {
+    private fun authenticated(call: ApplicationCall, allowQuery: Boolean = false): Session? {
+        val authorization = header(call, "Authorization")
         val token = when {
-            header(session, "authorization")?.startsWith("Bearer ") == true ->
-                header(session, "authorization")!!.removePrefix("Bearer ").trim()
-            allowQuery -> session.parameters["token"]?.firstOrNull()
+            authorization?.startsWith("Bearer ") == true -> authorization.removePrefix("Bearer ").trim()
+            allowQuery -> call.request.queryParameters["token"]
             else -> null
         } ?: return null
         val found = sessions[token] ?: return null
@@ -716,90 +848,39 @@ class FlashDropServer(
         return found
     }
 
-    private fun unauthorized(): Response =
-        jsonResponse(Response.Status.UNAUTHORIZED, JSONObject().put("error", "unauthorized"))
-
-    private fun methodNotAllowed(): Response =
-        jsonResponse(Response.Status.METHOD_NOT_ALLOWED, JSONObject().put("error", "method-not-allowed"))
-
-    private fun jsonResponse(status: Response.Status, body: JSONObject): Response {
-        val response = NanoHTTPD.newFixedLengthResponse(status, "application/json; charset=utf-8", body.toString())
-        response.addHeader("Cache-Control", "no-store")
-        addSecurityHeaders(response)
-        return response
+    private suspend fun unauthorized(call: ApplicationCall) {
+        respondJson(call, HttpStatusCode.Unauthorized, JSONObject().put("error", "unauthorized"))
     }
 
-    private fun bytesResponse(mime: String, bytes: ByteArray): Response {
-        val response = NanoHTTPD.newFixedLengthResponse(
-            Response.Status.OK,
-            mime,
-            ByteArrayInputStream(bytes),
-            bytes.size.toLong(),
-        )
-        response.addHeader("Cache-Control", "no-store")
-        addSecurityHeaders(response)
-        return response
+    private suspend fun methodNotAllowed(call: ApplicationCall) {
+        respondJson(call, HttpStatusCode.MethodNotAllowed, JSONObject().put("error", "method-not-allowed"))
     }
 
-    private fun addSecurityHeaders(response: Response) {
-        response.addHeader("X-Content-Type-Options", "nosniff")
-        response.addHeader("Referrer-Policy", "no-referrer")
+    private suspend fun respondJson(call: ApplicationCall, status: HttpStatusCode, body: JSONObject) {
+        call.response.header("Cache-Control", "no-store")
+        addSecurityHeaders(call)
+        call.respondText(body.toString(), ContentType.Application.Json, status)
     }
 
-    private fun readJson(session: IHTTPSession): JSONObject {
+    private suspend fun bytesResponse(call: ApplicationCall, contentType: ContentType, bytes: ByteArray) {
+        call.response.header("Cache-Control", "no-store")
+        addSecurityHeaders(call)
+        call.respondBytes(bytes, contentType, HttpStatusCode.OK)
+    }
+
+    private fun addSecurityHeaders(call: ApplicationCall) {
+        call.response.header("X-Content-Type-Options", "nosniff")
+        call.response.header("Referrer-Policy", "no-referrer")
+    }
+
+    private suspend fun readJson(call: ApplicationCall): JSONObject {
         val max = 64 * 1024
-        val body = readRequestBody(session, max)
-        return JSONObject(String(body, Charsets.UTF_8))
+        val length = call.request.contentLength()
+        if (length != null && length > max) throw IOException("body-too-large")
+        val text = call.receiveText()
+        if (text.length > max) throw IOException("body-too-large")
+        return JSONObject(text)
     }
-
-    /**
-     * 按 Content-Length 精确读取请求体。
-     * 不能读到 EOF：HTTP keep-alive 下这个流不会在请求体结束时关闭，
-     * 读到 EOF 会一直等到 socket 超时，表现为“配对很慢”并最终返回 bad-json。
-     */
-    private fun readRequestBody(session: IHTTPSession, max: Int): ByteArray {
-        val length = contentLength(session)
-        if (length != null) {
-            if (length > max) throw IOException("body-too-large")
-            val bytes = ByteArray(length.toInt())
-            readFully(session.inputStream, bytes)
-            return bytes
-        }
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(4096)
-        var total = 0
-        while (true) {
-            val read = session.inputStream.read(buffer)
-            if (read <= 0) break
-            total += read
-            if (total > max) throw IOException("body-too-large")
-            output.write(buffer, 0, read)
-        }
-        return output.toByteArray()
-    }
-
-    private fun copyRequestBody(session: IHTTPSession, output: OutputStream) {
-        val length = contentLength(session)
-        if (length != null) {
-            copyExactly(session.inputStream, output, length)
-        } else {
-            session.inputStream.copyTo(output)
-        }
-    }
-
-    private fun copyExactly(input: InputStream, output: OutputStream, length: Long) {
-        val buffer = ByteArray(64 * 1024)
-        var remaining = length
-        while (remaining > 0) {
-            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-            if (read <= 0) throw IOException("unexpected-eof")
-            output.write(buffer, 0, read)
-            remaining -= read
-        }
-    }
-
-    private fun contentLength(session: IHTTPSession): Long? =
-        header(session, "content-length")?.toLongOrNull()?.takeIf { it >= 0 }
 
     private fun readFully(input: InputStream, target: ByteArray) {
         var offset = 0
@@ -810,8 +891,8 @@ class FlashDropServer(
         }
     }
 
-    private fun header(session: IHTTPSession, name: String): String? =
-        session.headers[name] ?: session.headers[name.lowercase(Locale.ROOT)]
+    private fun header(call: ApplicationCall, name: String): String? =
+        call.request.headers[name] ?: call.request.headers[name.lowercase(Locale.ROOT)]
 
     private fun deviceJson(): JSONObject {
         val total = storageTotal()
@@ -864,10 +945,7 @@ class FlashDropServer(
         "documents" -> setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "csv")
         "archives" -> setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz")
         "apks" -> setOf("apk", "apks", "xapk", "apkm")
-        "downloads" -> setOf(
-            "apk", "apks", "xapk", "apkm", "zip", "rar", "7z", "pdf", "doc", "docx",
-            "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "mp4", "mov", "mkv", "mp3", "flac", "wav",
-        )
+        "downloads" -> emptySet()
         else -> emptySet()
     }
 
@@ -915,8 +993,9 @@ class FlashDropServer(
 
     private fun contentDisposition(name: String): String {
         val safe = name.replace("\"", "").replace("\r", "").replace("\n", "")
+        val ascii = safe.map { if (it.code in 32..126) it else '_' }.joinToString("")
         val encoded = URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-        return "attachment; filename=\"$safe\"; filename*=UTF-8''$encoded"
+        return "attachment; filename=\"$ascii\"; filename*=UTF-8''$encoded"
     }
 
     private fun mimeType(path: String): String = when (path.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
@@ -1045,6 +1124,7 @@ class FlashDropServer(
         ): FlashDropServer {
             var lastError: Exception? = null
             for (port in PORT_START..PORT_END) {
+                if (!isPortFree(port)) continue
                 val server = FlashDropServer(
                     context = context,
                     port = port,
@@ -1053,15 +1133,27 @@ class FlashDropServer(
                     initialEncryptionEnabled = encryptionEnabled,
                     listener = listener,
                 )
+                val engine = embeddedServer(CIO, port = port, host = "0.0.0.0") {
+                    server.configureServer()
+                }
                 try {
-                    server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+                    engine.start(wait = false)
+                    server.engine = engine
                     return server
                 } catch (error: Exception) {
                     lastError = error
-                    runCatching { server.stop() }
+                    runCatching { engine.stop(0, 0) }
                 }
             }
             throw IOException("2233-2333 没有可用端口", lastError)
         }
+
+        private fun isPortFree(port: Int): Boolean = runCatching {
+            ServerSocket().use { socket ->
+                socket.reuseAddress = true
+                socket.bind(InetSocketAddress("0.0.0.0", port))
+            }
+            true
+        }.getOrDefault(false)
     }
 }

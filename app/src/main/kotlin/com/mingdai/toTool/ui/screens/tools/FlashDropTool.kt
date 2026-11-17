@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +75,7 @@ fun FlashDropTool(padding: PaddingValues) {
     var showCodeDialog by remember { mutableStateOf(false) }
     var codeDraft by remember { mutableStateOf("") }
     var codeError by remember { mutableStateOf<String?>(null) }
+    var autoPermissionRequested by rememberSaveable { mutableStateOf(false) }
 
     val storagePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -113,6 +116,14 @@ fun FlashDropTool(padding: PaddingValues) {
                     Manifest.permission.WRITE_EXTERNAL_STORAGE,
                 ),
             )
+        }
+    }
+
+    // 进入工具页先申请一次文件访问权限；用户拒绝后不再反复弹出，只保留页面里的授权卡片。
+    LaunchedEffect(state.storageGranted, autoPermissionRequested) {
+        if (!state.storageGranted && !autoPermissionRequested) {
+            autoPermissionRequested = true
+            requestStorageAccess()
         }
     }
 

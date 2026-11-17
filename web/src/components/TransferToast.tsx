@@ -61,7 +61,11 @@ export function TransferToast({ records, visible, onClose, onView }: TransferToa
             <span className="toast-copy">
               <span className="toast-name">{record.name}</span>
               <span className="toast-meta">
-                {record.status === 'done' ? '已完成' : `${Math.round(record.progress)}%`}
+                {record.status === 'done'
+                  ? '已完成'
+                  : record.phase === 'decrypt'
+                    ? '解密中'
+                    : `${Math.round(record.progress)}%`}
                 <span aria-hidden="true"> · </span>
                 {formatBytes(record.size)}
               </span>

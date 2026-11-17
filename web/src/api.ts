@@ -6,13 +6,13 @@ import type {
   AppEntry,
   AppScope,
   CategoryId,
+  DownloadPhase,
   Entry,
   FileEntry,
   PairResult,
   ServerInfo,
   TransferRecord,
 } from './types'
-
 const TOKEN_KEY = 'flashdrop-token'
 const KEY_KEY = 'flashdrop-key'
 const MAX_ENCRYPTED_BYTES = 256 * 1024 * 1024
@@ -232,36 +232,85 @@ export async function listClipboard(): Promise<FileEntry[]> {
   return data.items
 }
 
-export async function downloadEntry(entry: Entry): Promise<string> {
+export async function downloadEntry(
+  entry: Entry,
+  onProgress: (phase: DownloadPhase, ratio: number) => void = () => {},
+): Promise<string> {
   if (entry.type === 'folder') throw new Error('不能下载文件夹')
   const endpoint = entry.type === 'app'
     ? `/api/download?package=${encodeURIComponent(entry.packageName)}`
     : `/api/download?path=${encodeURIComponent(entry.path)}`
-  const response = await apiFetch(endpoint)
-  const encrypted = response.headers.get('x-flashdrop-encrypted') === '1'
-  let blob: Blob
-  if (encrypted) {
-    if (!encryptionKey) throw new Error('缺少加密密钥，请重新配对')
-    const buffer = new Uint8Array(await response.arrayBuffer())
-    if (buffer.length < 13) throw new Error('加密文件格式错误')
-    const iv = buffer.slice(0, 12)
-    const ciphertext = buffer.slice(12)
-    const plain = gcm(encryptionKey, iv).decrypt(ciphertext)
-    blob = new Blob([toArrayBuffer(plain)])
-  } else {
-    blob = await response.blob()
-  }
-  const dispositionName = filenameFromDisposition(response.headers.get('content-disposition'))
-  const name = dispositionName || (entry.type === 'app' ? `${entry.name}.apk` : entry.name)
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = name
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-  return name
+
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', endpoint)
+    xhr.responseType = 'arraybuffer'
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress('download', Math.min(1, event.loaded / event.total))
+      }
+    }
+    xhr.onerror = () => reject(new ApiError(0, 'network'))
+    xhr.ontimeout = () => reject(new ApiError(0, 'timeout'))
+    xhr.onload = () => {
+      void (async () => {
+        if (xhr.status === 401) {
+          clearSession()
+          reject(new UnauthorizedError())
+          return
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          let code = `http-${xhr.status}`
+          try {
+            const text = new TextDecoder().decode(new Uint8Array(xhr.response as ArrayBuffer))
+            const data = JSON.parse(text) as { error?: string }
+            code = data.error ?? code
+          } catch {
+            // 非 JSON 错误响应
+          }
+          if (xhr.status === 403 && code === 'storage-permission') {
+            reject(new StoragePermissionError())
+          } else {
+            reject(new ApiError(xhr.status, code))
+          }
+          return
+        }
+        try {
+          const raw = new Uint8Array(xhr.response as ArrayBuffer)
+          let blob: Blob
+          if (xhr.getResponseHeader('x-flashdrop-encrypted') === '1') {
+            if (!encryptionKey) throw new Error('缺少加密密钥，请重新配对')
+            if (raw.length < 13) throw new Error('加密文件格式错误')
+            onProgress('decrypt', 0)
+            // 让浏览器先画出“正在解密”的进度状态，再执行同步 AES-GCM 解密。
+            await new Promise<void>((paint) => {
+              window.requestAnimationFrame(() => window.requestAnimationFrame(() => paint()))
+            })
+            const plain = gcm(encryptionKey, raw.slice(0, 12)).decrypt(raw.slice(12))
+            blob = new Blob([toArrayBuffer(plain)])
+            onProgress('decrypt', 1)
+          } else {
+            blob = new Blob([toArrayBuffer(raw)])
+          }
+          const dispositionName = filenameFromDisposition(xhr.getResponseHeader('content-disposition'))
+          const name = dispositionName || (entry.type === 'app' ? `${entry.name}.apk` : entry.name)
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = name
+          document.body.appendChild(anchor)
+          anchor.click()
+          anchor.remove()
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+          resolve(name)
+        } catch (error) {
+          reject(error)
+        }
+      })()
+    }
+    xhr.send()
+  })
 }
 
 export async function uploadFile(file: File, onProgress: (ratio: number) => void): Promise<void> {

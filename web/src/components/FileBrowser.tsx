@@ -17,6 +17,7 @@ import {
   UploadSimple,
   WarningCircle,
 } from '@phosphor-icons/react'
+import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import { categories, entryKindLabel, formatBytes, totalBytes } from '../data'
 import type {
@@ -46,6 +47,7 @@ interface FileBrowserProps {
   onScopeChange: (scope: AppScope | 'all') => void
   onOpenFolder: (folder: FolderEntry) => void
   onGoRoot: () => void
+  onNavigatePath: (path: string) => void
   onOpenEntry: (entry: Entry) => void
   onDownload: (entry: Entry) => void
   onCopy: (entry: FileEntry) => void
@@ -285,6 +287,7 @@ export function FileBrowser({
   onScopeChange,
   onOpenFolder,
   onGoRoot,
+  onNavigatePath,
   onOpenEntry,
   onDownload,
   onCopy,
@@ -313,15 +316,32 @@ export function FileBrowser({
 
   return (
     <div className="content-inner">
-      {folder && (
-        <div className="folder-path">
-          <button type="button" className="path-back" onClick={onGoRoot}>
-            手机存储
-          </button>
-          <CaretRight size={13} weight="regular" aria-hidden="true" />
-          <strong>{folder.name}</strong>
-        </div>
-      )}
+      {folder && (() => {
+        const parts = folder.path.split('/').filter(Boolean)
+        return (
+          <div className="folder-path">
+            <button type="button" className="path-back" onClick={onGoRoot}>
+              手机存储
+            </button>
+            {parts.map((part, index) => {
+              const path = parts.slice(0, index + 1).join('/')
+              const last = index === parts.length - 1
+              return (
+                <Fragment key={path}>
+                  <CaretRight size={13} weight="regular" aria-hidden="true" />
+                  {last ? (
+                    <strong>{part}</strong>
+                  ) : (
+                    <button type="button" className="path-back" onClick={() => onNavigatePath(path)}>
+                      {part}
+                    </button>
+                  )}
+                </Fragment>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       <div className="page-head">
         <div className="page-title">

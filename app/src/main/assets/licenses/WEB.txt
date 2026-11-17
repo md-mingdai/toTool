@@ -25,8 +25,8 @@
    https://www.jetbrains.com/lp/mono/
    SIL Open Font License 1.1
 
-6. NanoHTTPD
-   https://github.com/NanoHttpd/nanohttpd
-   BSD 3-Clause License
+6. Ktor
+   https://ktor.io
+   Apache License 2.0
 
 完整的许可证文本可在各自的软件包中查看。

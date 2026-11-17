@@ -60,15 +60,78 @@ function messageForError(error: unknown): string {
   return '操作失败，请稍后重试。'
 }
 
+interface RouteState {
+  category: CategoryId
+  path: string
+  query: string
+  scope: AppScope | 'all'
+}
+
+const categoryIds = new Set<CategoryId>(categories.map((item) => item.id))
+
+function parseRoute(): RouteState {
+  const url = new URL(window.location.href)
+  let segments: string[] = []
+  try {
+    segments = url.pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part))
+  } catch {
+    segments = url.pathname.split('/').filter(Boolean)
+  }
+  const first = segments[0]
+  let category: CategoryId = 'storage'
+  let path = ''
+  if (first === 'storage') {
+    path = segments.slice(1).join('/')
+  } else if (first && categoryIds.has(first as CategoryId)) {
+    category = first as CategoryId
+  }
+  const scopeValue = url.searchParams.get('scope')
+  const scope: AppScope | 'all' = scopeValue === 'system' || scopeValue === 'user' ? scopeValue : 'all'
+  return {
+    category,
+    path,
+    query: url.searchParams.get('q') ?? '',
+    scope,
+  }
+}
+
+function folderFromPath(path: string): FolderEntry | null {
+  if (!path) return null
+  const segments = path.split('/').filter(Boolean)
+  return {
+    type: 'folder',
+    id: path,
+    name: segments[segments.length - 1] ?? path,
+    path,
+    size: 0,
+    itemCount: 0,
+    modified: '',
+  }
+}
+
+function routeUrl(category: CategoryId, path: string, query: string, scope: AppScope | 'all'): string {
+  const base = category === 'storage'
+    ? path
+      ? `/storage/${path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}`
+      : '/storage'
+    : `/${category}`
+  const params = new URLSearchParams()
+  if (query.trim()) params.set('q', query.trim())
+  if (category === 'apps' && scope !== 'all') params.set('scope', scope)
+  const search = params.toString()
+  return search ? `${base}?${search}` : base
+}
+
 export default function App() {
+  const initialRoute = useRef<RouteState>(parseRoute()).current
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const [paired, setPaired] = useState(api.hasSession())
   const [info, setInfo] = useState<ServerInfo | null>(null)
   const [encryptionEnabled, setEncryptionEnabled] = useState(api.isEncryptionActive())
-  const [category, setCategory] = useState<CategoryId>('apps')
-  const [folder, setFolder] = useState<FolderEntry | null>(null)
-  const [appsScope, setAppsScope] = useState<AppScope | 'all'>('all')
-  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<CategoryId>(initialRoute.category)
+  const [folder, setFolder] = useState<FolderEntry | null>(() => folderFromPath(initialRoute.path))
+  const [appsScope, setAppsScope] = useState<AppScope | 'all'>(initialRoute.scope)
+  const [query, setQuery] = useState(initialRoute.query)
   const [entries, setEntries] = useState<Entry[]>([])
   const [appCounts, setAppCounts] = useState<AppCounts>({ all: 0, system: 0, user: 0 })
   const [transfers, setTransfers] = useState<TransferRecord[]>([])
@@ -97,6 +160,29 @@ export default function App() {
       // 忽略无法写入的情况
     }
   }, [theme])
+
+  // 首次访问或旧的深层链接：把地址规范到 /storage 或已知分类。
+  useEffect(() => {
+    const first = window.location.pathname.split('/').filter(Boolean)[0]
+    if (!first || (first !== 'storage' && !categoryIds.has(first as CategoryId))) {
+      window.history.replaceState(null, '', routeUrl(initialRoute.category, initialRoute.path, initialRoute.query, initialRoute.scope))
+    }
+  }, [initialRoute])
+
+  // PJAX 的返回/前进：只换数据和 URL 对应状态，不刷新页面。
+  useEffect(() => {
+    const onPopState = () => {
+      const route = parseRoute()
+      setCategory(route.category)
+      setFolder(folderFromPath(route.path))
+      setAppsScope(route.scope)
+      setQuery(route.query)
+      setSelected(null)
+      contentRef.current?.scrollTo({ top: 0 })
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   const handleDisconnect = useCallback(() => {
     void api.logout()
@@ -197,6 +283,7 @@ export default function App() {
 
   useEffect(() => {
     if (!paired) return
+    const folderPath = folder?.path ?? ''
     let cancelled = false
     const timer = window.setTimeout(async () => {
       setLoading(true)
@@ -226,9 +313,21 @@ export default function App() {
             setConnectionLost(false)
           }
         } else {
-          const result = await api.listFiles(category, folder?.path ?? '', query)
+          const result = await api.listFiles(category, folderPath, query)
           if (!cancelled) {
             setEntries(result)
+            setFolder((previous) => {
+              if (!previous || previous.path !== folderPath) return previous
+              const loadedSize = result.reduce((total, entry) => total + entry.size, 0)
+              const first = result[0]
+              const modified = first && 'modified' in first ? first.modified : previous.modified
+              return {
+                ...previous,
+                itemCount: previous.itemCount || result.length,
+                size: previous.size || loadedSize,
+                modified: previous.modified || modified,
+              }
+            })
             setConnectionLost(false)
           }
         }
@@ -256,6 +355,23 @@ export default function App() {
     contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
+  const syncUrl = useCallback((
+    nextCategory: CategoryId,
+    nextPath: string,
+    nextQuery: string,
+    nextScope: AppScope | 'all',
+    replace = false,
+  ) => {
+    const nextUrl = routeUrl(nextCategory, nextPath, nextQuery, nextScope)
+    const current = window.location.pathname + window.location.search
+    if (nextUrl === current) return
+    if (replace) {
+      window.history.replaceState(null, '', nextUrl)
+    } else {
+      window.history.pushState(null, '', nextUrl)
+    }
+  }, [])
+
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false)
     window.setTimeout(() => mobileMenuRef.current?.focus(), 0)
@@ -269,9 +385,10 @@ export default function App() {
     setAppsScope('all')
     setQuery('')
     setSelected(null)
+    syncUrl(next, '', '', 'all')
     closeSidebar()
     scrollTop()
-  }, [closeSidebar, scrollTop])
+  }, [closeSidebar, scrollTop, syncUrl])
 
   const handlePair = useCallback(async (code: string) => {
     const result = await api.pair(code)
@@ -282,7 +399,7 @@ export default function App() {
     })
     setEncryptionEnabled(result.encryption.enabled)
     setPaired(true)
-    setCategory('apps')
+    setCategory('storage')
     setFolder(null)
     setAppsScope('all')
     setQuery('')
@@ -290,29 +407,57 @@ export default function App() {
     setTransfers([])
     setToastRecords([])
     setConnectionLost(false)
+    syncUrl('storage', '', '', 'all', true)
     setNotice(`已连接 ${result.device.name}`)
-  }, [])
+  }, [syncUrl])
+
   const handleOpenFolder = useCallback((next: FolderEntry) => {
     setFolder(next)
     setQuery('')
     setSelected(null)
+    syncUrl('storage', next.path, '', 'all')
     scrollTop()
-  }, [scrollTop])
+  }, [scrollTop, syncUrl])
 
   const handleGoRoot = useCallback(() => {
     setFolder(null)
     setQuery('')
+    syncUrl('storage', '', '', 'all')
     scrollTop()
-  }, [scrollTop])
+  }, [scrollTop, syncUrl])
+
+  const handleNavigatePath = useCallback((path: string) => {
+    setFolder(folderFromPath(path))
+    setQuery('')
+    setSelected(null)
+    syncUrl('storage', path, '', 'all')
+    scrollTop()
+  }, [scrollTop, syncUrl])
+
+  const handleQueryChange = useCallback((next: string) => {
+    setQuery(next)
+    syncUrl(category, folder?.path ?? '', next, appsScope, true)
+  }, [appsScope, category, folder?.path, syncUrl])
+
+  const handleScopeChange = useCallback((next: AppScope | 'all') => {
+    setAppsScope(next)
+    syncUrl('apps', '', query, next, true)
+  }, [query, syncUrl])
+
+  const clearQuery = useCallback(() => {
+    setQuery('')
+    syncUrl(category, folder?.path ?? '', '', appsScope, true)
+  }, [appsScope, category, folder?.path, syncUrl])
 
   const handleViewTransfers = useCallback(() => {
     setCategory('transfers')
     setFolder(null)
     setQuery('')
     setToastOpen(false)
+    syncUrl('transfers', '', '', 'all')
     closeSidebar()
     scrollTop()
-  }, [closeSidebar, scrollTop])
+  }, [closeSidebar, scrollTop, syncUrl])
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!paired) return
@@ -365,15 +510,40 @@ export default function App() {
   }, [handleDisconnect, paired])
 
   const handleDownload = useCallback(async (entry: Entry) => {
+    const record: TransferRecord = {
+      id: `download-${Date.now()}`,
+      name: entry.name,
+      size: entry.size,
+      direction: 'download',
+      progress: 0,
+      status: 'active',
+      createdAt: '正在下载',
+      phase: 'download',
+    }
+    setToastRecords([record])
+    setToastOpen(true)
+    const update = (patch: Partial<TransferRecord>) => {
+      setToastRecords((previous) =>
+        previous.map((item) => (item.id === record.id ? { ...item, ...patch } : item)))
+    }
     try {
-      const name = await api.downloadEntry(entry)
-      setNotice(`已开始下载 ${name}`)
+      const name = await api.downloadEntry(entry, (phase, ratio) => {
+        update({
+          phase,
+          progress: phase === 'decrypt' ? 90 + Math.round(ratio * 10) : Math.round(ratio * 90),
+          createdAt: phase === 'decrypt' ? '正在解密' : '正在下载',
+        })
+      })
+      update({ name, progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
       setSelected(null)
-      const records = await api.listTransfers()
-      setTransfers(records)
-      setToastRecords(records.slice(0, 3))
-      setToastOpen(true)
+      setNotice(`已下载 ${name}`)
+      try {
+        setTransfers(await api.listTransfers())
+      } catch {
+        // 下载已经完成，传输列表刷新失败不打断
+      }
     } catch (caught) {
+      setToastRecords((previous) => previous.filter((item) => item.id !== record.id))
       if (caught instanceof api.UnauthorizedError) {
         handleDisconnect()
         return
@@ -477,7 +647,7 @@ export default function App() {
           )}
           <Topbar
             query={query}
-            onQueryChange={setQuery}
+            onQueryChange={handleQueryChange}
             onUpload={() => inputRef.current?.click()}
             theme={theme}
             onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
@@ -498,14 +668,15 @@ export default function App() {
               transfers={transfers}
               loading={loading}
               error={error}
-              onScopeChange={setAppsScope}
+              onScopeChange={handleScopeChange}
               onOpenFolder={handleOpenFolder}
               onGoRoot={handleGoRoot}
+              onNavigatePath={handleNavigatePath}
               onOpenEntry={setSelected}
               onDownload={(entry) => void handleDownload(entry)}
               onCopy={handleCopy}
               onUpload={() => inputRef.current?.click()}
-              onClearQuery={() => setQuery('')}
+              onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}
             />
           </main>
@@ -517,7 +688,7 @@ export default function App() {
                   <UploadSimple size={28} weight="regular" />
                 </span>
                 <strong>松手，传到手机</strong>
-                <span>文件会保存到手机的 Download 文件夹</span>
+                <span>文件会保存到手机的 Download/toTool/FlashDrop 文件夹</span>
               </div>
             </div>
           )}

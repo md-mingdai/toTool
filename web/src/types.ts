@@ -98,6 +98,8 @@ export interface AppCounts {
 
 export type TransferDirection = 'upload' | 'download'
 
+export type DownloadPhase = 'download' | 'decrypt'
+
 export interface TransferRecord {
   id: string
   name: string
@@ -106,6 +108,7 @@ export interface TransferRecord {
   progress: number
   status: 'active' | 'done'
   createdAt: string
+  phase?: DownloadPhase
 }
 
 export interface ServerInfo {
