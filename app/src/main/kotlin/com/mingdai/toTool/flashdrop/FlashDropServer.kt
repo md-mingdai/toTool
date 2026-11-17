@@ -170,6 +170,7 @@ class FlashDropServer private constructor(
         val progress: Int,
         val status: String,
         val createdAt: String,
+        val path: String? = null,
     )
 
     val code: String get() = currentCode
@@ -362,6 +363,7 @@ class FlashDropServer private constructor(
             path == "/api/clipboard" -> handleClipboard(call)
             path == "/api/upload" -> handleUpload(call)
             path == "/api/download" -> handleDownload(call)
+            path == "/api/media" -> handleDownload(call, inline = true)
             path == "/api/icon" -> handleIcon(call)
             path == "/api/thumb" -> handleThumb(call)
             else -> respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "not-found"))
@@ -546,6 +548,7 @@ class FlashDropServer private constructor(
         .put("progress", transfer.progress)
         .put("status", transfer.status)
         .put("createdAt", transfer.createdAt)
+        .apply { transfer.path?.let { put("path", it) } }
 
     private suspend fun handleClipboard(call: ApplicationCall) {
         if (authenticated(call) == null) return unauthorized(call)
@@ -722,7 +725,7 @@ class FlashDropServer private constructor(
         return files
     }
 
-    private fun invalidateFileCache() {
+    fun invalidateFileCache() {
         categoryCache.clear()
     }
 
@@ -933,6 +936,7 @@ class FlashDropServer private constructor(
                 saved.length(),
                 "upload",
                 header(call, "X-FlashDrop-Task-Id"),
+                relativePath(saved),
             )
             respondJson(call, HttpStatusCode.OK, JSONObject().put("item", fileJson(saved)))
         } catch (error: Exception) {
@@ -944,12 +948,13 @@ class FlashDropServer private constructor(
         }
     }
 
-    private suspend fun handleDownload(call: ApplicationCall) {
+    private suspend fun handleDownload(call: ApplicationCall, inline: Boolean = false) {
         if (call.request.httpMethod != HttpMethod.Get) {
             methodNotAllowed(call)
             return
         }
-        val authenticated = authenticated(call) ?: return unauthorized(call)
+        val authenticated = authenticated(call, allowQuery = true) ?: return unauthorized(call)
+        val preview = call.request.queryParameters["preview"] == "1"
         val packageName = call.request.queryParameters["package"]
         if (packageName.isNullOrBlank() && !hasStorageAccess()) {
             respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
@@ -995,32 +1000,49 @@ class FlashDropServer private constructor(
                 respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
                 return
             }
-            addTransfer(
-                downloadName,
-                file.length(),
-                "download",
-                header(call, "X-FlashDrop-Task-Id"),
-            )
-            call.response.header("Content-Disposition", contentDisposition(downloadName))
+            if (!preview) {
+                addTransfer(
+                    downloadName,
+                    file.length(),
+                    "download",
+                    header(call, "X-FlashDrop-Task-Id"),
+                )
+            }
+            call.response.header("Content-Disposition", contentDisposition(downloadName, inline))
             call.response.header("Cache-Control", "no-store")
             addSecurityHeaders(call)
             val key = authenticated.encryptionKey
+            val contentType = if (inline) ContentType.parse(mimeType(downloadName)) else ContentType.Application.OctetStream
             if (key != null) {
                 call.response.header("X-FlashDrop-Encrypted", "1")
                 call.respondOutputStream(
-                    ContentType.Application.OctetStream,
+                    contentType,
                     HttpStatusCode.OK,
                     encryptedLength(file.length()),
                 ) {
                     encryptFile(file, key, this)
                 }
             } else {
-                call.respondOutputStream(
-                    ContentType.Application.OctetStream,
-                    HttpStatusCode.OK,
-                    file.length(),
-                ) {
-                    FileInputStream(file).use { it.copyTo(this) }
+                val range = if (inline) parseRange(header(call, "Range"), file.length()) else null
+                if (range != null) {
+                    call.response.header("Accept-Ranges", "bytes")
+                    call.response.header("Content-Range", "bytes ${range.start}-${range.end}/${file.length()}")
+                    call.respondOutputStream(
+                        contentType,
+                        HttpStatusCode.PartialContent,
+                        range.end - range.start + 1,
+                    ) {
+                        writeFileRange(file, range.start, range.end - range.start + 1, this)
+                    }
+                } else {
+                    if (inline) call.response.header("Accept-Ranges", "bytes")
+                    call.respondOutputStream(
+                        contentType,
+                        HttpStatusCode.OK,
+                        file.length(),
+                    ) {
+                        FileInputStream(file).use { it.copyTo(this) }
+                    }
                 }
             }
         } finally {
@@ -1272,6 +1294,47 @@ class FlashDropServer private constructor(
         }
     }
 
+    private data class ByteRange(val start: Long, val end: Long)
+
+    private fun parseRange(value: String?, length: Long): ByteRange? {
+        if (value == null || length <= 0 || !value.startsWith("bytes=")) return null
+        val spec = value.removePrefix("bytes=").substringBefore(',').trim()
+        val startText = spec.substringBefore('-')
+        val endText = spec.substringAfter('-', "")
+        var start = startText.toLongOrNull()
+        var end = endText.toLongOrNull()
+        if (start == null) {
+            val suffix = end ?: return null
+            if (suffix <= 0) return null
+            start = (length - suffix).coerceAtLeast(0)
+            end = length - 1
+        } else {
+            if (start < 0 || start >= length) return null
+            if (end == null || end >= length) end = length - 1
+        }
+        if (end < start) return null
+        return ByteRange(start, end)
+    }
+
+    private fun writeFileRange(file: File, start: Long, length: Long, output: OutputStream) {
+        FileInputStream(file).use { input ->
+            var skipped = 0L
+            while (skipped < start) {
+                val step = input.skip(start - skipped)
+                if (step <= 0) break
+                skipped += step
+            }
+            var remaining = length
+            val buffer = ByteArray(64 * 1024)
+            while (remaining > 0) {
+                val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (read < 0) break
+                output.write(buffer, 0, read)
+                remaining -= read
+            }
+        }
+    }
+
     private fun header(call: ApplicationCall, name: String): String? =
         call.request.headers[name] ?: call.request.headers[name.lowercase(Locale.ROOT)]
 
@@ -1372,11 +1435,12 @@ class FlashDropServer private constructor(
         return candidate
     }
 
-    private fun contentDisposition(name: String): String {
+    private fun contentDisposition(name: String, inline: Boolean = false): String {
         val safe = name.replace("\"", "").replace("\r", "").replace("\n", "")
         val ascii = safe.map { if (it.code in 32..126) it else '_' }.joinToString("")
         val encoded = URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-        return "attachment; filename=\"$ascii\"; filename*=UTF-8''$encoded"
+        val type = if (inline) "inline" else "attachment"
+        return "$type; filename=\"$ascii\"; filename*=UTF-8''$encoded"
     }
 
     private fun mimeType(path: String): String = when (path.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
@@ -1393,10 +1457,29 @@ class FlashDropServer private constructor(
         "woff" -> "font/woff"
         "ico" -> "image/x-icon"
         "map" -> "application/json"
+        "mp4", "m4v" -> "video/mp4"
+        "webm" -> "video/webm"
+        "mkv" -> "video/x-matroska"
+        "mov" -> "video/quicktime"
+        "3gp" -> "video/3gpp"
+        "mp3" -> "audio/mpeg"
+        "m4a" -> "audio/mp4"
+        "wav" -> "audio/wav"
+        "ogg", "oga" -> "audio/ogg"
+        "flac" -> "audio/flac"
+        "aac" -> "audio/aac"
+        "pdf" -> "application/pdf"
+        "txt" -> "text/plain; charset=utf-8"
         else -> "application/octet-stream"
     }
 
-    private fun addTransfer(name: String, size: Long, direction: String, requestedId: String? = null) {
+    private fun addTransfer(
+        name: String,
+        size: Long,
+        direction: String,
+        requestedId: String? = null,
+        path: String? = null,
+    ) {
         val id = requestedId?.takeIf { it.length in 1..80 && it.all { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' } }
             ?: UUID.randomUUID().toString()
         synchronized(transfers) {
@@ -1410,6 +1493,7 @@ class FlashDropServer private constructor(
                     progress = 100,
                     status = "done",
                     createdAt = formatModified(System.currentTimeMillis()),
+                    path = path,
                 ),
             )
             while (transfers.size > 80) transfers.removeAt(transfers.lastIndex)

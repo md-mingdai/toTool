@@ -9,6 +9,7 @@ import type {
   ClipboardMessage,
   DownloadPhase,
   Entry,
+  FileEntry,
   FilePage,
   PairResult,
   ServerInfo,
@@ -367,6 +368,51 @@ export async function downloadEntry(
     }
     xhr.send()
   })
+}
+
+/** 未开启加密时媒体可直接流式加载；开启加密后由 fetchEntryBlob 解密成 Blob。 */
+export function mediaUrl(entry: FileEntry): string | null {
+  if (encryptionKey || !token) return null
+  return withToken(`/api/media?path=${encodeURIComponent(entry.path)}&preview=1`) ?? null
+}
+
+export async function fetchEntryBlob(entry: FileEntry, signal?: AbortSignal): Promise<Blob> {
+  const response = await apiFetch(`/api/download?path=${encodeURIComponent(entry.path)}&preview=1`, { signal })
+  const raw = new Uint8Array(await response.arrayBuffer())
+  if (response.headers.get('x-flashdrop-encrypted') === '1') {
+    if (!encryptionKey) throw new Error('缺少加密密钥，请重新配对')
+    if (raw.length < GCM_IV_BYTES + GCM_TAG_BYTES) throw new Error('加密文件格式错误')
+    const plain = await decryptToBlob(raw, encryptionKey, () => {}, signal)
+    return new Blob([plain], { type: mediaMime(entry.name) })
+  }
+  return new Blob([toArrayBuffer(raw)], { type: mediaMime(entry.name) })
+}
+
+function mediaMime(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  switch (ext) {
+    case 'png': return 'image/png'
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg'
+    case 'webp': return 'image/webp'
+    case 'gif': return 'image/gif'
+    case 'avif': return 'image/avif'
+    case 'bmp': return 'image/bmp'
+    case 'mp4':
+    case 'm4v': return 'video/mp4'
+    case 'webm': return 'video/webm'
+    case 'mkv': return 'video/x-matroska'
+    case 'mov': return 'video/quicktime'
+    case '3gp': return 'video/3gpp'
+    case 'mp3': return 'audio/mpeg'
+    case 'm4a': return 'audio/mp4'
+    case 'wav': return 'audio/wav'
+    case 'ogg':
+    case 'oga': return 'audio/ogg'
+    case 'flac': return 'audio/flac'
+    case 'aac': return 'audio/aac'
+    default: return 'application/octet-stream'
+  }
 }
 
 export async function uploadFile(

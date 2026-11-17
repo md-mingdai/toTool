@@ -4,6 +4,7 @@ import * as api from './api'
 import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { DetailsDialog } from './components/DetailsDialog'
 import { FileBrowser } from './components/FileBrowser'
+import { MediaViewerDialog } from './components/MediaViewerDialog'
 import { PairingGate } from './components/PairingGate'
 import { SearchOverlay } from './components/SearchOverlay'
 import { Sidebar } from './components/Sidebar'
@@ -206,6 +207,8 @@ export default function App() {
   const [searchOrigin, setSearchOrigin] = useState<DOMRect | null>(null)
   const [selected, setSelected] = useState<Entry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Array<FileEntry | FolderEntry> | null>(null)
+  const [pendingTransferId, setPendingTransferId] = useState<string | null>(null)
+  const [mediaEntry, setMediaEntry] = useState<FileEntry | null>(null)
   const [dragging, setDragging] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<File[]>([])
   const [uploadQueueOpen, setUploadQueueOpen] = useState(false)
@@ -603,6 +606,13 @@ export default function App() {
 
   const closeDetails = useCallback(() => setSelected(null), [])
 
+  const openMedia = useCallback((entry: FileEntry) => {
+    setSelected(null)
+    setMediaEntry(entry)
+  }, [])
+
+  const closeMedia = useCallback(() => setMediaEntry(null), [])
+
   const openSearch = useCallback((rect: DOMRect | null) => {
     setSearchOrigin(rect)
     setSearchOpen(true)
@@ -644,13 +654,33 @@ export default function App() {
     void api.deleteTransfer(id).catch(() => {})
   }, [])
 
-  const closeDelete = useCallback(() => setPendingDelete(null), [])
+  const closeDelete = useCallback(() => {
+    setPendingDelete(null)
+    setPendingTransferId(null)
+  }, [])
 
   const requestDelete = useCallback((entries: Entry[]) => {
     const deletable = entries.filter(
       (entry): entry is FileEntry | FolderEntry => entry.type === 'file' || entry.type === 'folder',
     )
-    if (deletable.length > 0) setPendingDelete(deletable)
+    if (deletable.length > 0) {
+      setPendingTransferId(null)
+      setPendingDelete(deletable)
+    }
+  }, [])
+
+  const requestDeleteTransferFile = useCallback((record: TransferRecord) => {
+    if (!record.path) return
+    setPendingTransferId(record.id)
+    setPendingDelete([{
+      type: 'file',
+      id: record.path,
+      name: record.name,
+      kind: 'file',
+      size: record.size,
+      modified: record.createdAt,
+      path: record.path,
+    }])
   }, [])
 
   const confirmDelete = useCallback(async () => {
@@ -660,8 +690,14 @@ export default function App() {
       if (result.failed.length > 0) {
         throw new Error(`${result.failed.length} 个文件删除失败`)
       }
+      if (pendingTransferId) {
+        await api.deleteTransfer(pendingTransferId)
+        setTransfers((previous) => previous.filter((task) => task.id !== pendingTransferId))
+        setToastRecords((previous) => previous.filter((task) => task.id !== pendingTransferId))
+      }
       setNotice(`已删除 ${result.deleted.length} 个文件`)
       setPendingDelete(null)
+      setPendingTransferId(null)
       setRefreshKey((value) => value + 1)
     } catch (caught) {
       if (caught instanceof api.UnauthorizedError) {
@@ -670,7 +706,7 @@ export default function App() {
       }
       throw new Error(messageForError(caught))
     }
-  }, [handleDisconnect, pendingDelete])
+  }, [handleDisconnect, pendingDelete, pendingTransferId])
 
   const handleSelectCategory = useCallback((next: CategoryId) => {
     setCategory(next)
@@ -1038,7 +1074,7 @@ export default function App() {
       <div
         className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${!paired ? ' is-locked' : ''}`}
         aria-hidden={!paired || undefined}
-        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || searchOpen || uploadQueueOpen || undefined}
+        inert={!paired || Boolean(selected) || Boolean(mediaEntry) || Boolean(pendingDelete) || searchOpen || uploadQueueOpen || undefined}
       >
         <Sidebar
           activeCategory={category}
@@ -1122,6 +1158,7 @@ export default function App() {
               onDeleteTask={deleteTask}
               onDeleteFile={(entry) => requestDelete([entry])}
               onDeleteFiles={requestDelete}
+              onDeleteTransferFile={requestDeleteTransferFile}
               onSendClipboard={handleSendClipboard}
               onCopyClipboard={handleCopyClipboard}
               onBatchDownload={(selected) => void handleBatchDownload(selected)}
@@ -1169,6 +1206,16 @@ export default function App() {
         onClose={closeDetails}
         onDownload={(entry) => void handleDownload(entry)}
         onCopy={handleCopy}
+        onOpenMedia={openMedia}
+      />
+
+      <MediaViewerDialog
+        entry={mediaEntry}
+        onClose={closeMedia}
+        onDownload={(entry) => {
+          setMediaEntry(null)
+          void handleDownload(entry)
+        }}
       />
 
       {pendingDelete && (

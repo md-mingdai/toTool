@@ -188,15 +188,23 @@ class FlashDropController(
 
     fun receivedFiles(): List<File> {
         if (!hasStorageAccess()) return emptyList()
-        val dir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "toTool/FlashDrop",
-        )
-        return dir.listFiles()
+        return receivedDir().listFiles()
             ?.filter { it.isFile }
             ?.sortedByDescending { it.lastModified() }
             .orEmpty()
     }
+
+    fun deleteReceived(file: File): Boolean {
+        if (!hasStorageAccess() || file.parentFile != receivedDir() || !file.isFile) return false
+        val deleted = file.delete()
+        if (deleted) server?.invalidateFileCache()
+        return deleted
+    }
+
+    private fun receivedDir(): File = File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+        "toTool/FlashDrop",
+    )
 
     fun primaryUrl(): String? {
         val address = state.addresses.firstOrNull() ?: return null

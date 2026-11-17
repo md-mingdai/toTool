@@ -129,6 +129,7 @@ export interface TransferRecord {
   createdAt: string
   phase?: TransferPhase
   speed?: number
+  path?: string
   local?: boolean
 }
 

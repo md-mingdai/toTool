@@ -10,6 +10,7 @@ import {
   FileVideo,
   Folder,
   Package,
+  PlayCircle,
   X,
 } from '@phosphor-icons/react'
 import { entryKindLabel, formatBytes } from '../data'
@@ -21,6 +22,7 @@ interface DetailsDialogProps {
   onClose: () => void
   onDownload: (entry: Entry) => void
   onCopy: (entry: FileEntry) => void
+  onOpenMedia: (entry: FileEntry) => void
 }
 
 function DetailGlyph({ entry, size = 28 }: { entry: Entry; size?: number }) {
@@ -46,7 +48,7 @@ function DetailGlyph({ entry, size = 28 }: { entry: Entry; size?: number }) {
   }
 }
 
-export function DetailsDialog({ entry, onClose, onDownload, onCopy }: DetailsDialogProps) {
+export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia }: DetailsDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy }: DetailsDia
   if (!entry) return null
 
   const isText = entry.type === 'file' && entry.kind === 'text'
+  const isMedia = entry.type === 'file' && (entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'audio')
   const previewImage = entry.type === 'file' ? entry.thumbUrl : undefined
 
   const rows: Array<{ label: string; value: string; mono?: boolean }> = []
@@ -105,7 +108,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy }: DetailsDia
         </button>
 
         <div
-          className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${entry.type === 'app' ? ' is-app' : ''}`}
+          className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${entry.type === 'app' ? ' is-app' : ''}${isMedia ? ' is-media' : ''}`}
         >
           {previewImage ? (
             <img src={previewImage} alt="" draggable={false} onDragStart={(event) => event.preventDefault()} />
@@ -115,6 +118,20 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy }: DetailsDia
             <span className="detail-glyph" aria-hidden="true">
               <DetailGlyph entry={entry} />
             </span>
+          )}
+          {isMedia && (
+            <button
+              type="button"
+              className="detail-media-open"
+              onClick={() => onOpenMedia(entry as FileEntry)}
+            >
+              <PlayCircle size={19} weight="fill" />
+              {entry.type === 'file' && entry.kind === 'image'
+                ? '查看图片'
+                : entry.type === 'file' && entry.kind === 'video'
+                  ? '播放视频'
+                  : '播放音频'}
+            </button>
           )}
         </div>
 

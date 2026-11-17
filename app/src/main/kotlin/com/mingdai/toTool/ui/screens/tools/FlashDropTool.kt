@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -545,6 +546,7 @@ private fun FlashDropTabs(selected: FlashDropTab, onSelect: (FlashDropTab) -> Un
 private fun ReceivedTab(controller: FlashDropController) {
     val context = LocalContext.current
     var files by remember { mutableStateOf<List<File>>(emptyList()) }
+    var pendingDelete by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -603,12 +605,35 @@ private fun ReceivedTab(controller: FlashDropController) {
                                 style = MiuixTheme.textStyles.footnote2,
                                 color = MiuixTheme.colorScheme.primary,
                             )
+                            IconButton(
+                                onClick = { pendingDelete = file },
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = "删除 ${file.name}",
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    AppDialog(
+        show = pendingDelete != null,
+        title = "删除接收到的文件",
+        summary = pendingDelete?.let { "从手机中永久删除「${it.name}」？" },
+        confirmText = "删除",
+        onDismiss = { pendingDelete = null },
+        onConfirm = {
+            pendingDelete?.let { controller.deleteReceived(it) }
+            pendingDelete = null
+            files = controller.receivedFiles()
+        },
+    )
 }
 
 @Composable

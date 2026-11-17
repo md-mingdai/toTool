@@ -12,6 +12,7 @@ import {
   FilePdf,
   FileText,
   FileVideo,
+  FileX,
   Folder,
   Image as ImageIcon,
   Package,
@@ -76,6 +77,7 @@ interface FileBrowserProps {
   onBatchDownload: (entries: Entry[]) => void
   onDeleteFile: (entry: FileEntry | FolderEntry) => void
   onDeleteFiles: (entries: Entry[]) => void
+  onDeleteTransferFile: (record: TransferRecord) => void
 }
 
 function FileGlyph({ kind, size = 20 }: { kind: FileEntry['kind']; size?: number }) {
@@ -234,6 +236,7 @@ function TransferList({
   onClearQuery,
   onCancel,
   onDelete,
+  onDeleteFile,
 }: {
   transfers: TransferRecord[]
   onUpload: () => void
@@ -242,6 +245,7 @@ function TransferList({
   onClearQuery: () => void
   onCancel: (id: string) => void
   onDelete: (id: string) => void
+  onDeleteFile: (record: TransferRecord) => void
 }) {
   if (transfers.length === 0) {
     return (
@@ -314,6 +318,17 @@ function TransferList({
               )}
             </span>
             <div className="entry-actions transfer-actions">
+              {!active && record.direction === 'upload' && record.path && (
+                <button
+                  type="button"
+                  className="row-action row-action-danger"
+                  onClick={() => onDeleteFile(record)}
+                  aria-label={`删除手机上的 ${record.name}`}
+                  title="删除手机文件"
+                >
+                  <FileX size={16} weight="regular" />
+                </button>
+              )}
               <button
                 type="button"
                 className="row-action"
@@ -367,6 +382,7 @@ export function FileBrowser({
   onBatchDownload,
   onDeleteFile,
   onDeleteFiles,
+  onDeleteTransferFile,
 }: FileBrowserProps) {
   const categoryMeta = categories.find((item) => item.id === category)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
@@ -580,6 +596,7 @@ export function FileBrowser({
           onClearQuery={onClearQuery}
           onCancel={onCancelTask}
           onDelete={onDeleteTask}
+          onDeleteFile={onDeleteTransferFile}
         />
       ) : isClipboard ? (
         <ClipboardChat
