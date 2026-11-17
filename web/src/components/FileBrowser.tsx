@@ -190,7 +190,7 @@ function entryMeta(entry: Entry): ReactNode {
 function rowAction(entry: Entry): { label: string; icon: ReactNode } {
   if (entry.type === 'folder') return { label: `打开 ${entry.name}`, icon: <CaretRight size={16} weight="regular" /> }
   if (entry.type === 'app') return { label: `下载 ${entry.name} 安装包`, icon: <DownloadSimple size={17} weight="regular" /> }
-  if (entry.kind === 'text') return { label: `预览 ${entry.name}`, icon: <FileText size={16} weight="regular" /> }
+  if (entry.kind === 'text') return { label: `下载 ${entry.name}`, icon: <DownloadSimple size={17} weight="regular" /> }
   return { label: `下载 ${entry.name}`, icon: <DownloadSimple size={17} weight="regular" /> }
 }
 
@@ -662,7 +662,6 @@ export function FileBrowser({
                     title={action.label}
                     onClick={() => {
                       if (entry.type === 'folder') onOpenFolder(entry as FolderEntry)
-                      else if (entry.type === 'file' && entry.kind === 'text') onOpenEntry(entry as FileEntry)
                       else onDownload(entry as AppEntry | FileEntry)
                     }}
                   >

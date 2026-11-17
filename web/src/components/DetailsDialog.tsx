@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   CircleNotch,
   Copy,
@@ -111,6 +113,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
   if (!entry) return null
 
   const isText = entry.type === 'file' && entry.kind === 'text'
+  const isMarkdown = isText && entry.type === 'file' && /\.(md|markdown|mdx)$/i.test(entry.name)
   const isMedia = entry.type === 'file' && (entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'audio')
   const previewImage = entry.type === 'file' ? entry.thumbUrl : undefined
 
@@ -152,7 +155,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
         </button>
 
         <div
-          className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${entry.type === 'app' ? ' is-app' : ''}${isMedia ? ' is-media' : ''}`}
+          className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${isMarkdown ? ' is-markdown' : ''}${entry.type === 'app' ? ' is-app' : ''}${isMedia ? ' is-media' : ''}`}
         >
           {isText ? (
             textLoading ? (
@@ -162,6 +165,17 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
               </span>
             ) : textError ? (
               <span className="detail-text-state is-error">{textError}</span>
+            ) : isMarkdown ? (
+              <div className="detail-markdown">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: (props) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+                  }}
+                >
+                  {textContent ?? ''}
+                </ReactMarkdown>
+              </div>
             ) : (
               <p>{textContent ?? ''}</p>
             )
@@ -214,6 +228,12 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
               : <DownloadSimple size={16} weight="regular" />}
             {isText && textContent !== null ? '复制内容' : entry.type === 'app' ? '下载 APK' : '下载到电脑'}
           </button>
+          {isText && textContent !== null && (
+            <button type="button" className="btn btn-ghost" onClick={() => onDownload(entry)}>
+              <DownloadSimple size={16} weight="regular" />
+              下载
+            </button>
+          )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             关闭
           </button>
