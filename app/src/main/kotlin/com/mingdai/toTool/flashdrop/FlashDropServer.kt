@@ -1001,7 +1001,7 @@ class FlashDropServer private constructor(
     }
 
     private suspend fun readJson(call: ApplicationCall): JSONObject {
-        val max = 64 * 1024
+        val max = 512 * 1024
         val length = call.request.contentLength()
         if (length != null && length > max) throw IOException("body-too-large")
         val text = call.receiveText()
