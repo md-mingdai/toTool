@@ -45,6 +45,7 @@ import io.ktor.server.websocket.webSocket
 import io.ktor.utils.io.jvm.javaio.copyTo
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import org.json.JSONArray
 import org.json.JSONObject
