@@ -48,7 +48,9 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -122,6 +124,7 @@ class FlashDropServer private constructor(
     private val failedAttempts = mutableListOf<Long>()
     private val clipboardHistory = Collections.synchronizedList(mutableListOf<ClipboardMessage>())
     private val sockets = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
+    private val categoryCache = ConcurrentHashMap<String, CategoryCacheEntry>()
 
     @Volatile
     private var lastClipboardText = ""
@@ -152,6 +155,11 @@ class FlashDropServer private constructor(
         val token: String,
         val expiresAt: Long,
         val encryptionKey: SecretKey?,
+    )
+
+    private data class CategoryCacheEntry(
+        val cachedAt: Long,
+        val files: List<File>,
     )
 
     private data class TransferRecord(
@@ -424,17 +432,41 @@ class FlashDropServer private constructor(
         val category = call.request.queryParameters["category"].orEmpty()
         val path = call.request.queryParameters["path"].orEmpty()
         val query = call.request.queryParameters["q"].orEmpty().trim()
+        val force = call.request.queryParameters["refresh"] == "1"
+        val sort = call.request.queryParameters["sort"].orEmpty().takeIf { it in setOf("modified", "name", "size") } ?: "modified"
 
-        val items = when (category) {
-            "storage" -> listStorage(path, query)
-            "photos", "videos", "audio", "documents", "archives", "apks", "downloads" ->
-                scanCategory(category, query)
-            else -> {
-                respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-category"))
-                return
+        val files = withContext(Dispatchers.IO) {
+            when (category) {
+                "storage" -> listStorage(path, query, sort, force)
+                "photos", "videos", "audio", "documents", "archives", "apks", "downloads" ->
+                    scanCategory(category, query, sort, force)
+                else -> null
+            }
+        } ?: run {
+            respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-category"))
+            return
+        }
+        val total = files.size
+        val totalPages = maxOf(1, (total + PAGE_SIZE - 1) / PAGE_SIZE)
+        val requestedPage = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+        val page = requestedPage.coerceIn(1, totalPages)
+        val from = (page - 1) * PAGE_SIZE
+        val to = minOf(total, from + PAGE_SIZE)
+        val items = JSONArray()
+        if (from < to) {
+            files.subList(from, to).forEach { file ->
+                if (file.isDirectory) items.put(folderJson(file)) else items.put(fileJson(file))
             }
         }
-        respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
+        respondJson(
+            call,
+            HttpStatusCode.OK,
+            JSONObject()
+                .put("items", items)
+                .put("total", total)
+                .put("page", page)
+                .put("pageSize", PAGE_SIZE),
+        )
     }
 
     private suspend fun handleDeleteFiles(call: ApplicationCall) {
@@ -465,6 +497,7 @@ class FlashDropServer private constructor(
             val ok = if (file.isDirectory) file.deleteRecursively() else file.delete()
             if (ok) deleted.put(relative) else failed.put(relative)
         }
+        if (deleted.length() > 0) invalidateFileCache()
         respondJson(
             call,
             HttpStatusCode.OK,
@@ -607,63 +640,90 @@ class FlashDropServer private constructor(
 
     /* ------------------------------ 文件列表 ------------------------------ */
 
-    private fun listStorage(relativePath: String, query: String): JSONArray {
+    private fun listStorage(relativePath: String, query: String, sort: String, force: Boolean): List<File> {
         val root = externalRoot()
         val dir = if (relativePath.isBlank()) root else safeFile(relativePath)
-        if (dir == null || !dir.isDirectory) return JSONArray()
-        val children = dir.listFiles()
-            ?.filter { !it.name.startsWith(".") }
-            ?.filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) }
-            ?.sortedWith(compareBy<File> { !it.isDirectory }.thenByDescending { it.lastModified() })
-            ?.take(MAX_LIST_ITEMS)
-            .orEmpty()
-
-        val items = JSONArray()
-        children.forEach { file ->
-            if (file.isDirectory) {
-                items.put(folderJson(file))
-            } else {
-                items.put(fileJson(file))
-            }
+        if (dir == null || !dir.isDirectory) return emptyList()
+        val key = "storage|$relativePath|${query.lowercase(Locale.ROOT)}|$sort"
+        return cachedFiles(key, force) {
+            dir.listFiles()
+                ?.filter { !it.name.startsWith(".") }
+                ?.filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) }
+                ?.sortedWith(Comparator { left, right ->
+                    if (left.isDirectory != right.isDirectory) {
+                        if (left.isDirectory) -1 else 1
+                    } else {
+                        fileComparator(sort).compare(left, right)
+                    }
+                })
+                .orEmpty()
         }
-        return items
     }
 
-    private fun scanCategory(category: String, query: String): JSONArray {
-        val roots = when (category) {
-            "photos" -> listOf("DCIM", "Pictures", "Download")
-            "videos" -> listOf("DCIM", "Movies", "Download")
-            "audio" -> listOf("Music", "Recordings", "Download")
-            "documents" -> listOf("Documents", "Download")
-            "archives" -> listOf("Download", "Documents")
-            "apks", "downloads" -> listOf("Download")
-            else -> emptyList()
-        }
-        val extensions = extensionsFor(category)
-        val found = mutableListOf<File>()
-        val queue = ArrayDeque<File>()
-        roots.map { File(externalRoot(), it) }.filter { it.isDirectory }.forEach(queue::addLast)
-        var visited = 0
-        while (queue.isNotEmpty() && found.size < MAX_LIST_ITEMS && visited < MAX_SCAN_DIRS) {
-            val dir = queue.removeFirst()
-            visited += 1
-            val children = dir.listFiles() ?: continue
-            for (child in children) {
-                if (child.name.startsWith(".")) continue
-                if (child.isDirectory) {
-                    queue.addLast(child)
-                } else if ((category == "downloads" || child.extension.lowercase(Locale.ROOT) in extensions) &&
-                    (query.isEmpty() || child.name.contains(query, ignoreCase = true))
-                ) {
-                    found += child
-                    if (found.size >= MAX_LIST_ITEMS) break
+    private fun scanCategory(category: String, query: String, sort: String, force: Boolean): List<File> {
+        val key = "category|$category|${query.lowercase(Locale.ROOT)}|$sort"
+        return cachedFiles(key, force) {
+            val roots = when (category) {
+                "photos" -> listOf("DCIM", "Pictures", "Download")
+                "videos" -> listOf("DCIM", "Movies", "Download")
+                "audio" -> listOf("Music", "Recordings", "Download")
+                "documents" -> listOf("Documents", "Download")
+                "archives" -> listOf("Download", "Documents")
+                "apks", "downloads" -> listOf("Download")
+                else -> emptyList()
+            }
+            val extensions = extensionsFor(category)
+            val found = mutableListOf<File>()
+            val visited = HashSet<String>()
+            val queue = ArrayDeque<File>()
+            roots.map { File(externalRoot(), it) }.filter { it.isDirectory }.forEach(queue::addLast)
+            while (queue.isNotEmpty()) {
+                val dir = queue.removeFirst()
+                val canonical = runCatching { dir.canonicalPath }.getOrNull() ?: continue
+                if (!visited.add(canonical)) continue
+                val children = dir.listFiles() ?: continue
+                for (child in children) {
+                    if (child.name.startsWith(".")) continue
+                    if (Files.isSymbolicLink(child.toPath())) continue
+                    if (child.isDirectory) {
+                        queue.addLast(child)
+                    } else if ((category == "downloads" || child.extension.lowercase(Locale.ROOT) in extensions) &&
+                        (query.isEmpty() || child.name.contains(query, ignoreCase = true))
+                    ) {
+                        found += child
+                    }
                 }
             }
+            found.sortWith(fileComparator(sort))
+            found
         }
-        found.sortByDescending { it.lastModified() }
-        val items = JSONArray()
-        found.forEach { items.put(fileJson(it)) }
-        return items
+    }
+
+    private fun fileComparator(sort: String): Comparator<File> = when (sort) {
+        "name" -> {
+            val collator = java.text.Collator.getInstance(Locale.CHINA)
+            Comparator { left, right -> collator.compare(left.name, right.name) }
+        }
+        "size" -> compareByDescending { it.length() }
+        else -> compareByDescending { it.lastModified() }
+    }
+
+    /** 分类/目录结果缓存：翻页时无需重新扫描，手动刷新和增删文件时失效。 */
+    private fun cachedFiles(key: String, force: Boolean, loader: () -> List<File>): List<File> {
+        val now = System.currentTimeMillis()
+        if (!force) {
+            categoryCache[key]?.takeIf { now - it.cachedAt <= CATEGORY_CACHE_MS }?.let { return it.files }
+        }
+        val files = loader()
+        categoryCache[key] = CategoryCacheEntry(now, files)
+        if (categoryCache.size > 32) {
+            categoryCache.entries.removeIf { now - it.value.cachedAt > CATEGORY_CACHE_MS }
+        }
+        return files
+    }
+
+    private fun invalidateFileCache() {
+        categoryCache.clear()
     }
 
     private fun folderJson(file: File): JSONObject {
@@ -867,6 +927,7 @@ class FlashDropServer private constructor(
             } else {
                 temp.copyTo(saved, overwrite = true)
             }
+            invalidateFileCache()
             addTransfer(
                 saved.name,
                 saved.length(),
@@ -917,7 +978,7 @@ class FlashDropServer private constructor(
                     val zipped = File.createTempFile("flashdrop-", ".zip", appContext.cacheDir)
                     archive = zipped
                     try {
-                        zipDirectory(resolved, zipped)
+                        withContext(Dispatchers.IO) { zipDirectory(resolved, zipped) }
                     } catch (error: Exception) {
                         Log.w(TAG, "zip folder failed", error)
                         respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "zip-failed"))
@@ -1437,8 +1498,8 @@ class FlashDropServer private constructor(
         private const val TOKEN_TTL_MS = 24L * 60 * 60 * 1000
         private const val ATTEMPT_WINDOW_MS = 60_000L
         private const val MAX_ATTEMPTS = 5
-        private const val MAX_LIST_ITEMS = 500
-        private const val MAX_SCAN_DIRS = 2_000
+        private const val PAGE_SIZE = 250
+        private const val CATEGORY_CACHE_MS = 8_000L
         private const val APP_CACHE_MS = 30_000L
         private const val SALT_BYTES = 16
         private const val GCM_IV_BYTES = 12

@@ -99,6 +99,13 @@ export interface AppCounts {
   user: number
 }
 
+export interface FilePage {
+  items: Entry[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 export type TransferDirection = 'upload' | 'download'
 
 export type TransferPhase = 'upload' | 'encrypt' | 'download' | 'decrypt'

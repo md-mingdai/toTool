@@ -24,6 +24,7 @@ import {
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { categories, entryKindLabel, formatBytes, formatSpeed, totalBytes, transferPhaseLabel } from '../data'
+import { Pagination } from './Pagination'
 import type {
   AppCounts,
   AppEntry,
@@ -43,6 +44,10 @@ interface FileBrowserProps {
   category: CategoryId
   categoryLabel: string
   entries: Entry[]
+  totalItems: number
+  page: number
+  pageSize: number
+  sortBy: 'modified' | 'name' | 'size'
   folder: FolderEntry | null
   query: string
   appsScope: AppScope | 'all'
@@ -62,6 +67,8 @@ interface FileBrowserProps {
   onUpload: () => void
   onClearQuery: () => void
   onRetry: () => void
+  onPageChange: (page: number) => void
+  onSortChange: (sort: 'modified' | 'name' | 'size') => void
   onCancelTask: (id: string) => void
   onDeleteTask: (id: string) => void
   onSendClipboard: (text: string) => Promise<void>
@@ -328,6 +335,10 @@ export function FileBrowser({
   category,
   categoryLabel,
   entries,
+  totalItems,
+  page,
+  pageSize,
+  sortBy,
   folder,
   query,
   appsScope,
@@ -347,6 +358,8 @@ export function FileBrowser({
   onUpload,
   onClearQuery,
   onRetry,
+  onPageChange,
+  onSortChange,
   onCancelTask,
   onDeleteTask,
   onSendClipboard,
@@ -357,7 +370,6 @@ export function FileBrowser({
 }: FileBrowserProps) {
   const categoryMeta = categories.find((item) => item.id === category)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-  const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified')
   const sortedEntries = useMemo(() => {
     const list = [...entries]
     list.sort((a, b) => {
@@ -399,7 +411,9 @@ export function FileBrowser({
     ? visibleTransfers.length
     : isClipboard
       ? visibleClipboard.length
-      : entries.length
+      : isApps
+        ? entries.length
+        : totalItems
 
   const selectableCount = sortedEntries.filter((entry) => entry.type !== 'folder').length
   const selectedFiles = sortedEntries.filter(
@@ -414,7 +428,7 @@ export function FileBrowser({
         ? `${visibleTransfers.length} 条传输记录`
         : isClipboard
           ? `${visibleClipboard.length} 条剪贴板消息`
-          : `${entries.length} 项 · ${formatBytes(total)}`
+          : `${totalItems.toLocaleString('zh-CN')} 项${totalItems === entries.length ? ` · ${formatBytes(total)}` : ''}`
 
   return (
     <div className="content-inner">
@@ -509,7 +523,7 @@ export function FileBrowser({
                     : new Set())
                 }}
               />
-              全选
+              全选本页
             </label>
           )}
         </div>
@@ -518,7 +532,7 @@ export function FileBrowser({
           {!isClipboard && !isTransfers && (
             <label className="sort-select">
               <span>排序</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} aria-label="排序方式">
+              <select value={sortBy} onChange={(event) => onSortChange(event.target.value as typeof sortBy)} aria-label="排序方式">
                 <option value="modified">修改时间</option>
                 <option value="name">名称</option>
                 <option value="size">大小</option>
@@ -683,6 +697,15 @@ export function FileBrowser({
             </button>
           )}
         </div>
+      )}
+
+      {!isApps && !isTransfers && !isClipboard && totalItems > pageSize && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={totalItems}
+          onChange={onPageChange}
+        />
       )}
     </div>
   )

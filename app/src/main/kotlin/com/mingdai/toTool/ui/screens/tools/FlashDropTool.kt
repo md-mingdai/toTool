@@ -333,6 +333,7 @@ private fun ServiceCard(
                         bitmap = qr.asImageBitmap(),
                         contentDescription = "访问隔空闪传网页的二维码",
                         modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
                             .size(172.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .padding(top = 4.dp),

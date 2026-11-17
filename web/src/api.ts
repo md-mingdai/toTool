@@ -9,6 +9,7 @@ import type {
   ClipboardMessage,
   DownloadPhase,
   Entry,
+  FilePage,
   PairResult,
   ServerInfo,
   TransferRecord,
@@ -224,12 +225,16 @@ export async function listFiles(
   category: CategoryId,
   path: string,
   query: string,
-): Promise<Entry[]> {
-  const response = await apiFetch(
-    `/api/files?category=${encodeURIComponent(category)}&path=${encodeURIComponent(path)}&q=${encodeURIComponent(query)}`,
-  )
-  const data = (await response.json()) as { items: Entry[] }
-  return data.items.map((entry) => decorateEntry(entry))
+  page = 1,
+  force = false,
+  sort: 'modified' | 'name' | 'size' = 'modified',
+): Promise<FilePage> {
+  const params = new URLSearchParams({ category, path, q: query, sort })
+  if (page > 1) params.set('page', String(page))
+  if (force) params.set('refresh', '1')
+  const response = await apiFetch(`/api/files?${params.toString()}`)
+  const data = (await response.json()) as FilePage
+  return { ...data, items: data.items.map((entry) => decorateEntry(entry)) }
 }
 
 export async function listTransfers(): Promise<TransferRecord[]> {

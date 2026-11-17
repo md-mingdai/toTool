@@ -125,6 +125,8 @@ function routeUrl(category: CategoryId, path: string, query: string, scope: AppS
   return search ? `${base}?${search}` : base
 }
 
+const LIBRARY_PAGE_SIZE = 250
+
 function newTaskId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -183,6 +185,9 @@ export default function App() {
   const [appsScope, setAppsScope] = useState<AppScope | 'all'>(initialRoute.scope)
   const [query, setQuery] = useState(initialRoute.query)
   const [entries, setEntries] = useState<Entry[]>([])
+  const [totalItems, setTotalItems] = useState(0)
+  const [page, setPage] = useState(1)
+  const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified')
   const [appCounts, setAppCounts] = useState<AppCounts>({ all: 0, system: 0, user: 0 })
   const [clipboardMessages, setClipboardMessages] = useState<ClipboardMessage[]>([])
   const [transfers, setTransfers] = useState<TransferRecord[]>([])
@@ -193,6 +198,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [searchOrigin, setSearchOrigin] = useState<DOMRect | null>(null)
   const [selected, setSelected] = useState<Entry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Array<FileEntry | FolderEntry> | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -202,6 +208,7 @@ export default function App() {
   const contentRef = useRef<HTMLDivElement>(null)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
   const abortRef = useRef(new Map<string, () => void>())
+  const lastRefreshRef = useRef(refreshKey)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -231,6 +238,7 @@ export default function App() {
       setFolder(folderFromPath(route.path))
       setAppsScope(route.scope)
       setQuery(route.query)
+      setPage(1)
       setSelected(null)
       contentRef.current?.scrollTo({ top: 0 })
     }
@@ -461,6 +469,8 @@ export default function App() {
   useEffect(() => {
     if (!paired) return
     const folderPath = folder?.path ?? ''
+    const force = refreshKey !== lastRefreshRef.current
+    lastRefreshRef.current = refreshKey
     let cancelled = false
     const timer = window.setTimeout(async () => {
       setLoading(true)
@@ -470,6 +480,7 @@ export default function App() {
           const result = await api.listApps(appsScope, query)
           if (!cancelled) {
             setEntries(result.entries)
+            setTotalItems(result.entries.length)
             setAppCounts(result.counts)
             setConnectionLost(false)
           }
@@ -478,6 +489,7 @@ export default function App() {
           if (!cancelled) {
             setTransfers((previous) => mergeTasks(previous, result))
             setEntries([])
+            setTotalItems(0)
             setConnectionLost(false)
           }
         } else if (category === 'clipboard') {
@@ -485,20 +497,23 @@ export default function App() {
           if (!cancelled) {
             setClipboardMessages(result)
             setEntries([])
+            setTotalItems(0)
             setConnectionLost(false)
           }
         } else {
-          const result = await api.listFiles(category, folderPath, query)
+          const result = await api.listFiles(category, folderPath, query, page, force, sortBy)
           if (!cancelled) {
-            setEntries(result)
+            setEntries(result.items)
+            setTotalItems(result.total)
+            if (result.page !== page) setPage(result.page)
             setFolder((previous) => {
               if (!previous || previous.path !== folderPath) return previous
-              const loadedSize = result.reduce((total, entry) => total + entry.size, 0)
-              const first = result[0]
+              const loadedSize = result.items.reduce((sum, entry) => sum + entry.size, 0)
+              const first = result.items[0]
               const modified = first && 'modified' in first ? first.modified : previous.modified
               return {
                 ...previous,
-                itemCount: result.length,
+                itemCount: result.total,
                 size: loadedSize,
                 modified: previous.modified || modified,
               }
@@ -524,7 +539,7 @@ export default function App() {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [appsScope, category, folder?.path, handleDisconnect, paired, query, refreshKey])
+  }, [appsScope, category, folder?.path, handleDisconnect, page, paired, query, refreshKey, sortBy])
 
   useEffect(() => {
     if (!paired || category !== 'clipboard') return
@@ -546,6 +561,16 @@ export default function App() {
 
   const scrollTop = useCallback(() => {
     contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
+  const handlePageChange = useCallback((next: number) => {
+    setPage(Math.max(1, next))
+    scrollTop()
+  }, [scrollTop])
+
+  const handleSortChange = useCallback((next: 'modified' | 'name' | 'size') => {
+    setSortBy(next)
+    setPage(1)
   }, [])
 
   const syncUrl = useCallback((
@@ -571,6 +596,16 @@ export default function App() {
   }, [])
 
   const closeDetails = useCallback(() => setSelected(null), [])
+
+  const openSearch = useCallback((rect: DOMRect | null) => {
+    setSearchOrigin(rect)
+    setSearchOpen(true)
+  }, [])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchOrigin(null)
+  }, [])
 
   const updateTask = useCallback((id: string, patch: Partial<TransferRecord>) => {
     setTransfers((previous) => previous.map((task) => (task.id === id ? { ...task, ...patch } : task)))
@@ -636,6 +671,7 @@ export default function App() {
     setFolder(null)
     setAppsScope('all')
     setQuery('')
+    setPage(1)
     setSelected(null)
     syncUrl(next, '', '', 'all')
     closeSidebar()
@@ -655,6 +691,8 @@ export default function App() {
     setFolder(null)
     setAppsScope('all')
     setQuery('')
+    setPage(1)
+    setTotalItems(0)
     setEntries([])
     setClipboardMessages([])
     setTransfers([])
@@ -668,6 +706,7 @@ export default function App() {
   const handleOpenFolder = useCallback((next: FolderEntry) => {
     setFolder(next)
     setQuery('')
+    setPage(1)
     setSelected(null)
     syncUrl('storage', next.path, '', 'all')
     scrollTop()
@@ -676,6 +715,7 @@ export default function App() {
   const handleGoRoot = useCallback(() => {
     setFolder(null)
     setQuery('')
+    setPage(1)
     syncUrl('storage', '', '', 'all')
     scrollTop()
   }, [scrollTop, syncUrl])
@@ -689,6 +729,7 @@ export default function App() {
     }
     setFolder(folderFromPath(parent))
     setQuery('')
+    setPage(1)
     setSelected(null)
     syncUrl('storage', parent, '', 'all')
     scrollTop()
@@ -697,6 +738,7 @@ export default function App() {
   const handleNavigatePath = useCallback((path: string) => {
     setFolder(folderFromPath(path))
     setQuery('')
+    setPage(1)
     setSelected(null)
     syncUrl('storage', path, '', 'all')
     scrollTop()
@@ -704,16 +746,19 @@ export default function App() {
 
   const handleQueryChange = useCallback((next: string) => {
     setQuery(next)
+    setPage(1)
     syncUrl(category, folder?.path ?? '', next, appsScope, true)
   }, [appsScope, category, folder?.path, syncUrl])
 
   const handleScopeChange = useCallback((next: AppScope | 'all') => {
     setAppsScope(next)
+    setPage(1)
     syncUrl('apps', '', query, next, true)
   }, [query, syncUrl])
 
   const clearQuery = useCallback(() => {
     setQuery('')
+    setPage(1)
     syncUrl(category, folder?.path ?? '', '', appsScope, true)
   }, [appsScope, category, folder?.path, syncUrl])
 
@@ -721,6 +766,7 @@ export default function App() {
     setCategory('transfers')
     setFolder(null)
     setQuery('')
+    setPage(1)
     setToastOpen(false)
     syncUrl('transfers', '', '', 'all')
     closeSidebar()
@@ -792,6 +838,7 @@ export default function App() {
         }
       }
     }
+    setPage(1)
     setRefreshKey((value) => value + 1)
     await refreshTasks()
   }, [handleDisconnect, paired, refreshTasks, updateTask])
@@ -999,7 +1046,7 @@ export default function App() {
             onOpenSidebar={() => setSidebarOpen(true)}
             menuButtonRef={mobileMenuRef}
             searchOpen={searchOpen}
-            onOpenSearch={() => setSearchOpen(true)}
+            onOpenSearch={openSearch}
           />
 
           <main className="content-scroll" ref={contentRef}>
@@ -1007,6 +1054,10 @@ export default function App() {
               category={category}
               categoryLabel={categoryLabel}
               entries={entries}
+              totalItems={totalItems}
+              page={page}
+              pageSize={LIBRARY_PAGE_SIZE}
+              sortBy={sortBy}
               folder={folder}
               query={query}
               appsScope={appsScope}
@@ -1026,6 +1077,8 @@ export default function App() {
               onUpload={() => inputRef.current?.click()}
               onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}
+              onPageChange={handlePageChange}
+              onSortChange={handleSortChange}
               onCancelTask={cancelTask}
               onDeleteTask={deleteTask}
               onDeleteFile={(entry) => requestDelete([entry])}
@@ -1060,7 +1113,8 @@ export default function App() {
         <SearchOverlay
           query={query}
           onQueryChange={handleQueryChange}
-          onClose={() => setSearchOpen(false)}
+          onClose={closeSearch}
+          originRect={searchOrigin}
         />
       )}
 
