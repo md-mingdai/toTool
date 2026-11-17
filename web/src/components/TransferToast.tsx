@@ -6,7 +6,7 @@ import {
   UploadSimple,
   X,
 } from '@phosphor-icons/react'
-import { formatBytes } from '../data'
+import { formatBytes, formatSpeed, transferPhaseLabel } from '../data'
 import type { TransferRecord } from '../types'
 
 interface TransferToastProps {
@@ -63,11 +63,17 @@ export function TransferToast({ records, visible, onClose, onView }: TransferToa
               <span className="toast-meta">
                 {record.status === 'done'
                   ? '已完成'
-                  : record.phase === 'decrypt'
-                    ? '解密中'
+                  : transferPhaseLabel(record.phase)
+                    ? `${transferPhaseLabel(record.phase)} ${Math.round(record.progress)}%`
                     : `${Math.round(record.progress)}%`}
                 <span aria-hidden="true"> · </span>
                 {formatBytes(record.size)}
+                {formatSpeed(record.speed) && (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    {formatSpeed(record.speed)}
+                  </>
+                )}
               </span>
               {record.status === 'active' && (
                 <span className="inline-progress" role="progressbar" aria-label={`${record.name} 传输进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(record.progress)}>

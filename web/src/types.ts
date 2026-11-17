@@ -55,6 +55,7 @@ export interface AppEntry {
   size: number
   scope: AppScope
   installedAt: string
+  modifiedAt?: number
   iconUrl?: string
 }
 
@@ -65,6 +66,7 @@ export interface FileEntry {
   kind: EntryKind
   size: number
   modified: string
+  modifiedAt?: number
   path: string
   thumbUrl?: string
   text?: string
@@ -77,6 +79,7 @@ export interface FolderEntry {
   size: number
   itemCount: number
   modified: string
+  modifiedAt?: number
   path: string
 }
 
@@ -98,6 +101,8 @@ export interface AppCounts {
 
 export type TransferDirection = 'upload' | 'download'
 
+export type TransferPhase = 'upload' | 'encrypt' | 'download' | 'decrypt'
+export type UploadPhase = 'upload' | 'encrypt'
 export type DownloadPhase = 'download' | 'decrypt'
 
 export interface ClipboardMessage {
@@ -115,7 +120,8 @@ export interface TransferRecord {
   progress: number
   status: 'active' | 'done' | 'cancelled' | 'failed'
   createdAt: string
-  phase?: DownloadPhase
+  phase?: TransferPhase
+  speed?: number
   local?: boolean
 }
 

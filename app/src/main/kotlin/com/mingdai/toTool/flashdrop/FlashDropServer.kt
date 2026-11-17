@@ -58,6 +58,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.file.Files
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.URLDecoder
@@ -73,7 +76,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
-import javax.crypto.CipherInputStream
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -402,6 +404,7 @@ class FlashDropServer private constructor(
                     .put("size", app.size)
                     .put("scope", app.scope)
                     .put("installedAt", app.installedAt)
+                    .put("modifiedAt", app.modifiedAt)
                     .put("iconUrl", "/api/icon?package=${urlEncode(app.packageName)}"),
             )
         }
@@ -455,11 +458,12 @@ class FlashDropServer private constructor(
         for (index in 0 until minOf(paths.length(), 100)) {
             val relative = paths.optString(index)
             val file = safeFile(relative)
-            if (file == null || !file.isFile) {
+            if (file == null) {
                 failed.put(relative)
                 continue
             }
-            if (file.delete()) deleted.put(relative) else failed.put(relative)
+            val ok = if (file.isDirectory) file.deleteRecursively() else file.delete()
+            if (ok) deleted.put(relative) else failed.put(relative)
         }
         respondJson(
             call,
@@ -671,6 +675,7 @@ class FlashDropServer private constructor(
             .put("size", 0)
             .put("itemCount", file.listFiles()?.count { !it.name.startsWith(".") } ?: 0)
             .put("modified", formatModified(file.lastModified()))
+            .put("modifiedAt", file.lastModified())
             .put("path", relative)
     }
 
@@ -684,6 +689,7 @@ class FlashDropServer private constructor(
             .put("kind", kind)
             .put("size", file.length())
             .put("modified", formatModified(file.lastModified()))
+            .put("modifiedAt", file.lastModified())
             .put("path", relative)
         if (kind == "image" || kind == "video") {
             json.put("thumbUrl", "/api/thumb?path=${urlEncode(relative)}")
@@ -700,6 +706,7 @@ class FlashDropServer private constructor(
         val size: Long,
         val scope: String,
         val installedAt: String,
+        val modifiedAt: Long,
         val sourceDir: String,
     )
 
@@ -731,6 +738,7 @@ class FlashDropServer private constructor(
                     size = size,
                     scope = if (system) "system" else "user",
                     installedAt = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(packageInfo.firstInstallTime)),
+                    modifiedAt = packageInfo.firstInstallTime,
                     sourceDir = info.sourceDir,
                 )
             }.getOrNull()
@@ -886,75 +894,220 @@ class FlashDropServer private constructor(
             respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
             return
         }
-        val file: File
-        val downloadName: String
-        if (!packageName.isNullOrBlank()) {
-            val app = installedApps().firstOrNull { it.packageName == packageName }
-            if (app == null) {
-                respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "app-not-found"))
+        var archive: File? = null
+        try {
+            val file: File
+            val downloadName: String
+            if (!packageName.isNullOrBlank()) {
+                val app = installedApps().firstOrNull { it.packageName == packageName }
+                if (app == null) {
+                    respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "app-not-found"))
+                    return
+                }
+                file = File(app.sourceDir)
+                downloadName = "${sanitizeName(app.name)}.apk"
+            } else {
+                val path = call.request.queryParameters["path"].orEmpty()
+                val resolved = safeFile(path)?.takeIf { it.isFile || it.isDirectory }
+                if (resolved == null) {
+                    respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "file-not-found"))
+                    return
+                }
+                if (resolved.isDirectory) {
+                    val zipped = File.createTempFile("flashdrop-", ".zip", appContext.cacheDir)
+                    archive = zipped
+                    try {
+                        zipDirectory(resolved, zipped)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "zip folder failed", error)
+                        respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "zip-failed"))
+                        return
+                    }
+                    file = zipped
+                    downloadName = "${sanitizeName(resolved.name)}.zip"
+                } else {
+                    file = resolved
+                    downloadName = file.name
+                }
+            }
+            if (!file.canRead()) {
+                respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
                 return
             }
-            file = File(app.sourceDir)
-            downloadName = "${sanitizeName(app.name)}.apk"
-        } else {
-            val path = call.request.queryParameters["path"].orEmpty()
-            val resolved = safeFile(path)?.takeIf { it.isFile }
-            if (resolved == null) {
-                respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "file-not-found"))
-                return
-            }
-            file = resolved
-            downloadName = file.name
-        }
-        if (!file.canRead()) {
-            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
-            return
-        }
-        addTransfer(
-            downloadName,
-            file.length(),
-            "download",
-            header(call, "X-FlashDrop-Task-Id"),
-        )
-        call.response.header("Content-Disposition", contentDisposition(downloadName))
-        call.response.header("Cache-Control", "no-store")
-        addSecurityHeaders(call)
-        val key = authenticated.encryptionKey
-        if (key != null) {
-            call.response.header("X-FlashDrop-Encrypted", "1")
-            val iv = ByteArray(GCM_IV_BYTES).also(secureRandom::nextBytes)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
-            call.respondOutputStream(
-                ContentType.Application.OctetStream,
-                HttpStatusCode.OK,
-                file.length() + GCM_IV_BYTES + GCM_TAG_BYTES,
-            ) {
-                write(iv)
-                CipherInputStream(FileInputStream(file), cipher).use { it.copyTo(this) }
-            }
-        } else {
-            call.respondOutputStream(
-                ContentType.Application.OctetStream,
-                HttpStatusCode.OK,
+            addTransfer(
+                downloadName,
                 file.length(),
-            ) {
-                FileInputStream(file).use { it.copyTo(this) }
+                "download",
+                header(call, "X-FlashDrop-Task-Id"),
+            )
+            call.response.header("Content-Disposition", contentDisposition(downloadName))
+            call.response.header("Cache-Control", "no-store")
+            addSecurityHeaders(call)
+            val key = authenticated.encryptionKey
+            if (key != null) {
+                call.response.header("X-FlashDrop-Encrypted", "1")
+                call.respondOutputStream(
+                    ContentType.Application.OctetStream,
+                    HttpStatusCode.OK,
+                    encryptedLength(file.length()),
+                ) {
+                    encryptFile(file, key, this)
+                }
+            } else {
+                call.respondOutputStream(
+                    ContentType.Application.OctetStream,
+                    HttpStatusCode.OK,
+                    file.length(),
+                ) {
+                    FileInputStream(file).use { it.copyTo(this) }
+                }
+            }
+        } finally {
+            archive?.delete()
+        }
+    }
+
+    /** 文件夹下载前先在手机缓存目录打包，网页端拿到的就是一个普通 zip。 */
+    private fun zipDirectory(source: File, target: File) {
+        val base = source.absoluteFile
+        val basePath = base.path
+        ZipOutputStream(FileOutputStream(target)).use { zip ->
+            base.walkTopDown()
+                .onEnter { directory ->
+                    directory == base || !Files.isSymbolicLink(directory.toPath())
+                }
+                .forEach { entry ->
+                    if (entry == base || Files.isSymbolicLink(entry.toPath())) return@forEach
+                    val relative = entry.absolutePath
+                        .removePrefix(basePath)
+                        .trimStart(File.separatorChar)
+                        .replace(File.separatorChar, '/')
+                    if (relative.isEmpty()) return@forEach
+                    if (entry.isDirectory) {
+                        zip.putNextEntry(ZipEntry("$relative/"))
+                        zip.closeEntry()
+                    } else if (entry.isFile) {
+                        zip.putNextEntry(ZipEntry(relative))
+                        entry.inputStream().use { it.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+                }
+        }
+    }
+
+    private fun encryptedLength(fileLength: Long): Long {
+        val chunks = if (fileLength == 0L) 1L else (fileLength + ENC_CHUNK_SIZE - 1) / ENC_CHUNK_SIZE
+        return ENC_MAGIC.size + GCM_IV_BYTES + fileLength + chunks * (4L + GCM_TAG_BYTES)
+    }
+
+    private fun encryptFile(file: File, key: SecretKey, output: OutputStream) {
+        val baseIv = ByteArray(GCM_IV_BYTES).also(secureRandom::nextBytes)
+        for (index in 8 until 12) baseIv[index] = 0
+        output.write(ENC_MAGIC)
+        output.write(baseIv)
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(ENC_CHUNK_SIZE)
+            var index = 0
+            var read = input.read(buffer)
+            if (read < 0) {
+                writeEncryptedChunk(output, baseIv, index, key, ByteArray(0))
+                return@use
+            }
+            while (read >= 0) {
+                writeEncryptedChunk(output, baseIv, index, key, buffer.copyOf(read))
+                index += 1
+                read = input.read(buffer)
             }
         }
     }
 
+    private fun writeEncryptedChunk(
+        output: OutputStream,
+        baseIv: ByteArray,
+        index: Int,
+        key: SecretKey,
+        plaintext: ByteArray,
+    ) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, nonceFor(baseIv, index)))
+        val ciphertext = cipher.doFinal(plaintext)
+        output.write(intToBytes(ciphertext.size))
+        output.write(ciphertext)
+    }
+
+    /**
+     * 新版格式：FDEC1 + 12 字节基础 IV + 每块 [4 字节长度 + AES-GCM 密文+tag]。
+     * 每块独立 GCM，手机端和网页端都可以流式处理，避免大文件一次性解密卡死。
+     */
     private fun decryptToFile(source: File, target: File, key: SecretKey) {
         FileInputStream(source).use { input ->
-            val iv = ByteArray(GCM_IV_BYTES)
-            readFully(input, iv)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
-            CipherInputStream(input, cipher).use { decrypted ->
-                FileOutputStream(target).use { output -> decrypted.copyTo(output) }
+            val header = ByteArray(ENC_MAGIC.size)
+            val headerRead = input.read(header)
+            if (headerRead == ENC_MAGIC.size && header.contentEquals(ENC_MAGIC)) {
+                val baseIv = ByteArray(GCM_IV_BYTES)
+                readFully(input, baseIv)
+                FileOutputStream(target).use { output ->
+                    val lengthBytes = ByteArray(4)
+                    var index = 0
+                    while (true) {
+                        val lengthRead = input.read(lengthBytes)
+                        if (lengthRead < 0) break
+                        if (lengthRead != 4) throw IOException("bad-encrypted-file")
+                        val length = bytesToInt(lengthBytes)
+                        if (length < GCM_TAG_BYTES || length > ENC_CHUNK_SIZE + GCM_TAG_BYTES) {
+                            throw IOException("bad-encrypted-chunk")
+                        }
+                        val ciphertext = ByteArray(length)
+                        readFully(input, ciphertext)
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, nonceFor(baseIv, index)))
+                        output.write(cipher.doFinal(ciphertext))
+                        index += 1
+                    }
+                }
+            } else {
+                // 兼容早期 IV + 整文件密文的格式。
+                val iv = ByteArray(GCM_IV_BYTES)
+                if (headerRead > 0) header.copyInto(iv, 0, 0, minOf(headerRead, iv.size))
+                if (headerRead < iv.size) readFully(input, iv, headerRead, iv.size - headerRead)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                FileOutputStream(target).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        val chunk = cipher.update(buffer, 0, read)
+                        if (chunk != null && chunk.isNotEmpty()) output.write(chunk)
+                    }
+                    val finalChunk = cipher.doFinal()
+                    if (finalChunk.isNotEmpty()) output.write(finalChunk)
+                }
             }
         }
     }
+
+    private fun nonceFor(baseIv: ByteArray, index: Int): ByteArray {
+        val nonce = baseIv.copyOf()
+        nonce[8] = (index ushr 24).toByte()
+        nonce[9] = (index ushr 16).toByte()
+        nonce[10] = (index ushr 8).toByte()
+        nonce[11] = index.toByte()
+        return nonce
+    }
+
+    private fun intToBytes(value: Int): ByteArray = byteArrayOf(
+        (value ushr 24).toByte(),
+        (value ushr 16).toByte(),
+        (value ushr 8).toByte(),
+        value.toByte(),
+    )
+
+    private fun bytesToInt(bytes: ByteArray): Int =
+        ((bytes[0].toInt() and 0xFF) shl 24) or
+            ((bytes[1].toInt() and 0xFF) shl 16) or
+            ((bytes[2].toInt() and 0xFF) shl 8) or
+            (bytes[3].toInt() and 0xFF)
 
     /* ------------------------------ 静态资源 ------------------------------ */
 
@@ -1045,9 +1198,14 @@ class FlashDropServer private constructor(
     }
 
     private fun readFully(input: InputStream, target: ByteArray) {
-        var offset = 0
-        while (offset < target.size) {
-            val read = input.read(target, offset, target.size - offset)
+        readFully(input, target, 0, target.size)
+    }
+
+    private fun readFully(input: InputStream, target: ByteArray, start: Int, length: Int) {
+        var offset = start
+        val end = start + length
+        while (offset < end) {
+            val read = input.read(target, offset, end - offset)
             if (read <= 0) throw IOException("unexpected-eof")
             offset += read
         }
@@ -1285,6 +1443,8 @@ class FlashDropServer private constructor(
         private const val SALT_BYTES = 16
         private const val GCM_IV_BYTES = 12
         private const val GCM_TAG_BYTES = 16
+        private const val ENC_CHUNK_SIZE = 1024 * 1024
+        private val ENC_MAGIC = byteArrayOf(0x46, 0x44, 0x45, 0x43, 0x31)
         private const val PBKDF2_ITERATIONS = 120_000
 
         /**

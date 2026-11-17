@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Trash, WarningCircle, X } from '@phosphor-icons/react'
-import type { FileEntry } from '../types'
+import type { FileEntry, FolderEntry } from '../types'
 
 interface ConfirmDeleteDialogProps {
-  files: FileEntry[]
+  entries: Array<FileEntry | FolderEntry>
   onClose: () => void
   onConfirm: () => Promise<void>
 }
 
-export function ConfirmDeleteDialog({ files, onClose, onConfirm }: ConfirmDeleteDialogProps) {
+export function ConfirmDeleteDialog({ entries, onClose, onConfirm }: ConfirmDeleteDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -25,7 +25,8 @@ export function ConfirmDeleteDialog({ files, onClose, onConfirm }: ConfirmDelete
     }
   }, [busy, onClose])
 
-  if (files.length === 0) return null
+  if (entries.length === 0) return null
+  const hasFolder = entries.some((entry) => entry.type === 'folder')
 
   return (
     <div
@@ -51,13 +52,13 @@ export function ConfirmDeleteDialog({ files, onClose, onConfirm }: ConfirmDelete
         </button>
         <h2 id="delete-title">删除手机文件？</h2>
         <p>
-          将从手机中永久删除 {files.length} 个文件，此操作无法撤销。
+          将从手机中永久删除 {entries.length} 项{hasFolder ? '（文件夹会连同其中所有内容递归删除）' : '文件'}，此操作无法撤销。
         </p>
         <ul className="delete-list">
-          {files.slice(0, 6).map((file) => (
-            <li key={file.id}>{file.name}</li>
+          {entries.slice(0, 6).map((entry) => (
+            <li key={entry.id}>{entry.name}</li>
           ))}
-          {files.length > 6 && <li>以及另外 {files.length - 6} 个文件</li>}
+          {entries.length > 6 && <li>以及另外 {entries.length - 6} 项</li>}
         </ul>
         {error && <p className="confirm-error" role="alert">{error}</p>}
         <div className="confirm-actions">

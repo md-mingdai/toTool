@@ -13,6 +13,8 @@ interface TopbarProps {
   sidebarOpen: boolean
   onOpenSidebar: () => void
   menuButtonRef: RefObject<HTMLButtonElement | null>
+  searchOpen: boolean
+  onOpenSearch: () => void
 }
 
 export function Topbar({
@@ -24,6 +26,8 @@ export function Topbar({
   sidebarOpen,
   onOpenSidebar,
   menuButtonRef,
+  searchOpen,
+  onOpenSearch,
 }: TopbarProps) {
   const searchRef = useRef<HTMLInputElement>(null)
   const shortcut = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'
@@ -32,12 +36,12 @@ export function Topbar({
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        searchRef.current?.focus()
+        onOpenSearch()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [onOpenSearch])
 
   return (
     <header className="topbar">
@@ -58,11 +62,13 @@ export function Topbar({
         <Brand compact />
       </span>
 
-      <div className="search-box">
+      <div className={`search-box${searchOpen ? ' is-search-open' : ''}`}>
         <MagnifyingGlass className="search-icon" size={18} weight="regular" aria-hidden="true" />
         <input
           ref={searchRef}
           value={query}
+          onFocus={onOpenSearch}
+          onClick={onOpenSearch}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {

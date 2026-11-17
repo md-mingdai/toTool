@@ -368,14 +368,14 @@ private fun ServiceCard(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SecondaryButton(onClick = onCopy, modifier = Modifier.weight(1f)) {
-                        Text("复制链接")
+                        Text("复制链接", maxLines = 1)
                     }
                     SecondaryButton(onClick = onRestart, modifier = Modifier.weight(1f)) {
-                        Text("重启服务")
+                        Text("重启服务", maxLines = 1)
                     }
-                    SecondaryButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                        Text("停止")
-                    }
+                }
+                SecondaryButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                    Text("停止服务")
                 }
             } else {
                 PrimaryButton(

@@ -12,11 +12,16 @@ import type {
   PairResult,
   ServerInfo,
   TransferRecord,
+  UploadPhase,
 } from './types'
 const TOKEN_KEY = 'flashdrop-token'
 const KEY_KEY = 'flashdrop-key'
 const MAX_ENCRYPTED_BYTES = 256 * 1024 * 1024
 const PBKDF2_ITERATIONS_FALLBACK = 120_000
+const ENC_MAGIC = new Uint8Array([0x46, 0x44, 0x45, 0x43, 0x31])
+const ENC_CHUNK_SIZE = 1024 * 1024
+const GCM_IV_BYTES = 12
+const GCM_TAG_BYTES = 16
 
 export class ApiError extends Error {
   constructor(
@@ -269,10 +274,9 @@ export async function sendClipboard(text: string): Promise<ClipboardMessage> {
 export async function downloadEntry(
   entry: Entry,
   taskId: string,
-  onProgress: (phase: DownloadPhase, ratio: number) => void = () => {},
+  onProgress: (phase: DownloadPhase, ratio: number, loaded: number) => void = () => {},
   signal?: AbortSignal,
 ): Promise<string> {
-  if (entry.type === 'folder') throw new Error('不能下载文件夹')
   const endpoint = entry.type === 'app'
     ? `/api/download?package=${encodeURIComponent(entry.packageName)}`
     : `/api/download?path=${encodeURIComponent(entry.path)}`
@@ -291,7 +295,7 @@ export async function downloadEntry(
     signal?.addEventListener('abort', abort, { once: true })
     xhr.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) {
-        onProgress('download', Math.min(1, event.loaded / event.total))
+        onProgress('download', Math.min(1, event.loaded / event.total), event.loaded)
       }
     }
     xhr.onerror = () => {
@@ -332,15 +336,11 @@ export async function downloadEntry(
           let blob: Blob
           if (xhr.getResponseHeader('x-flashdrop-encrypted') === '1') {
             if (!encryptionKey) throw new Error('缺少加密密钥，请重新配对')
-            if (raw.length < 13) throw new Error('加密文件格式错误')
-            onProgress('decrypt', 0)
-            // 让浏览器先画出“正在解密”的进度状态，再执行同步 AES-GCM 解密。
-            await new Promise<void>((paint) => {
-              window.requestAnimationFrame(() => window.requestAnimationFrame(() => paint()))
-            })
-            const plain = gcm(encryptionKey, raw.slice(0, 12)).decrypt(raw.slice(12))
-            blob = new Blob([toArrayBuffer(plain)])
-            onProgress('decrypt', 1)
+            onProgress('decrypt', 0, 0)
+            blob = await decryptToBlob(raw, encryptionKey, (ratio, loaded) => {
+              onProgress('decrypt', ratio, loaded)
+            }, signal)
+            onProgress('decrypt', 1, raw.length)
           } else {
             blob = new Blob([toArrayBuffer(raw)])
           }
@@ -367,7 +367,7 @@ export async function downloadEntry(
 export async function uploadFile(
   file: File,
   taskId: string,
-  onProgress: (ratio: number) => void,
+  onProgress: (phase: UploadPhase, ratio: number, loaded: number) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const encrypted = Boolean(encryptionKey)
@@ -375,13 +375,15 @@ export async function uploadFile(
     throw new Error('加密模式暂支持 256 MB 以内的文件')
   }
 
+  onProgress(encrypted ? 'encrypt' : 'upload', 0, 0)
   let body: Blob | File = file
   if (encrypted && encryptionKey) {
-    const plain = new Uint8Array(await file.arrayBuffer())
-    const iv = randomBytes(12)
-    const ciphertext = gcm(encryptionKey, iv).encrypt(plain)
-    body = new Blob([toArrayBuffer(iv), toArrayBuffer(ciphertext)], { type: 'application/octet-stream' })
+    body = await encryptFileBlob(file, encryptionKey, (ratio, loaded) => {
+      onProgress('encrypt', ratio, loaded)
+    }, signal)
   }
+  if (signal?.aborted) throw new ApiError(0, 'aborted')
+  onProgress('upload', 0, 0)
 
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -399,7 +401,7 @@ export async function uploadFile(
     }
     signal?.addEventListener('abort', abort, { once: true })
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total)
+      if (event.lengthComputable && event.total > 0) onProgress('upload', event.loaded / event.total, event.loaded)
     }
     xhr.onerror = () => {
       signal?.removeEventListener('abort', abort)
@@ -428,6 +430,100 @@ export async function uploadFile(
     }
     xhr.send(body)
   })
+}
+
+async function encryptFileBlob(
+  file: File,
+  key: Uint8Array,
+  onProgress: (ratio: number, loaded: number) => void,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const total = file.size
+  const baseIv = randomBytes(GCM_IV_BYTES)
+  baseIv.fill(0, 8, GCM_IV_BYTES)
+  const parts: BlobPart[] = [toArrayBuffer(ENC_MAGIC), toArrayBuffer(baseIv)]
+  let offset = 0
+  let index = 0
+  while (offset < total) {
+    if (signal?.aborted) throw new ApiError(0, 'aborted')
+    const end = Math.min(total, offset + ENC_CHUNK_SIZE)
+    const plain = new Uint8Array(await file.slice(offset, end).arrayBuffer())
+    const ciphertext = gcm(key, nonceFor(baseIv, index)).encrypt(plain)
+    parts.push(toArrayBuffer(intToBytes(ciphertext.length)), toArrayBuffer(ciphertext))
+    offset = end
+    index += 1
+    onProgress(total > 0 ? offset / total : 1, offset)
+    await yieldToUi()
+  }
+  if (total === 0) {
+    const ciphertext = gcm(key, nonceFor(baseIv, 0)).encrypt(new Uint8Array(0))
+    parts.push(toArrayBuffer(intToBytes(ciphertext.length)), toArrayBuffer(ciphertext))
+    onProgress(1, 0)
+  }
+  return new Blob(parts, { type: 'application/octet-stream' })
+}
+
+async function decryptToBlob(
+  raw: Uint8Array,
+  key: Uint8Array,
+  onProgress: (ratio: number, loaded: number) => void,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const hasMagic = raw.length >= ENC_MAGIC.length && ENC_MAGIC.every((byte, index) => raw[index] === byte)
+  if (!hasMagic) {
+    // 兼容早期 IV + 整文件密文格式。
+    if (raw.length < GCM_IV_BYTES + GCM_TAG_BYTES) throw new Error('加密文件格式错误')
+    const plain = gcm(key, raw.slice(0, GCM_IV_BYTES)).decrypt(raw.slice(GCM_IV_BYTES))
+    return new Blob([toArrayBuffer(plain)])
+  }
+  if (raw.length < ENC_MAGIC.length + GCM_IV_BYTES) throw new Error('加密文件格式错误')
+  const baseIv = raw.slice(ENC_MAGIC.length, ENC_MAGIC.length + GCM_IV_BYTES)
+  const parts: BlobPart[] = []
+  let offset = ENC_MAGIC.length + GCM_IV_BYTES
+  let index = 0
+  while (offset < raw.length) {
+    if (signal?.aborted) throw new ApiError(0, 'aborted')
+    if (offset + 4 > raw.length) throw new Error('加密文件格式错误')
+    const length = readInt(raw, offset)
+    offset += 4
+    if (length < GCM_TAG_BYTES || length > ENC_CHUNK_SIZE + GCM_TAG_BYTES || offset + length > raw.length) {
+      throw new Error('加密文件格式错误')
+    }
+    const ciphertext = raw.subarray(offset, offset + length)
+    const plain = gcm(key, nonceFor(baseIv, index)).decrypt(ciphertext)
+    parts.push(toArrayBuffer(plain))
+    offset += length
+    index += 1
+    onProgress(offset / raw.length, offset)
+    await yieldToUi()
+  }
+  return new Blob(parts)
+}
+
+function nonceFor(baseIv: Uint8Array, index: number): Uint8Array {
+  const nonce = baseIv.slice()
+  nonce[8] = (index >>> 24) & 0xff
+  nonce[9] = (index >>> 16) & 0xff
+  nonce[10] = (index >>> 8) & 0xff
+  nonce[11] = index & 0xff
+  return nonce
+}
+
+function intToBytes(value: number): Uint8Array {
+  return new Uint8Array([
+    (value >>> 24) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 8) & 0xff,
+    value & 0xff,
+  ])
+}
+
+function readInt(bytes: Uint8Array, offset: number): number {
+  return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+}
+
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0))
 }
 
 export function withToken(url: string | undefined): string | undefined {

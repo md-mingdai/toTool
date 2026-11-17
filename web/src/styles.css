@@ -854,6 +854,100 @@ mark {
   color: var(--muted);
 }
 
+.file-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--content-bg);
+}
+
+.toolbar-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.toolbar-icon:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.toolbar-icon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.toolbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.toolbar-selected {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.toolbar-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.sort-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sort-select select {
+  padding: 4px 22px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.sort-select select:focus {
+  border-color: var(--accent-line);
+}
+
 .tabs {
   display: inline-flex;
   align-items: center;
@@ -2248,6 +2342,109 @@ input[type='checkbox'] {
   }
 }
 
+.search-box.is-search-open {
+  visibility: hidden;
+}
+
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 76px 20px 20px;
+  background: rgba(8, 10, 8, 0.38);
+  backdrop-filter: grayscale(1) blur(5px);
+  -webkit-backdrop-filter: grayscale(1) blur(5px);
+  animation: fade-in 0.2s ease;
+}
+
+.search-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(760px, calc(100vw - 32px));
+  min-height: 58px;
+  padding: 0 12px 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  animation: search-slide-in 0.34s var(--ease-soft);
+}
+
+.search-panel > svg {
+  flex: none;
+  color: var(--faint);
+}
+
+.search-panel input {
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.search-panel input::placeholder {
+  color: var(--faint);
+}
+
+.search-panel input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-panel kbd {
+  flex: none;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.search-overlay-close {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 9px;
+  color: var(--muted);
+}
+
+.search-overlay-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.search-overlay-hint {
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes search-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(170px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -2379,6 +2576,18 @@ input[type='checkbox'] {
   .topbar-inner {
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .file-toolbar {
+    gap: 8px;
+  }
+
+  .toolbar-meta {
+    gap: 8px;
+  }
+
+  .toolbar-check {
+    padding-left: 2px;
   }
 
   .search-box {
@@ -2568,8 +2777,9 @@ input[type='checkbox'] {
   .pair-overlay,
   .modal-overlay,
   .drawer-scrim,
-  .drop-overlay {
+  .drop-overlay,
+  .search-overlay {
     backdrop-filter: none;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
   }
 }

@@ -1,4 +1,4 @@
-import type { Category, FileEntry } from './types'
+import type { Category, FileEntry, TransferPhase } from './types'
 
 export const categories: Category[] = [
   { id: 'storage', label: '手机存储', group: '文件', icon: 'storage' },
@@ -13,6 +13,26 @@ export const categories: Category[] = [
   { id: 'clipboard', label: '剪贴板', group: '传输', icon: 'clipboard' },
   { id: 'transfers', label: '最近传输', group: '传输', icon: 'transfers' },
 ]
+
+export function transferPhaseLabel(phase: TransferPhase | undefined): string {
+  switch (phase) {
+    case 'encrypt':
+      return '加密中'
+    case 'decrypt':
+      return '解密中'
+    case 'upload':
+      return '上传中'
+    case 'download':
+      return '下载中'
+    default:
+      return ''
+  }
+}
+
+export function formatSpeed(speed: number | undefined): string {
+  if (!speed || speed <= 0) return ''
+  return `${formatBytes(speed)}/s`
+}
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'

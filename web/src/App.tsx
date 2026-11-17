@@ -5,6 +5,7 @@ import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { DetailsDialog } from './components/DetailsDialog'
 import { FileBrowser } from './components/FileBrowser'
 import { PairingGate } from './components/PairingGate'
+import { SearchOverlay } from './components/SearchOverlay'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { TransferToast } from './components/TransferToast'
@@ -131,6 +132,30 @@ function newTaskId(prefix: string): string {
   return `${prefix}-${suffix}`
 }
 
+function createSpeedMeter(): (phase: string, loaded: number) => number {
+  let phase = ''
+  let loaded = 0
+  let time = performance.now()
+  let speed = 0
+  return (nextPhase, nextLoaded) => {
+    const now = performance.now()
+    if (nextPhase !== phase) {
+      phase = nextPhase
+      loaded = nextLoaded
+      time = now
+      speed = 0
+      return 0
+    }
+    const elapsed = now - time
+    if (elapsed < 250) return speed
+    const instant = Math.max(0, ((nextLoaded - loaded) * 1000) / elapsed)
+    speed = speed > 0 ? speed * 0.65 + instant * 0.35 : instant
+    loaded = nextLoaded
+    time = now
+    return speed
+  }
+}
+
 function mergeTasks(local: TransferRecord[], server: TransferRecord[]): TransferRecord[] {
   const merged = new Map<string, TransferRecord>()
   server.forEach((task) => merged.set(task.id, task))
@@ -167,8 +192,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [selected, setSelected] = useState<Entry | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Array<FileEntry | FolderEntry> | null>(null)
   const [dragging, setDragging] = useState(false)
   const [connectionLost, setConnectionLost] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -563,7 +589,7 @@ export default function App() {
   const cancelTask = useCallback((id: string) => {
     abortRef.current.get(id)?.()
     abortRef.current.delete(id)
-    updateTask(id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+    updateTask(id, { status: 'cancelled', phase: undefined, speed: undefined, createdAt: '已取消' })
     setToastRecords((previous) => previous.filter((task) => task.id !== id))
     void api.deleteTransfer(id).catch(() => {})
     setNotice('已取消传输')
@@ -580,8 +606,10 @@ export default function App() {
   const closeDelete = useCallback(() => setPendingDelete(null), [])
 
   const requestDelete = useCallback((entries: Entry[]) => {
-    const files = entries.filter((entry): entry is FileEntry => entry.type === 'file')
-    if (files.length > 0) setPendingDelete(files)
+    const deletable = entries.filter(
+      (entry): entry is FileEntry | FolderEntry => entry.type === 'file' || entry.type === 'folder',
+    )
+    if (deletable.length > 0) setPendingDelete(deletable)
   }, [])
 
   const confirmDelete = useCallback(async () => {
@@ -652,6 +680,20 @@ export default function App() {
     scrollTop()
   }, [scrollTop, syncUrl])
 
+  const handleGoUp = useCallback(() => {
+    if (!folder) return
+    const parent = folder.path.split('/').filter(Boolean).slice(0, -1).join('/')
+    if (!parent) {
+      handleGoRoot()
+      return
+    }
+    setFolder(folderFromPath(parent))
+    setQuery('')
+    setSelected(null)
+    syncUrl('storage', parent, '', 'all')
+    scrollTop()
+  }, [folder, handleGoRoot, scrollTop, syncUrl])
+
   const handleNavigatePath = useCallback((path: string) => {
     setFolder(folderFromPath(path))
     setQuery('')
@@ -696,7 +738,8 @@ export default function App() {
       direction: 'upload',
       progress: 1,
       status: 'active',
-      createdAt: '正在传输',
+      createdAt: '准备传输',
+      phase: api.isEncryptionActive() ? 'encrypt' : 'upload',
       local: true,
     }))
     setToastRecords(records)
@@ -711,17 +754,25 @@ export default function App() {
       const record = records[index]
       const controller = new AbortController()
       abortRef.current.set(record.id, () => controller.abort())
+      const measure = createSpeedMeter()
       try {
         await api.uploadFile(
           file,
           record.id,
-          (ratio) => {
-            const progress = Math.max(1, Math.min(99, Math.round(ratio * 100)))
-            updateTask(record.id, { progress })
+          (phase, ratio, loaded) => {
+            const progress = phase === 'encrypt'
+              ? Math.max(1, Math.min(14, Math.round(ratio * 14)))
+              : Math.max(15, Math.min(99, 15 + Math.round(ratio * 84)))
+            updateTask(record.id, {
+              phase,
+              progress,
+              speed: measure(phase, loaded),
+              createdAt: phase === 'encrypt' ? '正在加密' : '正在上传',
+            })
           },
           controller.signal,
         )
-        updateTask(record.id, { progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
+        updateTask(record.id, { progress: 100, status: 'done', phase: undefined, speed: undefined, createdAt: '刚刚' })
         abortRef.current.delete(record.id)
       } catch (caught) {
         abortRef.current.delete(record.id)
@@ -730,9 +781,9 @@ export default function App() {
           return
         }
         if (caught instanceof api.ApiError && caught.code === 'aborted') {
-          updateTask(record.id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+          updateTask(record.id, { status: 'cancelled', phase: undefined, speed: undefined, createdAt: '已取消' })
         } else {
-          updateTask(record.id, { status: 'failed', phase: undefined, createdAt: '失败' })
+          updateTask(record.id, { status: 'failed', phase: undefined, speed: undefined, createdAt: '失败' })
           setToastRecords((previous) => previous.filter((task) => task.id !== record.id))
           if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
             setConnectionLost(true)
@@ -764,14 +815,16 @@ export default function App() {
     const controller = new AbortController()
     abortRef.current.set(id, () => controller.abort())
     try {
-      const name = await api.downloadEntry(entry, id, (phase, ratio) => {
+      const measure = createSpeedMeter()
+      const name = await api.downloadEntry(entry, id, (phase, ratio, loaded) => {
         updateTask(id, {
           phase,
           progress: phase === 'decrypt' ? 90 + Math.round(ratio * 10) : Math.round(ratio * 90),
+          speed: measure(phase, loaded),
           createdAt: phase === 'decrypt' ? '正在解密' : '正在下载',
         })
       }, controller.signal)
-      updateTask(id, { name, progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
+      updateTask(id, { name, progress: 100, status: 'done', phase: undefined, speed: undefined, createdAt: '刚刚' })
       abortRef.current.delete(id)
       setSelected(null)
       setNotice(`已下载 ${name}`)
@@ -783,9 +836,9 @@ export default function App() {
         return
       }
       if (caught instanceof api.ApiError && caught.code === 'aborted') {
-        updateTask(id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+        updateTask(id, { status: 'cancelled', phase: undefined, speed: undefined, createdAt: '已取消' })
       } else {
-        updateTask(id, { status: 'failed', phase: undefined, createdAt: '失败' })
+        updateTask(id, { status: 'failed', phase: undefined, speed: undefined, createdAt: '失败' })
         setToastRecords((previous) => previous.filter((task) => task.id !== id))
         if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
           setConnectionLost(true)
@@ -797,7 +850,6 @@ export default function App() {
 
   const handleBatchDownload = useCallback(async (selected: Entry[]) => {
     for (const entry of selected) {
-      if (entry.type === 'folder') continue
       await handleDownload(entry)
       await new Promise((resolve) => window.setTimeout(resolve, 180))
     }
@@ -900,7 +952,7 @@ export default function App() {
       <div
         className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${!paired ? ' is-locked' : ''}`}
         aria-hidden={!paired || undefined}
-        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || undefined}
+        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || searchOpen || undefined}
       >
         <Sidebar
           activeCategory={category}
@@ -946,6 +998,8 @@ export default function App() {
             sidebarOpen={sidebarOpen}
             onOpenSidebar={() => setSidebarOpen(true)}
             menuButtonRef={mobileMenuRef}
+            searchOpen={searchOpen}
+            onOpenSearch={() => setSearchOpen(true)}
           />
 
           <main className="content-scroll" ref={contentRef}>
@@ -964,6 +1018,7 @@ export default function App() {
               onScopeChange={handleScopeChange}
               onOpenFolder={handleOpenFolder}
               onGoRoot={handleGoRoot}
+              onGoUp={handleGoUp}
               onNavigatePath={handleNavigatePath}
               onOpenEntry={setSelected}
               onDownload={(entry) => void handleDownload(entry)}
@@ -1001,6 +1056,14 @@ export default function App() {
         </div>
       </div>
 
+      {searchOpen && paired && (
+        <SearchOverlay
+          query={query}
+          onQueryChange={handleQueryChange}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+
       <PairingGate
         open={!paired}
         device={info?.device ?? null}
@@ -1015,11 +1078,13 @@ export default function App() {
         onCopy={handleCopy}
       />
 
-      <ConfirmDeleteDialog
-        files={pendingDelete ?? []}
-        onClose={closeDelete}
-        onConfirm={confirmDelete}
-      />
+      {pendingDelete && (
+        <ConfirmDeleteDialog
+          entries={pendingDelete}
+          onClose={closeDelete}
+          onConfirm={confirmDelete}
+        />
+      )}
 
       <TransferToast
         records={toastRecords}
