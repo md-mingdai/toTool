@@ -733,6 +733,20 @@ mark {
   background: var(--surface-2);
 }
 
+.btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--surface);
+}
+
+.btn-danger:hover {
+  filter: brightness(1.03);
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+}
+
 .upload-button {
   height: 42px;
   padding: 0 14px;
@@ -930,6 +944,7 @@ input[type='checkbox'] {
 
 .selection-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 8px 0;
@@ -1190,6 +1205,12 @@ input[type='checkbox'] {
   border-color: var(--line);
   background: var(--surface);
   color: var(--text);
+}
+
+.row-action-danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 /* Transfer rows */
@@ -1971,6 +1992,86 @@ input[type='checkbox'] {
   font-family: var(--font-mono);
   font-size: 8px;
   text-align: center;
+}
+
+.confirm-card {
+  position: relative;
+  width: min(440px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  outline: none;
+  animation: modal-in 0.28s var(--ease-soft);
+}
+
+.confirm-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-card h2 {
+  padding-right: 30px;
+  font-size: 21px;
+  letter-spacing: -0.02em;
+}
+
+.confirm-card > p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.delete-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+  margin: 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.delete-list li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.confirm-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.confirm-actions .btn {
+  flex: 1;
 }
 
 /* Details modal */

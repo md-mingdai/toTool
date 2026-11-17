@@ -64,6 +64,8 @@ interface FileBrowserProps {
   onSendClipboard: (text: string) => Promise<void>
   onCopyClipboard: (text: string) => void
   onBatchDownload: (entries: Entry[]) => void
+  onDeleteFile: (entry: FileEntry) => void
+  onDeleteFiles: (entries: Entry[]) => void
 }
 
 function FileGlyph({ kind, size = 20 }: { kind: FileEntry['kind']; size?: number }) {
@@ -339,6 +341,8 @@ export function FileBrowser({
   onSendClipboard,
   onCopyClipboard,
   onBatchDownload,
+  onDeleteFile,
+  onDeleteFiles,
 }: FileBrowserProps) {
   const categoryMeta = categories.find((item) => item.id === category)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
@@ -374,6 +378,9 @@ export function FileBrowser({
       : entries.length
 
   const selectableCount = entries.filter((entry) => entry.type !== 'folder').length
+  const selectedFiles = entries.filter(
+    (entry): entry is FileEntry => entry.type === 'file' && selectedIds.has(entry.id),
+  )
 
   const lede = folder
     ? `${folder.itemCount.toLocaleString('zh-CN')} 项${folder.size > 0 ? ` · ${formatBytes(folder.size)}` : ''}`
@@ -482,6 +489,12 @@ export function FileBrowser({
             <DownloadSimple size={16} weight="regular" />
             下载所选
           </button>
+          {selectedFiles.length > 0 && (
+            <button type="button" className="btn btn-danger" onClick={() => onDeleteFiles(selectedFiles)}>
+              <Trash size={16} weight="regular" />
+              删除所选文件
+            </button>
+          )}
           <button type="button" className="btn btn-ghost" onClick={() => setSelectedIds(new Set())}>
             取消选择
           </button>
@@ -575,6 +588,17 @@ export function FileBrowser({
                   >
                     {action.icon}
                   </button>
+                  {entry.type === 'file' && (
+                    <button
+                      type="button"
+                      className="row-action row-action-danger"
+                      aria-label={`删除手机上的 ${entry.name}`}
+                      title="从手机删除"
+                      onClick={() => onDeleteFile(entry)}
+                    >
+                      <Trash size={16} weight="regular" />
+                    </button>
+                  )}
                 </div>
               </li>
             )

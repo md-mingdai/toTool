@@ -241,6 +241,15 @@ export async function deleteTransfer(id: string): Promise<void> {
   })
 }
 
+export async function deleteFiles(paths: string[]): Promise<{ deleted: string[]; failed: string[] }> {
+  const response = await apiFetch('/api/files/delete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  })
+  return (await response.json()) as { deleted: string[]; failed: string[] }
+}
+
 export async function listClipboard(): Promise<ClipboardMessage[]> {
   const response = await apiFetch('/api/clipboard')
   const data = (await response.json()) as { items: ClipboardMessage[] }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle, UploadSimple, WarningCircle } from '@phosphor-icons/react'
 import * as api from './api'
+import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog'
 import { DetailsDialog } from './components/DetailsDialog'
 import { FileBrowser } from './components/FileBrowser'
 import { PairingGate } from './components/PairingGate'
@@ -167,6 +168,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selected, setSelected] = useState<Entry | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null)
   const [dragging, setDragging] = useState(false)
   const [connectionLost, setConnectionLost] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -221,6 +223,7 @@ export default function App() {
     setToastRecords([])
     setToastOpen(false)
     setSelected(null)
+    setPendingDelete(null)
     setSidebarOpen(false)
     setEncryptionEnabled(false)
     setConnectionLost(false)
@@ -574,6 +577,32 @@ export default function App() {
     void api.deleteTransfer(id).catch(() => {})
   }, [])
 
+  const closeDelete = useCallback(() => setPendingDelete(null), [])
+
+  const requestDelete = useCallback((entries: Entry[]) => {
+    const files = entries.filter((entry): entry is FileEntry => entry.type === 'file')
+    if (files.length > 0) setPendingDelete(files)
+  }, [])
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete || pendingDelete.length === 0) return
+    try {
+      const result = await api.deleteFiles(pendingDelete.map((file) => file.path))
+      if (result.failed.length > 0) {
+        throw new Error(`${result.failed.length} 个文件删除失败`)
+      }
+      setNotice(`已删除 ${result.deleted.length} 个文件`)
+      setPendingDelete(null)
+      setRefreshKey((value) => value + 1)
+    } catch (caught) {
+      if (caught instanceof api.UnauthorizedError) {
+        handleDisconnect()
+        throw caught
+      }
+      throw new Error(messageForError(caught))
+    }
+  }, [handleDisconnect, pendingDelete])
+
   const handleSelectCategory = useCallback((next: CategoryId) => {
     setCategory(next)
     setFolder(null)
@@ -602,6 +631,7 @@ export default function App() {
     setClipboardMessages([])
     setTransfers([])
     setToastRecords([])
+    setPendingDelete(null)
     setConnectionLost(false)
     syncUrl('storage', '', '', 'all', true)
     setNotice(`已连接 ${result.device.name}`)
@@ -943,6 +973,8 @@ export default function App() {
               onRetry={() => setRefreshKey((value) => value + 1)}
               onCancelTask={cancelTask}
               onDeleteTask={deleteTask}
+              onDeleteFile={(entry) => requestDelete([entry])}
+              onDeleteFiles={requestDelete}
               onSendClipboard={handleSendClipboard}
               onCopyClipboard={handleCopyClipboard}
               onBatchDownload={(selected) => void handleBatchDownload(selected)}
@@ -981,6 +1013,12 @@ export default function App() {
         onClose={closeDetails}
         onDownload={(entry) => void handleDownload(entry)}
         onCopy={handleCopy}
+      />
+
+      <ConfirmDeleteDialog
+        files={pendingDelete ?? []}
+        onClose={closeDelete}
+        onConfirm={confirmDelete}
       />
 
       <TransferToast

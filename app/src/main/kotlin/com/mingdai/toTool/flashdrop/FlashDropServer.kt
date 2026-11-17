@@ -346,6 +346,7 @@ class FlashDropServer private constructor(
             path == "/api/logout" -> handleLogout(call)
             path == "/api/apps" -> handleApps(call)
             path == "/api/files" -> handleFiles(call)
+            path == "/api/files/delete" -> handleDeleteFiles(call)
             path == "/api/transfers" -> handleTransfers(call)
             path == "/api/transfers/delete" -> handleDeleteTransfer(call)
             path == "/api/clipboard" -> handleClipboard(call)
@@ -431,6 +432,40 @@ class FlashDropServer private constructor(
             }
         }
         respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
+    }
+
+    private suspend fun handleDeleteFiles(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call) == null) return unauthorized(call)
+        if (!hasStorageAccess()) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
+            return
+        }
+        val body = runCatching { readJson(call) }.getOrNull()
+        val paths = body?.optJSONArray("paths")
+        if (paths == null || paths.length() == 0) {
+            respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "missing-paths"))
+            return
+        }
+        val deleted = JSONArray()
+        val failed = JSONArray()
+        for (index in 0 until minOf(paths.length(), 100)) {
+            val relative = paths.optString(index)
+            val file = safeFile(relative)
+            if (file == null || !file.isFile) {
+                failed.put(relative)
+                continue
+            }
+            if (file.delete()) deleted.put(relative) else failed.put(relative)
+        }
+        respondJson(
+            call,
+            HttpStatusCode.OK,
+            JSONObject().put("deleted", deleted).put("failed", failed),
+        )
     }
 
     private suspend fun handleTransfers(call: ApplicationCall) {
