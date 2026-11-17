@@ -16,6 +16,40 @@ permissions:
   contents: read
 
 jobs:
+  # 前端单独构建一次，四个架构的 APK 下载同一份 dist，
+  # 放进 app/src/main/assets/flashdrop/，由手机端 HTTP 服务读取。
+  web:
+    name: Web · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装前端依赖
+        working-directory: web
+        run: npm ci
+
+      - name: 构建前端
+        working-directory: web
+        run: npm run build
+
+      - name: 上传 Web 资源
+        uses: actions/upload-artifact@v7
+        with:
+          name: flashdrop-web
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 7
+
   # ---------------------------------------------------------------------------
   # 每个 CPU 架构各打一个 APK，四个架构并行。每个任务自己完成整条流程：
   #   从源码交叉编译这个架构的 FFmpeg（纯 LGPL，有缓存，通常直接复用）→ 放进 jniLibs → 打这个架构的 APK
@@ -25,6 +59,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: APK · ${{ matrix.abi }}
+    needs: web
     runs-on: ubuntu-latest
     timeout-minutes: 120      # 第一次要先编 FFmpeg（十几分钟到半小时），之后命中缓存就快了
 
@@ -40,6 +75,21 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+
+      - name: 下载 Web 资源
+        uses: actions/download-artifact@v8
+        with:
+          name: flashdrop-web
+          path: app/src/main/assets/flashdrop
+
+      - name: 校验 Web 构建产物
+        run: |
+          test -f app/src/main/assets/flashdrop/index.html
+          test -d app/src/main/assets/flashdrop/assets
+          if [ -e app/src/main/assets/flashdrop/node_modules ] || [ -e app/src/main/assets/flashdrop/src ]; then
+            echo "::error::assets/flashdrop 里混入了前端源码或 node_modules，只应打包 web/dist 构建产物"
+            exit 1
+          fi
 
       # ---------------- FFmpeg ----------------
       # 缓存键里带着编译脚本和版本文件的哈希：这两个文件没改，就直接复用上次编好的 libffmpeg.so，
@@ -172,7 +222,7 @@ jobs:
           echo "- \`${ABI}\`：$(du -h "dist/${NAME}.apk" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
       # 确认 APK 里带着这个架构的 libffmpeg.so，并且没有混进其它架构的原生库
-      - name: 检查 APK 里的原生库
+      - name: 检查 APK 里的原生库与网页资源
         run: |
           APK=$(find dist -name '*.apk' | head -n 1)
           LIBS=$(unzip -Z1 "$APK" | grep -E '^lib/.+\.so$' || true)
@@ -180,6 +230,13 @@ jobs:
           echo "$LIBS" | grep -qx "lib/${ABI}/libffmpeg.so" || { echo "::error::APK 里没有 lib/${ABI}/libffmpeg.so"; exit 1; }
           if echo "$LIBS" | grep -v "^lib/${ABI}/" | grep -q .; then
             echo "::warning::APK 里混进了其它架构的原生库（-PabiFilter 没有生效？）"
+          fi
+          # 网页只为构建产物；源码、依赖和 package 文件不能进 APK
+          ASSETS=$(unzip -Z1 "$APK" | grep '^assets/flashdrop/' || true)
+          echo "$ASSETS" | grep -qx 'assets/flashdrop/index.html' || { echo "::error::APK 里没有 assets/flashdrop/index.html"; exit 1; }
+          if echo "$ASSETS" | grep -Eq '^assets/flashdrop/(src|node_modules|package\.json|package-lock\.json)'; then
+            echo "::error::APK 的 assets/flashdrop 里混入了前端源码或依赖"
+            exit 1
           fi
 
       - name: 上传 APK

@@ -38,3 +38,6 @@ Thumbs.db
 app/src/main/jniLibs/*/libffmpeg.so
 ffmpeg/work/
 ffmpeg/out/
+
+# 隔空闪传网页：由 web/ 在 CI 里构建后放进 assets，不提交
+app/src/main/assets/flashdrop/

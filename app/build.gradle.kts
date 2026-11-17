@@ -147,6 +147,9 @@ dependencies {
 
     implementation("com.google.zxing:core:3.5.3")
 
+    // 隔空闪传：手机上的轻量 HTTP 服务（静态页面 + 同源 API）
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+
     // 条码扫描：CameraX 负责相机预览与逐帧分析
     val cameraX = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraX")

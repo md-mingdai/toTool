@@ -37,6 +37,7 @@ import com.mingdai.toTool.ui.screens.tools.DateTool
 import com.mingdai.toTool.ui.screens.tools.DecibelTool
 import com.mingdai.toTool.ui.screens.tools.DeviceInfoTool
 import com.mingdai.toTool.ui.screens.tools.EquationSolverTool
+import com.mingdai.toTool.ui.screens.tools.FlashDropTool
 import com.mingdai.toTool.ui.screens.tools.FlashlightTool
 import com.mingdai.toTool.ui.screens.tools.FunctionPlotTool
 import com.mingdai.toTool.ui.screens.tools.HashTool
@@ -100,6 +101,8 @@ private val ToolWindowSpecs: Map<String, ToolWindowSpec> = mapOf(
     "dev_level" to ToolWindowSpec(keepOn = true),
     "daily_compass" to ToolWindowSpec(keepOn = true),
     "daily_decibel" to ToolWindowSpec(keepOn = true),
+    // 网页服务要一直可达，屏幕常亮避免用户刚连上就息屏
+    "dev_flashdrop" to ToolWindowSpec(keepOn = true),
 )
 
 /**
@@ -206,6 +209,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "calc_equation" -> EquationSolverTool(padding)
             "calc_plot" -> FunctionPlotTool(padding)
             // --- 设备工具 ---
+            "dev_flashdrop" -> FlashDropTool(padding)
             "dev_device" -> DeviceInfoTool(padding)
             "dev_battery" -> BatteryTool(padding)
             "dev_network" -> NetworkTool(padding)
