@@ -5,18 +5,27 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -28,12 +37,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -42,6 +53,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mingdai.toTool.barcode.BarcodeRenderer
 import com.mingdai.toTool.barcode.BarcodeType
 import com.mingdai.toTool.data.LocalPrefs
+import com.mingdai.toTool.flashdrop.ClipboardMessage
 import com.mingdai.toTool.flashdrop.FlashDropController
 import com.mingdai.toTool.flashdrop.FlashDropState
 import com.mingdai.toTool.ui.components.AppDialog
@@ -53,10 +65,23 @@ import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.WarnColor
 import com.mingdai.toTool.ui.components.copyText
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlinx.coroutines.delay
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private enum class FlashDropTab(val label: String) {
+    CONNECTION("连接"),
+    RECEIVED("已接收"),
+    CLIPBOARD("剪贴板"),
+}
 
 /**
  * 隔空闪传：在手机上启动一个局域网网页服务，电脑浏览器访问后管理手机文件。
@@ -76,6 +101,7 @@ fun FlashDropTool(padding: PaddingValues) {
     var codeDraft by remember { mutableStateOf("") }
     var codeError by remember { mutableStateOf<String?>(null) }
     var autoPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(FlashDropTab.CONNECTION) }
 
     val storagePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -127,7 +153,11 @@ fun FlashDropTool(padding: PaddingValues) {
         }
     }
 
-    ToolBody(padding) {
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        FlashDropTabs(selected = tab, onSelect = { tab = it })
+        Box(modifier = Modifier.weight(1f)) {
+            when (tab) {
+                FlashDropTab.CONNECTION -> ToolBody(PaddingValues(0.dp)) {
         SectionLabel("网页服务")
         ServiceCard(
             state = state,
@@ -188,6 +218,11 @@ fun FlashDropTool(padding: PaddingValues) {
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
+            }
+        }
+                }
+                FlashDropTab.RECEIVED -> ReceivedTab(controller)
+                FlashDropTab.CLIPBOARD -> ClipboardTab(controller)
             }
         }
     }
@@ -465,3 +500,221 @@ private fun UsageLine(index: String, text: String) {
         )
     }
 }
+
+
+@Composable
+private fun FlashDropTabs(selected: FlashDropTab, onSelect: (FlashDropTab) -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            FlashDropTab.entries.forEach { tab ->
+                val active = tab == selected
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(tab) }
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        tab.label,
+                        style = MiuixTheme.textStyles.title4,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) colors.primary else colors.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(34.dp)
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(if (active) colors.primary else Color.Transparent),
+                    )
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(colors.dividerLine))
+    }
+}
+
+@Composable
+private fun ReceivedTab(controller: FlashDropController) {
+    val context = LocalContext.current
+    var files by remember { mutableStateOf<List<File>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            files = controller.receivedFiles()
+            delay(1500)
+        }
+    }
+
+    ToolBody(PaddingValues(0.dp)) {
+        SectionLabel("文件")
+        if (files.isEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 76.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "还没有接收到文件",
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        } else {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    files.forEachIndexed { index, file ->
+                        if (index > 0) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp)
+                                    .height(0.5.dp)
+                                    .background(MiuixTheme.colorScheme.dividerLine),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    file.name,
+                                    style = MiuixTheme.textStyles.body2,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    "${Formatter.formatShortFileSize(context, file.length())} · ${formatFileTime(file.lastModified())}",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            Text(
+                                "已接收",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClipboardTab(controller: FlashDropController) {
+    val context = LocalContext.current
+    var messages by remember { mutableStateOf<List<ClipboardMessage>>(emptyList()) }
+    var text by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            messages = controller.syncClipboard()
+            delay(1200)
+        }
+    }
+
+    ToolBody(PaddingValues(0.dp)) {
+        SectionLabel("剪贴板")
+        if (messages.isEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "还没有剪贴板消息",
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        } else {
+            messages.forEach { message ->
+                val own = message.source == "phone"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (own) Arrangement.End else Arrangement.Start,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.82f)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(
+                                if (own) MiuixTheme.colorScheme.primaryContainer
+                                else MiuixTheme.colorScheme.secondaryContainer,
+                            )
+                            .padding(horizontal = 13.dp, vertical = 10.dp),
+                    ) {
+                        Column {
+                            Text(
+                                message.text,
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "${if (own) "手机" else "电脑"} · ${message.createdAt}",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    onClick = { copyText(context, message.text, "剪贴板") },
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ContentCopy,
+                                        contentDescription = "复制",
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = "发送到手机剪贴板",
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                )
+                PrimaryButton(
+                    onClick = {
+                        if (text.isNotBlank() && controller.sendClipboardFromPhone(text)) {
+                            text = ""
+                            messages = controller.clipboardMessages()
+                        }
+                    },
+                    enabled = text.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("发送")
+                }
+            }
+        }
+    }
+}
+
+private fun formatFileTime(millis: Long): String =
+    SimpleDateFormat("M月d日 HH:mm", Locale.getDefault()).format(Date(millis))

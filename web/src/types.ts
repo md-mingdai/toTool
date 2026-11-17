@@ -100,15 +100,23 @@ export type TransferDirection = 'upload' | 'download'
 
 export type DownloadPhase = 'download' | 'decrypt'
 
+export interface ClipboardMessage {
+  id: string
+  text: string
+  source: 'phone' | 'web'
+  createdAt: string
+}
+
 export interface TransferRecord {
   id: string
   name: string
   size: number
   direction: TransferDirection
   progress: number
-  status: 'active' | 'done'
+  status: 'active' | 'done' | 'cancelled' | 'failed'
   createdAt: string
   phase?: DownloadPhase
+  local?: boolean
 }
 
 export interface ServerInfo {

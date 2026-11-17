@@ -108,7 +108,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy }: DetailsDia
           className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${entry.type === 'app' ? ' is-app' : ''}`}
         >
           {previewImage ? (
-            <img src={previewImage} alt="" />
+            <img src={previewImage} alt="" draggable={false} onDragStart={(event) => event.preventDefault()} />
           ) : isText ? (
             <p>{entry.type === 'file' ? entry.text : ''}</p>
           ) : (

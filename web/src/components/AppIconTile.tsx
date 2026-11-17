@@ -18,7 +18,7 @@ export function AppIconTile({
         style={{ width: size, height: size, borderRadius: radius }}
         aria-hidden="true"
       >
-        <img src={iconUrl} alt="" onError={() => setFailed(true)} />
+        <img src={iconUrl} alt="" draggable={false} onDragStart={(event) => event.preventDefault()} onError={() => setFailed(true)} />
       </span>
     )
   }

@@ -45,8 +45,10 @@ import io.ktor.server.websocket.webSocket
 import io.ktor.utils.io.jvm.javaio.copyTo
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -77,6 +79,13 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+
+data class ClipboardMessage(
+    val id: String,
+    val text: String,
+    val source: String,
+    val createdAt: String,
+)
 
 /**
  * 隔空闪传的手机端服务（Ktor CIO）。
@@ -109,6 +118,11 @@ class FlashDropServer private constructor(
     private val thumbCache = LruCache<String, ByteArray>(12 * 1024 * 1024)
     private val transfers = Collections.synchronizedList(mutableListOf<TransferRecord>())
     private val failedAttempts = mutableListOf<Long>()
+    private val clipboardHistory = Collections.synchronizedList(mutableListOf<ClipboardMessage>())
+    private val sockets = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
+
+    @Volatile
+    private var lastClipboardText = ""
 
     @Volatile
     private var appsCache: List<AppInfo>? = null
@@ -186,16 +200,21 @@ class FlashDropServer private constructor(
                     close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "unauthorized"))
                     return@webSocket
                 }
-                send(Frame.Text("""{"type":"connected"}"""))
-                for (frame in incoming) {
-                    val live = sessions[token]
-                    if (live == null || live.expiresAt < System.currentTimeMillis()) {
-                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "session-ended"))
-                        break
+                sockets.add(this)
+                try {
+                    send(Frame.Text("""{"type":"connected"}"""))
+                    for (frame in incoming) {
+                        val live = sessions[token]
+                        if (live == null || live.expiresAt < System.currentTimeMillis()) {
+                            close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "session-ended"))
+                            break
+                        }
+                        if (frame is Frame.Text && frame.readText() == "ping") {
+                            send(Frame.Text("pong"))
+                        }
                     }
-                    if (frame is Frame.Text && frame.readText() == "ping") {
-                        send(Frame.Text("pong"))
-                    }
+                } finally {
+                    sockets.remove(this)
                 }
             }
             route("/") { handle { dispatch(call) } }
@@ -328,6 +347,7 @@ class FlashDropServer private constructor(
             path == "/api/apps" -> handleApps(call)
             path == "/api/files" -> handleFiles(call)
             path == "/api/transfers" -> handleTransfers(call)
+            path == "/api/transfers/delete" -> handleDeleteTransfer(call)
             path == "/api/clipboard" -> handleClipboard(call)
             path == "/api/upload" -> handleUpload(call)
             path == "/api/download" -> handleDownload(call)
@@ -422,20 +442,38 @@ class FlashDropServer private constructor(
         val items = JSONArray()
         synchronized(transfers) {
             transfers.take(80).forEach { transfer ->
-                items.put(
-                    JSONObject()
-                        .put("id", transfer.id)
-                        .put("name", transfer.name)
-                        .put("size", transfer.size)
-                        .put("direction", transfer.direction)
-                        .put("progress", transfer.progress)
-                        .put("status", transfer.status)
-                        .put("createdAt", transfer.createdAt),
-                )
+                items.put(transferJson(transfer))
             }
         }
         respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
     }
+
+    private suspend fun handleDeleteTransfer(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call) == null) return unauthorized(call)
+        val body = runCatching { readJson(call) }.getOrNull()
+        val id = body?.optString("id").orEmpty()
+        if (id.isEmpty()) {
+            respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "missing-id"))
+            return
+        }
+        synchronized(transfers) {
+            transfers.removeAll { it.id == id }
+        }
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("ok", true))
+    }
+
+    private fun transferJson(transfer: TransferRecord): JSONObject = JSONObject()
+        .put("id", transfer.id)
+        .put("name", transfer.name)
+        .put("size", transfer.size)
+        .put("direction", transfer.direction)
+        .put("progress", transfer.progress)
+        .put("status", transfer.status)
+        .put("createdAt", transfer.createdAt)
 
     private suspend fun handleClipboard(call: ApplicationCall) {
         if (authenticated(call) == null) return unauthorized(call)
@@ -446,8 +484,15 @@ class FlashDropServer private constructor(
                 return
             }
             val text = body.optString("text")
+            if (text.isEmpty() || text.length > 100_000) {
+                respondJson(call, HttpStatusCode.BadRequest, JSONObject().put("error", "bad-text"))
+                return
+            }
             if (writeClipboard(text)) {
-                respondJson(call, HttpStatusCode.OK, JSONObject().put("ok", true))
+                lastClipboardText = text
+                val message = addClipboardMessage(text, "web")
+                notifyClipboard(message)
+                respondJson(call, HttpStatusCode.OK, JSONObject().put("item", clipboardJson(message)))
             } else {
                 respondJson(call, HttpStatusCode.InternalServerError, JSONObject().put("error", "clipboard-denied"))
             }
@@ -458,22 +503,67 @@ class FlashDropServer private constructor(
             return
         }
 
-        val text = readClipboard().orEmpty()
+        syncSystemClipboard()
         val items = JSONArray()
-        if (text.isNotEmpty()) {
-            items.put(
-                JSONObject()
-                    .put("type", "file")
-                    .put("id", "clipboard-current")
-                    .put("name", "当前剪贴板")
-                    .put("kind", "text")
-                    .put("size", text.toByteArray(Charsets.UTF_8).size)
-                    .put("modified", formatModified(System.currentTimeMillis()))
-                    .put("path", "")
-                    .put("text", text),
-            )
-        }
+        clipboardMessages().forEach { message -> items.put(clipboardJson(message)) }
         respondJson(call, HttpStatusCode.OK, JSONObject().put("items", items))
+    }
+
+    fun clipboardMessages(): List<ClipboardMessage> =
+        synchronized(clipboardHistory) { clipboardHistory.toList() }
+
+    fun syncClipboard(): List<ClipboardMessage> {
+        syncSystemClipboard()
+        return clipboardMessages()
+    }
+
+    fun sendClipboardFromPhone(text: String): Boolean {
+        if (text.isBlank() || !writeClipboard(text)) return false
+        lastClipboardText = text
+        val message = addClipboardMessage(text, "phone")
+        notifyClipboard(message)
+        return true
+    }
+
+    private fun syncSystemClipboard() {
+        val text = readClipboard()?.trim().orEmpty()
+        if (text.isEmpty() || text == lastClipboardText) return
+        lastClipboardText = text
+        val message = addClipboardMessage(text, "phone")
+        notifyClipboard(message)
+    }
+
+    private fun addClipboardMessage(text: String, source: String): ClipboardMessage {
+        val message = ClipboardMessage(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            source = source,
+            createdAt = formatModified(System.currentTimeMillis()),
+        )
+        synchronized(clipboardHistory) {
+            clipboardHistory.add(message)
+            while (clipboardHistory.size > 100) clipboardHistory.removeAt(0)
+        }
+        return message
+    }
+
+    private fun clipboardJson(message: ClipboardMessage): JSONObject = JSONObject()
+        .put("id", message.id)
+        .put("text", message.text)
+        .put("source", message.source)
+        .put("createdAt", message.createdAt)
+
+    private fun notifyClipboard(message: ClipboardMessage) {
+        val payload = JSONObject()
+            .put("type", "clipboard")
+            .put("item", clipboardJson(message))
+            .toString()
+        val targets = synchronized(sockets) { sockets.toList() }
+        targets.forEach { socket ->
+            socket.launch {
+                runCatching { socket.send(Frame.Text(payload)) }
+            }
+        }
     }
 
     /* ------------------------------ 文件列表 ------------------------------ */
@@ -734,7 +824,12 @@ class FlashDropServer private constructor(
             } else {
                 temp.copyTo(saved, overwrite = true)
             }
-            addTransfer(saved.name, saved.length(), "upload")
+            addTransfer(
+                saved.name,
+                saved.length(),
+                "upload",
+                header(call, "X-FlashDrop-Task-Id"),
+            )
             respondJson(call, HttpStatusCode.OK, JSONObject().put("item", fileJson(saved)))
         } catch (error: Exception) {
             target?.delete()
@@ -780,7 +875,12 @@ class FlashDropServer private constructor(
             respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
             return
         }
-        addTransfer(downloadName, file.length(), "download")
+        addTransfer(
+            downloadName,
+            file.length(),
+            "download",
+            header(call, "X-FlashDrop-Task-Id"),
+        )
         call.response.header("Content-Disposition", contentDisposition(downloadName))
         call.response.header("Cache-Control", "no-store")
         addSecurityHeaders(call)
@@ -1042,12 +1142,14 @@ class FlashDropServer private constructor(
         else -> "application/octet-stream"
     }
 
-    private fun addTransfer(name: String, size: Long, direction: String) {
+    private fun addTransfer(name: String, size: Long, direction: String, requestedId: String? = null) {
+        val id = requestedId?.takeIf { it.length in 1..80 && it.all { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' } }
+            ?: UUID.randomUUID().toString()
         synchronized(transfers) {
             transfers.add(
                 0,
                 TransferRecord(
-                    id = UUID.randomUUID().toString(),
+                    id = id,
                     name = name,
                     size = size,
                     direction = direction,
@@ -1096,6 +1198,12 @@ class FlashDropServer private constructor(
     }
 
     private fun readClipboard(): String? {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return runCatching {
+                val manager = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                manager.primaryClip?.getItemAt(0)?.coerceToText(appContext)?.toString()
+            }.getOrNull()
+        }
         var result: String? = null
         val latch = CountDownLatch(1)
         Handler(Looper.getMainLooper()).post {
@@ -1110,6 +1218,12 @@ class FlashDropServer private constructor(
     }
 
     private fun writeClipboard(text: String): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return runCatching {
+                val manager = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                manager.setPrimaryClip(ClipData.newPlainText("隔空闪传", text))
+            }.isSuccess
+        }
         var ok = false
         val latch = CountDownLatch(1)
         Handler(Looper.getMainLooper()).post {

@@ -14,10 +14,12 @@ import {
   Folder,
   Image as ImageIcon,
   Package,
+  Trash,
   UploadSimple,
   WarningCircle,
+  X,
 } from '@phosphor-icons/react'
-import { Fragment } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { categories, entryKindLabel, formatBytes, totalBytes } from '../data'
 import type {
@@ -25,6 +27,7 @@ import type {
   AppEntry,
   AppScope,
   CategoryId,
+  ClipboardMessage,
   Entry,
   FileEntry,
   FolderEntry,
@@ -32,6 +35,7 @@ import type {
 } from '../types'
 import { AppIconTile } from './AppIconTile'
 import { CategoryIcon } from './CategoryIcon'
+import { ClipboardChat } from './ClipboardChat'
 
 interface FileBrowserProps {
   category: CategoryId
@@ -42,6 +46,7 @@ interface FileBrowserProps {
   appsScope: AppScope | 'all'
   appCounts: AppCounts
   transfers: TransferRecord[]
+  clipboardMessages: ClipboardMessage[]
   loading: boolean
   error: string | null
   onScopeChange: (scope: AppScope | 'all') => void
@@ -54,6 +59,11 @@ interface FileBrowserProps {
   onUpload: () => void
   onClearQuery: () => void
   onRetry: () => void
+  onCancelTask: (id: string) => void
+  onDeleteTask: (id: string) => void
+  onSendClipboard: (text: string) => Promise<void>
+  onCopyClipboard: (text: string) => void
+  onBatchDownload: (entries: Entry[]) => void
 }
 
 function FileGlyph({ kind, size = 20 }: { kind: FileEntry['kind']; size?: number }) {
@@ -210,12 +220,16 @@ function TransferList({
   hasQuery,
   query,
   onClearQuery,
+  onCancel,
+  onDelete,
 }: {
   transfers: TransferRecord[]
   onUpload: () => void
   hasQuery: boolean
   query: string
   onClearQuery: () => void
+  onCancel: (id: string) => void
+  onDelete: (id: string) => void
 }) {
   if (transfers.length === 0) {
     return (
@@ -241,17 +255,31 @@ function TransferList({
     <ul className="entry-list transfer-list">
       {transfers.map((record) => {
         const uploading = record.direction === 'upload'
+        const active = record.status === 'active'
+        const statusText = active
+          ? record.phase === 'decrypt'
+            ? '解密中'
+            : `${Math.round(record.progress)}%`
+          : record.status === 'done'
+            ? '已完成'
+            : record.status === 'cancelled'
+              ? '已取消'
+              : '失败'
         return (
           <li className="entry-row transfer-row" key={record.id}>
             <span className={`entry-tile transfer-tile ${uploading ? 'is-upload' : 'is-download'}`} aria-hidden="true">
-              {record.status === 'done' ? <Check size={19} weight="bold" /> : uploading ? <UploadSimple size={19} weight="regular" /> : <DownloadSimple size={19} weight="regular" />}
+              {record.status === 'done'
+                ? <Check size={19} weight="bold" />
+                : record.status === 'cancelled' || record.status === 'failed'
+                  ? <WarningCircle size={19} weight="regular" />
+                  : uploading
+                    ? <UploadSimple size={19} weight="regular" />
+                    : <DownloadSimple size={19} weight="regular" />}
             </span>
             <span className="entry-text">
               <span className="entry-title">
                 <span className="entry-name">{record.name}</span>
-                <span className={`transfer-status${record.status === 'done' ? ' is-done' : ''}`}>
-                  {record.status === 'done' ? '已完成' : `${Math.round(record.progress)}%`}
-                </span>
+                <span className={`transfer-status is-${record.status}`}>{statusText}</span>
               </span>
               <span className="entry-meta">
                 <span>{uploading ? '传到手机' : '下载到电脑'}</span>
@@ -260,12 +288,23 @@ function TransferList({
                 <span className="meta-dot" aria-hidden="true" />
                 <span>{record.createdAt}</span>
               </span>
-              {record.status === 'active' && (
+              {active && (
                 <span className="inline-progress" role="progressbar" aria-label={`${record.name} 传输进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(record.progress)}>
                   <span style={{ width: `${record.progress}%` }} />
                 </span>
               )}
             </span>
+            <div className="entry-actions transfer-actions">
+              <button
+                type="button"
+                className="row-action"
+                onClick={() => (active ? onCancel(record.id) : onDelete(record.id))}
+                aria-label={active ? `取消 ${record.name}` : `删除 ${record.name} 的记录`}
+                title={active ? '取消任务' : '删除记录'}
+              >
+                {active ? <X size={16} weight="regular" /> : <Trash size={16} weight="regular" />}
+              </button>
+            </div>
           </li>
         )
       })}
@@ -282,6 +321,7 @@ export function FileBrowser({
   appsScope,
   appCounts,
   transfers,
+  clipboardMessages,
   loading,
   error,
   onScopeChange,
@@ -294,8 +334,27 @@ export function FileBrowser({
   onUpload,
   onClearQuery,
   onRetry,
+  onCancelTask,
+  onDeleteTask,
+  onSendClipboard,
+  onCopyClipboard,
+  onBatchDownload,
 }: FileBrowserProps) {
   const categoryMeta = categories.find((item) => item.id === category)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [category, folder?.path])
+
+  useEffect(() => {
+    setSelectedIds((previous) => {
+      const available = new Set(entries.filter((entry) => entry.type !== 'folder').map((entry) => entry.id))
+      const next = new Set([...previous].filter((id) => available.has(id)))
+      return next.size === previous.size ? previous : next
+    })
+  }, [entries])
+
   const isApps = category === 'apps'
   const isTransfers = category === 'transfers'
   const isClipboard = category === 'clipboard'
@@ -304,7 +363,17 @@ export function FileBrowser({
   const visibleTransfers = hasQuery
     ? transfers.filter((record) => record.name.toLowerCase().includes(query.trim().toLowerCase()))
     : transfers
-  const resultCount = isTransfers ? visibleTransfers.length : entries.length
+  const visibleClipboard = hasQuery
+    ? clipboardMessages.filter((message) =>
+      `${message.text} ${message.source === 'phone' ? '手机' : '电脑'}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : clipboardMessages
+  const resultCount = isTransfers
+    ? visibleTransfers.length
+    : isClipboard
+      ? visibleClipboard.length
+      : entries.length
+
+  const selectableCount = entries.filter((entry) => entry.type !== 'folder').length
 
   const lede = folder
     ? `${folder.itemCount.toLocaleString('zh-CN')} 项${folder.size > 0 ? ` · ${formatBytes(folder.size)}` : ''}`
@@ -312,7 +381,9 @@ export function FileBrowser({
       ? `${appCounts.all} 个应用 · 系统 ${appCounts.system} · 用户 ${appCounts.user}`
       : isTransfers
         ? `${visibleTransfers.length} 条传输记录`
-        : `${entries.length} 项 · ${formatBytes(total)}`
+        : isClipboard
+          ? `${visibleClipboard.length} 条剪贴板消息`
+          : `${entries.length} 项 · ${formatBytes(total)}`
 
   return (
     <div className="content-inner">
@@ -375,16 +446,45 @@ export function FileBrowser({
         </div>
       )}
 
-      {!isApps && !isTransfers && !loading && !error && entries.length > 0 && (
+      {!isTransfers && !isClipboard && !loading && !error && entries.length > 0 && (
         <div className="list-meta">
-          <span>{isClipboard ? '剪贴板记录' : '按修改时间排序'}</span>
+          <label className="select-all">
+            <input
+              type="checkbox"
+              checked={selectableCount > 0 && selectedIds.size === selectableCount}
+              onChange={(event) => {
+                setSelectedIds(event.target.checked
+                  ? new Set(entries.filter((entry) => entry.type !== 'folder').map((entry) => entry.id))
+                  : new Set())
+              }}
+            />
+            全选
+          </label>
           <span>
-            {hasQuery
-              ? `“${query.trim()}”`
-              : folder
-                ? `显示 ${entries.length} / ${folder.itemCount.toLocaleString('zh-CN')}`
-                : `共 ${entries.length} 项`}
+            {selectedIds.size > 0
+              ? `已选 ${selectedIds.size} 项`
+              : hasQuery
+                ? `“${query.trim()}”`
+                : folder
+                  ? `显示 ${entries.length} / ${folder.itemCount.toLocaleString('zh-CN')}`
+                  : `共 ${entries.length} 项`}
           </span>
+        </div>
+      )}
+
+      {!isTransfers && !isClipboard && selectedIds.size > 0 && (
+        <div className="selection-bar">
+          <span>已选择 {selectedIds.size} 项</span>
+          <button type="button" className="btn btn-primary" onClick={() => {
+            const selected = entries.filter((entry) => selectedIds.has(entry.id))
+            onBatchDownload(selected)
+          }}>
+            <DownloadSimple size={16} weight="regular" />
+            下载所选
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => setSelectedIds(new Set())}>
+            取消选择
+          </button>
         </div>
       )}
 
@@ -399,6 +499,14 @@ export function FileBrowser({
           hasQuery={hasQuery}
           query={query}
           onClearQuery={onClearQuery}
+          onCancel={onCancelTask}
+          onDelete={onDeleteTask}
+        />
+      ) : isClipboard ? (
+        <ClipboardChat
+          messages={visibleClipboard}
+          onSend={onSendClipboard}
+          onCopy={onCopyClipboard}
         />
       ) : entries.length > 0 ? (
         <ul className="entry-list">
@@ -406,6 +514,24 @@ export function FileBrowser({
             const action = rowAction(entry)
             return (
               <li className="entry-row" key={entry.id}>
+                {entry.type === 'folder' ? (
+                  <span className="row-check-spacer" />
+                ) : (
+                  <input
+                    type="checkbox"
+                    className="row-check"
+                    checked={selectedIds.has(entry.id)}
+                    onChange={(event) => {
+                      setSelectedIds((previous) => {
+                        const next = new Set(previous)
+                        if (event.target.checked) next.add(entry.id)
+                        else next.delete(entry.id)
+                        return next
+                      })
+                    }}
+                    aria-label={`选择 ${entry.name}`}
+                  />
+                )}
                 <button
                   type="button"
                   className="entry-main"

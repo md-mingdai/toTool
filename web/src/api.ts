@@ -6,9 +6,9 @@ import type {
   AppEntry,
   AppScope,
   CategoryId,
+  ClipboardMessage,
   DownloadPhase,
   Entry,
-  FileEntry,
   PairResult,
   ServerInfo,
   TransferRecord,
@@ -233,15 +233,35 @@ export async function listTransfers(): Promise<TransferRecord[]> {
   return data.items
 }
 
-export async function listClipboard(): Promise<FileEntry[]> {
+export async function deleteTransfer(id: string): Promise<void> {
+  await apiFetch('/api/transfers/delete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+}
+
+export async function listClipboard(): Promise<ClipboardMessage[]> {
   const response = await apiFetch('/api/clipboard')
-  const data = (await response.json()) as { items: FileEntry[] }
+  const data = (await response.json()) as { items: ClipboardMessage[] }
   return data.items
+}
+
+export async function sendClipboard(text: string): Promise<ClipboardMessage> {
+  const response = await apiFetch('/api/clipboard', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  const data = (await response.json()) as { item: ClipboardMessage }
+  return data.item
 }
 
 export async function downloadEntry(
   entry: Entry,
+  taskId: string,
   onProgress: (phase: DownloadPhase, ratio: number) => void = () => {},
+  signal?: AbortSignal,
 ): Promise<string> {
   if (entry.type === 'folder') throw new Error('不能下载文件夹')
   const endpoint = entry.type === 'app'
@@ -253,14 +273,29 @@ export async function downloadEntry(
     xhr.open('GET', endpoint)
     xhr.responseType = 'arraybuffer'
     xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.setRequestHeader('X-FlashDrop-Task-Id', taskId)
+    const abort = () => xhr.abort()
+    if (signal?.aborted) {
+      reject(new ApiError(0, 'aborted'))
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     xhr.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) {
         onProgress('download', Math.min(1, event.loaded / event.total))
       }
     }
-    xhr.onerror = () => reject(new ApiError(0, 'network'))
-    xhr.ontimeout = () => reject(new ApiError(0, 'timeout'))
+    xhr.onerror = () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new ApiError(0, 'network'))
+    }
+    xhr.ontimeout = () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new ApiError(0, 'timeout'))
+    }
+    xhr.onabort = () => reject(new ApiError(0, 'aborted'))
     xhr.onload = () => {
+      signal?.removeEventListener('abort', abort)
       void (async () => {
         if (xhr.status === 401) {
           clearSession()
@@ -320,7 +355,12 @@ export async function downloadEntry(
   })
 }
 
-export async function uploadFile(file: File, onProgress: (ratio: number) => void): Promise<void> {
+export async function uploadFile(
+  file: File,
+  taskId: string,
+  onProgress: (ratio: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const encrypted = Boolean(encryptionKey)
   if (encrypted && file.size > MAX_ENCRYPTED_BYTES) {
     throw new Error('加密模式暂支持 256 MB 以内的文件')
@@ -342,12 +382,27 @@ export async function uploadFile(file: File, onProgress: (ratio: number) => void
     xhr.setRequestHeader('Content-Type', 'application/octet-stream')
     xhr.setRequestHeader('X-FlashDrop-Name', encodeURIComponent(file.name))
     xhr.setRequestHeader('X-FlashDrop-Encrypted', encrypted ? '1' : '0')
+    xhr.setRequestHeader('X-FlashDrop-Task-Id', taskId)
+    const abort = () => xhr.abort()
+    if (signal?.aborted) {
+      reject(new ApiError(0, 'aborted'))
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total)
     }
-    xhr.onerror = () => reject(new ApiError(0, 'network'))
-    xhr.ontimeout = () => reject(new ApiError(0, 'timeout'))
+    xhr.onerror = () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new ApiError(0, 'network'))
+    }
+    xhr.ontimeout = () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new ApiError(0, 'timeout'))
+    }
+    xhr.onabort = () => reject(new ApiError(0, 'aborted'))
     xhr.onload = () => {
+      signal?.removeEventListener('abort', abort)
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve()
         return

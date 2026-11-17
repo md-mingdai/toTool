@@ -12,6 +12,7 @@ import type {
   AppCounts,
   AppScope,
   CategoryId,
+  ClipboardMessage,
   Entry,
   FileEntry,
   FolderEntry,
@@ -122,6 +123,29 @@ function routeUrl(category: CategoryId, path: string, query: string, scope: AppS
   return search ? `${base}?${search}` : base
 }
 
+function newTaskId(prefix: string): string {
+  const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${suffix}`
+}
+
+function mergeTasks(local: TransferRecord[], server: TransferRecord[]): TransferRecord[] {
+  const merged = new Map<string, TransferRecord>()
+  server.forEach((task) => merged.set(task.id, task))
+  local.forEach((task) => {
+    const current = merged.get(task.id)
+    if (!current || task.status === 'active') {
+      merged.set(task.id, { ...current, ...task, local: true })
+    }
+  })
+  return Array.from(merged.values()).sort((a, b) => {
+    if (a.status === 'active' && b.status !== 'active') return -1
+    if (b.status === 'active' && a.status !== 'active') return 1
+    return 0
+  })
+}
+
 export default function App() {
   const initialRoute = useRef<RouteState>(parseRoute()).current
   const [theme, setTheme] = useState<Theme>(initialTheme)
@@ -134,6 +158,7 @@ export default function App() {
   const [query, setQuery] = useState(initialRoute.query)
   const [entries, setEntries] = useState<Entry[]>([])
   const [appCounts, setAppCounts] = useState<AppCounts>({ all: 0, system: 0, user: 0 })
+  const [clipboardMessages, setClipboardMessages] = useState<ClipboardMessage[]>([])
   const [transfers, setTransfers] = useState<TransferRecord[]>([])
   const [toastRecords, setToastRecords] = useState<TransferRecord[]>([])
   const [toastOpen, setToastOpen] = useState(false)
@@ -148,6 +173,7 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
+  const abortRef = useRef(new Map<string, () => void>())
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -186,8 +212,11 @@ export default function App() {
 
   const handleDisconnect = useCallback(() => {
     void api.logout()
+    abortRef.current.forEach((abort) => abort())
+    abortRef.current.clear()
     setPaired(false)
     setEntries([])
+    setClipboardMessages([])
     setTransfers([])
     setToastRecords([])
     setToastOpen(false)
@@ -337,7 +366,22 @@ export default function App() {
     socket.onmessage = (event) => {
       if (disposed) return
       lastPong = Date.now()
-      if (event.data === 'pong') setConnectionLost(false)
+      if (event.data === 'pong') {
+        setConnectionLost(false)
+        return
+      }
+      if (typeof event.data !== 'string' || !event.data.startsWith('{')) return
+      try {
+        const payload = JSON.parse(event.data) as { type?: string; item?: ClipboardMessage }
+        if (payload.type === 'clipboard' && payload.item) {
+          const item = payload.item
+          setClipboardMessages((previous) => (
+            previous.some((message) => message.id === item.id) ? previous : [...previous, item]
+          ))
+        }
+      } catch {
+        // 非 JSON 心跳或未来扩展消息
+      }
     }
     socket.onerror = () => {
       // 随后的 onclose 会切换到回退轮询
@@ -403,17 +447,15 @@ export default function App() {
         } else if (category === 'transfers') {
           const result = await api.listTransfers()
           if (!cancelled) {
-            setTransfers(result)
+            setTransfers((previous) => mergeTasks(previous, result))
             setEntries([])
             setConnectionLost(false)
           }
         } else if (category === 'clipboard') {
           const result = await api.listClipboard()
-          const needle = query.trim().toLowerCase()
           if (!cancelled) {
-            setEntries(needle
-              ? result.filter((entry) => `${entry.name} ${entry.text ?? ''}`.toLowerCase().includes(needle))
-              : result)
+            setClipboardMessages(result)
+            setEntries([])
             setConnectionLost(false)
           }
         } else {
@@ -455,6 +497,24 @@ export default function App() {
     }
   }, [appsScope, category, folder?.path, handleDisconnect, paired, query, refreshKey])
 
+  useEffect(() => {
+    if (!paired || category !== 'clipboard') return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const messages = await api.listClipboard()
+        if (!cancelled) setClipboardMessages(messages)
+      } catch (caught) {
+        if (caught instanceof api.UnauthorizedError) handleDisconnect()
+      }
+    }
+    const timer = window.setInterval(() => void load(), 2500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [category, handleDisconnect, paired])
+
   const scrollTop = useCallback(() => {
     contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
@@ -483,6 +543,37 @@ export default function App() {
 
   const closeDetails = useCallback(() => setSelected(null), [])
 
+  const updateTask = useCallback((id: string, patch: Partial<TransferRecord>) => {
+    setTransfers((previous) => previous.map((task) => (task.id === id ? { ...task, ...patch } : task)))
+    setToastRecords((previous) => previous.map((task) => (task.id === id ? { ...task, ...patch } : task)))
+  }, [])
+
+  const refreshTasks = useCallback(async () => {
+    try {
+      const serverTasks = await api.listTransfers()
+      setTransfers((previous) => mergeTasks(previous, serverTasks))
+    } catch {
+      // 任务列表刷新失败不影响正在进行的传输
+    }
+  }, [])
+
+  const cancelTask = useCallback((id: string) => {
+    abortRef.current.get(id)?.()
+    abortRef.current.delete(id)
+    updateTask(id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+    setToastRecords((previous) => previous.filter((task) => task.id !== id))
+    void api.deleteTransfer(id).catch(() => {})
+    setNotice('已取消传输')
+  }, [updateTask])
+
+  const deleteTask = useCallback((id: string) => {
+    abortRef.current.get(id)?.()
+    abortRef.current.delete(id)
+    setTransfers((previous) => previous.filter((task) => task.id !== id))
+    setToastRecords((previous) => previous.filter((task) => task.id !== id))
+    void api.deleteTransfer(id).catch(() => {})
+  }, [])
+
   const handleSelectCategory = useCallback((next: CategoryId) => {
     setCategory(next)
     setFolder(null)
@@ -508,6 +599,7 @@ export default function App() {
     setAppsScope('all')
     setQuery('')
     setEntries([])
+    setClipboardMessages([])
     setTransfers([])
     setToastRecords([])
     setConnectionLost(false)
@@ -567,55 +659,66 @@ export default function App() {
     if (!paired) return
     const list = Array.from(files)
     if (list.length === 0) return
-    const stamp = Date.now()
-    let batch: TransferRecord[] = list.map((file, index) => ({
-      id: `local-${stamp}-${index}`,
+    const records: TransferRecord[] = list.map((file) => ({
+      id: newTaskId('upload'),
       name: file.name,
       size: file.size,
       direction: 'upload',
       progress: 0,
       status: 'active',
       createdAt: '正在传输',
+      local: true,
     }))
-    setToastRecords(batch)
+    setToastRecords(records)
     setToastOpen(true)
+    setTransfers((previous) => [
+      ...records,
+      ...previous.filter((task) => !records.some((record) => record.id === task.id)),
+    ])
+
     for (let index = 0; index < list.length; index += 1) {
       const file = list[index]
+      const record = records[index]
+      const controller = new AbortController()
+      abortRef.current.set(record.id, () => controller.abort())
       try {
-        await api.uploadFile(file, (ratio) => {
-          const progress = Math.max(1, Math.min(99, Math.round(ratio * 100)))
-          batch = batch.map((record, recordIndex) =>
-            recordIndex === index ? { ...record, progress } : record)
-          setToastRecords(batch)
-        })
-        batch = batch.map((record, recordIndex) =>
-          recordIndex === index ? { ...record, progress: 100, status: 'done', createdAt: '刚刚' } : record)
-        setToastRecords(batch)
+        await api.uploadFile(
+          file,
+          record.id,
+          (ratio) => {
+            const progress = Math.max(1, Math.min(99, Math.round(ratio * 100)))
+            updateTask(record.id, { progress })
+          },
+          controller.signal,
+        )
+        updateTask(record.id, { progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
+        abortRef.current.delete(record.id)
       } catch (caught) {
+        abortRef.current.delete(record.id)
         if (caught instanceof api.UnauthorizedError) {
           handleDisconnect()
           return
         }
-        batch = batch.filter((_, recordIndex) => recordIndex !== index)
-        setToastRecords(batch)
-        if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
-          setConnectionLost(true)
+        if (caught instanceof api.ApiError && caught.code === 'aborted') {
+          updateTask(record.id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+        } else {
+          updateTask(record.id, { status: 'failed', phase: undefined, createdAt: '失败' })
+          setToastRecords((previous) => previous.filter((task) => task.id !== record.id))
+          if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
+            setConnectionLost(true)
+          }
+          setNotice(messageForError(caught))
         }
-        setNotice(messageForError(caught))
-        break
       }
     }
     setRefreshKey((value) => value + 1)
-    try {
-      setTransfers(await api.listTransfers())
-    } catch {
-      // 传输列表刷新失败不影响已完成的文件
-    }
-  }, [handleDisconnect, paired])
+    await refreshTasks()
+  }, [handleDisconnect, paired, refreshTasks, updateTask])
 
   const handleDownload = useCallback(async (entry: Entry) => {
+    const id = newTaskId('download')
     const record: TransferRecord = {
-      id: `download-${Date.now()}`,
+      id,
       name: entry.name,
       size: entry.size,
       direction: 'download',
@@ -623,44 +726,78 @@ export default function App() {
       status: 'active',
       createdAt: '正在下载',
       phase: 'download',
+      local: true,
     }
     setToastRecords([record])
     setToastOpen(true)
-    const update = (patch: Partial<TransferRecord>) => {
-      setToastRecords((previous) =>
-        previous.map((item) => (item.id === record.id ? { ...item, ...patch } : item)))
-    }
+    setTransfers((previous) => [record, ...previous])
+    const controller = new AbortController()
+    abortRef.current.set(id, () => controller.abort())
     try {
-      const name = await api.downloadEntry(entry, (phase, ratio) => {
-        update({
+      const name = await api.downloadEntry(entry, id, (phase, ratio) => {
+        updateTask(id, {
           phase,
           progress: phase === 'decrypt' ? 90 + Math.round(ratio * 10) : Math.round(ratio * 90),
           createdAt: phase === 'decrypt' ? '正在解密' : '正在下载',
         })
-      })
-      update({ name, progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
+      }, controller.signal)
+      updateTask(id, { name, progress: 100, status: 'done', phase: undefined, createdAt: '刚刚' })
+      abortRef.current.delete(id)
       setSelected(null)
       setNotice(`已下载 ${name}`)
-      try {
-        setTransfers(await api.listTransfers())
-      } catch {
-        // 下载已经完成，传输列表刷新失败不打断
-      }
+      await refreshTasks()
     } catch (caught) {
-      setToastRecords((previous) => previous.filter((item) => item.id !== record.id))
+      abortRef.current.delete(id)
       if (caught instanceof api.UnauthorizedError) {
         handleDisconnect()
         return
       }
-      if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
-        setConnectionLost(true)
+      if (caught instanceof api.ApiError && caught.code === 'aborted') {
+        updateTask(id, { status: 'cancelled', phase: undefined, createdAt: '已取消' })
+      } else {
+        updateTask(id, { status: 'failed', phase: undefined, createdAt: '失败' })
+        setToastRecords((previous) => previous.filter((task) => task.id !== id))
+        if (caught instanceof api.ApiError && (caught.status === 0 || caught.code === 'network')) {
+          setConnectionLost(true)
+        }
+        setNotice(messageForError(caught))
+      }
+    }
+  }, [handleDisconnect, refreshTasks, updateTask])
+
+  const handleBatchDownload = useCallback(async (selected: Entry[]) => {
+    for (const entry of selected) {
+      if (entry.type === 'folder') continue
+      await handleDownload(entry)
+      await new Promise((resolve) => window.setTimeout(resolve, 180))
+    }
+  }, [handleDownload])
+
+  const handleCopy = useCallback((entry: FileEntry) => {
+    const text = entry.text ?? entry.name
+    void copyToClipboard(text).then((copied) => {
+      setNotice(copied ? '已复制到电脑剪贴板' : '浏览器拒绝了剪贴板访问')
+    })
+  }, [])
+
+  const handleSendClipboard = useCallback(async (text: string) => {
+    try {
+      const message = await api.sendClipboard(text)
+      setClipboardMessages((previous) => [
+        ...previous.filter((item) => item.id !== message.id),
+        message,
+      ])
+      setNotice('已发送到手机剪贴板')
+    } catch (caught) {
+      if (caught instanceof api.UnauthorizedError) {
+        handleDisconnect()
+        return
       }
       setNotice(messageForError(caught))
     }
   }, [handleDisconnect])
 
-  const handleCopy = useCallback((entry: FileEntry) => {
-    const text = entry.text ?? entry.name
+  const handleCopyClipboard = useCallback((text: string) => {
     void copyToClipboard(text).then((copied) => {
       setNotice(copied ? '已复制到电脑剪贴板' : '浏览器拒绝了剪贴板访问')
     })
@@ -705,7 +842,12 @@ export default function App() {
   }, [handleUpload, paired])
 
   const categoryLabel = categories.find((item) => item.id === category)?.label ?? '手机文件'
+  const pageLabel = folder?.name || categoryLabel
   const port = info?.port ?? (Number(window.location.port) || null)
+
+  useEffect(() => {
+    document.title = paired ? `隔空闪传 · ${pageLabel}` : '隔空闪传 · 配对'
+  }, [paired, pageLabel])
 
   return (
     <>
@@ -770,6 +912,7 @@ export default function App() {
               appsScope={appsScope}
               appCounts={appCounts}
               transfers={transfers}
+              clipboardMessages={clipboardMessages}
               loading={loading}
               error={error}
               onScopeChange={handleScopeChange}
@@ -782,6 +925,11 @@ export default function App() {
               onUpload={() => inputRef.current?.click()}
               onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}
+              onCancelTask={cancelTask}
+              onDeleteTask={deleteTask}
+              onSendClipboard={handleSendClipboard}
+              onCopyClipboard={handleCopyClipboard}
+              onBatchDownload={(selected) => void handleBatchDownload(selected)}
             />
           </main>
 

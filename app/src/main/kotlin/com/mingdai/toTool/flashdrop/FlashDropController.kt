@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.data.Prefs
+import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
@@ -177,6 +178,24 @@ class FlashDropController(
         prefs.setFlashDropEncryptionEnabled(enabled)
         server?.updateEncryption(enabled)
         state = state.copy(encryptionEnabled = enabled, pairedClients = 0)
+    }
+
+    fun clipboardMessages(): List<ClipboardMessage> = server?.clipboardMessages() ?: emptyList()
+
+    fun syncClipboard(): List<ClipboardMessage> = server?.syncClipboard() ?: emptyList()
+
+    fun sendClipboardFromPhone(text: String): Boolean = server?.sendClipboardFromPhone(text) == true
+
+    fun receivedFiles(): List<File> {
+        if (!hasStorageAccess()) return emptyList()
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "toTool/FlashDrop",
+        )
+        return dir.listFiles()
+            ?.filter { it.isFile }
+            ?.sortedByDescending { it.lastModified() }
+            .orEmpty()
     }
 
     fun primaryUrl(): String? {
