@@ -33,6 +33,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.io.SequenceInputStream
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -573,7 +574,7 @@ class FlashDropServer(
         val temp = File.createTempFile("flashdrop-", ".upload", appContext.cacheDir)
         var target: File? = null
         try {
-            FileOutputStream(temp).use { output -> session.inputStream.copyTo(output) }
+            FileOutputStream(temp).use { output -> copyRequestBody(session, output) }
             val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             if (!targetDir.exists() && !targetDir.mkdirs()) {
                 return jsonResponse(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "download-dir"))
@@ -738,8 +739,23 @@ class FlashDropServer(
 
     private fun readJson(session: IHTTPSession): JSONObject {
         val max = 64 * 1024
-        val length = header(session, "content-length")?.toLongOrNull() ?: 0
-        if (length > max) throw IOException("body-too-large")
+        val body = readRequestBody(session, max)
+        return JSONObject(body.toString(Charsets.UTF_8.name()))
+    }
+
+    /**
+     * 按 Content-Length 精确读取请求体。
+     * 不能读到 EOF：HTTP keep-alive 下这个流不会在请求体结束时关闭，
+     * 读到 EOF 会一直等到 socket 超时，表现为“配对很慢”并最终返回 bad-json。
+     */
+    private fun readRequestBody(session: IHTTPSession, max: Int): ByteArray {
+        val length = contentLength(session)
+        if (length != null) {
+            if (length > max) throw IOException("body-too-large")
+            val bytes = ByteArray(length.toInt())
+            readFully(session.inputStream, bytes)
+            return bytes
+        }
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(4096)
         var total = 0
@@ -750,8 +766,31 @@ class FlashDropServer(
             if (total > max) throw IOException("body-too-large")
             output.write(buffer, 0, read)
         }
-        return JSONObject(output.toString(Charsets.UTF_8.name()))
+        return output.toByteArray()
     }
+
+    private fun copyRequestBody(session: IHTTPSession, output: OutputStream) {
+        val length = contentLength(session)
+        if (length != null) {
+            copyExactly(session.inputStream, output, length)
+        } else {
+            session.inputStream.copyTo(output)
+        }
+    }
+
+    private fun copyExactly(input: InputStream, output: OutputStream, length: Long) {
+        val buffer = ByteArray(64 * 1024)
+        var remaining = length
+        while (remaining > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            if (read <= 0) throw IOException("unexpected-eof")
+            output.write(buffer, 0, read)
+            remaining -= read
+        }
+    }
+
+    private fun contentLength(session: IHTTPSession): Long? =
+        header(session, "content-length")?.toLongOrNull()?.takeIf { it >= 0 }
 
     private fun readFully(input: InputStream, target: ByteArray) {
         var offset = 0
