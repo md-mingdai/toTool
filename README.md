@@ -68,7 +68,7 @@
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 构建产物放进 APK 的 `assets/flashdrop/`。
 - 手机端内嵌 Ktor CIO：提供静态页面和同源 `/api`，按端口范围递增选端口；文件通过「所有文件访问权限」读写，应用来自 PackageManager，剪贴板走系统 ClipboardManager。上传默认保存到 `Download/toTool/FlashDrop/`。
 - 配对码由手机端校验并限速；自动模式下，成功配对后立即轮换。加密密钥由配对码 + 随机 salt 经 PBKDF2 派生，文件内容用 AES-256-GCM 加密；网页端使用纯 JS 的 noble 实现，HTTP 局域网下也能工作。
-- 网页刷新时通过 `/api/session` 验证 token；手机端断开时网页轮询 `/api/info` 并显示连接警告。
+- 网页刷新时通过 `/api/session` 验证 token；网页与手机端优先建立 WebSocket 长连接（心跳保活），不支持或断开时回退到 `/api/info` 探活，两种方式都失败时显示连接横幅。
 
 ## 隐私与权限
 

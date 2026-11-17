@@ -276,6 +276,7 @@ export default function App() {
     let pollTimer: number | null = null
     let heartbeatTimer: number | null = null
     let watchdogTimer: number | null = null
+    let lastPollOk: boolean | null = null
 
     const clearPolling = () => {
       if (pollTimer !== null) {
@@ -289,7 +290,10 @@ export default function App() {
       if (disposed || pollTimer !== null) return
       const check = async () => {
         const ok = await api.ping()
-        if (!disposed) setConnectionLost(!ok)
+        if (disposed) return
+        if (ok && lastPollOk === false) setRefreshKey((value) => value + 1)
+        lastPollOk = ok
+        setConnectionLost(!ok)
       }
       void check()
       pollTimer = window.setInterval(() => void check(), 5000)
