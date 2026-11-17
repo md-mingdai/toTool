@@ -9,6 +9,7 @@ import { SearchOverlay } from './components/SearchOverlay'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { TransferToast } from './components/TransferToast'
+import { UploadQueueDialog } from './components/UploadQueueDialog'
 import { categories } from './data'
 import type {
   AppCounts,
@@ -127,6 +128,10 @@ function routeUrl(category: CategoryId, path: string, query: string, scope: AppS
 
 const LIBRARY_PAGE_SIZE = 250
 
+function fileKey(file: File): string {
+  return `${file.name}\u0000${file.size}\u0000${file.lastModified}`
+}
+
 function newTaskId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -202,9 +207,10 @@ export default function App() {
   const [selected, setSelected] = useState<Entry | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Array<FileEntry | FolderEntry> | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [uploadQueue, setUploadQueue] = useState<File[]>([])
+  const [uploadQueueOpen, setUploadQueueOpen] = useState(false)
   const [connectionLost, setConnectionLost] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
   const abortRef = useRef(new Map<string, () => void>())
@@ -843,6 +849,39 @@ export default function App() {
     await refreshTasks()
   }, [handleDisconnect, paired, refreshTasks, updateTask])
 
+  const addQueuedFiles = useCallback((files: FileList | File[]) => {
+    setUploadQueue((previous) => {
+      const next = [...previous]
+      const keys = new Set(previous.map(fileKey))
+      for (const file of Array.from(files)) {
+        const key = fileKey(file)
+        if (!keys.has(key)) {
+          keys.add(key)
+          next.push(file)
+        }
+      }
+      return next
+    })
+  }, [])
+
+  const openUploadQueue = useCallback((files?: FileList | File[]) => {
+    if (!paired) return
+    if (files) addQueuedFiles(files)
+    setUploadQueueOpen(true)
+  }, [addQueuedFiles, paired])
+
+  const closeUploadQueue = useCallback(() => {
+    setUploadQueueOpen(false)
+    setUploadQueue([])
+  }, [])
+
+  const confirmUploadQueue = useCallback(() => {
+    const files = uploadQueue
+    setUploadQueueOpen(false)
+    setUploadQueue([])
+    if (files.length > 0) void handleUpload(files)
+  }, [handleUpload, uploadQueue])
+
   const handleDownload = useCallback(async (entry: Entry) => {
     const id = newTaskId('download')
     const record: TransferRecord = {
@@ -956,7 +995,7 @@ export default function App() {
       event.preventDefault()
       depth = 0
       setDragging(false)
-      if (event.dataTransfer?.files.length) void handleUpload(event.dataTransfer.files)
+      if (event.dataTransfer?.files.length) openUploadQueue(event.dataTransfer.files)
     }
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)
@@ -968,7 +1007,7 @@ export default function App() {
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [handleUpload, paired])
+  }, [openUploadQueue, paired])
 
   const categoryLabel = categories.find((item) => item.id === category)?.label ?? '手机文件'
   const pageLabel = folder?.name || categoryLabel
@@ -999,7 +1038,7 @@ export default function App() {
       <div
         className={`app-shell${sidebarOpen ? ' sidebar-open' : ''}${!paired ? ' is-locked' : ''}`}
         aria-hidden={!paired || undefined}
-        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || searchOpen || undefined}
+        inert={!paired || Boolean(selected) || Boolean(pendingDelete) || searchOpen || uploadQueueOpen || undefined}
       >
         <Sidebar
           activeCategory={category}
@@ -1039,7 +1078,7 @@ export default function App() {
           <Topbar
             query={query}
             onQueryChange={handleQueryChange}
-            onUpload={() => inputRef.current?.click()}
+            onUpload={() => openUploadQueue()}
             theme={theme}
             onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
             sidebarOpen={sidebarOpen}
@@ -1074,7 +1113,7 @@ export default function App() {
               onOpenEntry={setSelected}
               onDownload={(entry) => void handleDownload(entry)}
               onCopy={handleCopy}
-              onUpload={() => inputRef.current?.click()}
+              onUpload={() => openUploadQueue()}
               onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}
               onPageChange={handlePageChange}
@@ -1095,8 +1134,8 @@ export default function App() {
                 <span className="drop-icon">
                   <UploadSimple size={28} weight="regular" />
                 </span>
-                <strong>松手，传到手机</strong>
-                <span>文件会保存到手机的 Download/toTool/FlashDrop 文件夹</span>
+                <strong>松手，加入传输队列</strong>
+                <span>确认后会批量上传到手机 Download/toTool/FlashDrop</span>
               </div>
             </div>
           )}
@@ -1140,6 +1179,17 @@ export default function App() {
         />
       )}
 
+      {uploadQueueOpen && (
+        <UploadQueueDialog
+          files={uploadQueue}
+          onAdd={addQueuedFiles}
+          onRemove={(index) => setUploadQueue((previous) => previous.filter((_, i) => i !== index))}
+          onClear={() => setUploadQueue([])}
+          onClose={closeUploadQueue}
+          onConfirm={confirmUploadQueue}
+        />
+      )}
+
       <TransferToast
         records={toastRecords}
         visible={toastOpen}
@@ -1154,18 +1204,6 @@ export default function App() {
         </div>
       )}
 
-      <input
-        ref={inputRef}
-        className="visually-hidden"
-        type="file"
-        multiple
-        tabIndex={-1}
-        aria-hidden="true"
-        onChange={(event) => {
-          if (event.target.files) void handleUpload(event.target.files)
-          event.target.value = ''
-        }}
-      />
     </>
   )
 }
