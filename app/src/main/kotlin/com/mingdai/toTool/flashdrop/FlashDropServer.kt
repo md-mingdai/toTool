@@ -620,7 +620,7 @@ class FlashDropServer(
         }
         addTransfer(downloadName, file.length(), "download")
         val response = if (authenticated.encryptionKey != null) {
-            encryptedFileResponse(file, authenticated.encryptionKey!!)
+            encryptFileResponse(file, authenticated.encryptionKey!!)
         } else {
             NanoHTTPD.newFixedLengthResponse(
                 Response.Status.OK,
