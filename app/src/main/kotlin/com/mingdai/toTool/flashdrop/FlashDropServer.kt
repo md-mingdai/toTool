@@ -60,6 +60,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -358,6 +361,7 @@ class FlashDropServer private constructor(
             path == "/api/apps" -> handleApps(call)
             path == "/api/files" -> handleFiles(call)
             path == "/api/files/delete" -> handleDeleteFiles(call)
+            path == "/api/text" -> handleText(call)
             path == "/api/transfers" -> handleTransfers(call)
             path == "/api/transfers/delete" -> handleDeleteTransfer(call)
             path == "/api/clipboard" -> handleClipboard(call)
@@ -469,6 +473,42 @@ class FlashDropServer private constructor(
                 .put("page", page)
                 .put("pageSize", PAGE_SIZE),
         )
+    }
+
+    private suspend fun handleText(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        if (authenticated(call) == null) return unauthorized(call)
+        if (!hasStorageAccess()) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "storage-permission"))
+            return
+        }
+        val path = call.request.queryParameters["path"].orEmpty()
+        val file = safeFile(path)?.takeIf { it.isFile }
+        if (file == null) {
+            respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "file-not-found"))
+            return
+        }
+        if (!file.canRead()) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "cannot-read"))
+            return
+        }
+        if (file.length() > TEXT_PREVIEW_LIMIT) {
+            respondJson(call, HttpStatusCode.PayloadTooLarge, JSONObject().put("error", "text-too-large"))
+            return
+        }
+        if (!looksLikeText(file)) {
+            respondJson(call, HttpStatusCode.UnsupportedMediaType, JSONObject().put("error", "not-text"))
+            return
+        }
+        val text = decodeText(file.readBytes())
+        if (text == null) {
+            respondJson(call, HttpStatusCode.UnsupportedMediaType, JSONObject().put("error", "not-text"))
+            return
+        }
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("text", text))
     }
 
     private suspend fun handleDeleteFiles(call: ApplicationCall) {
@@ -744,7 +784,10 @@ class FlashDropServer private constructor(
 
     private fun fileJson(file: File): JSONObject {
         val relative = relativePath(file)
-        val kind = kindFor(file.name)
+        var kind = kindFor(file.name)
+        if (kind == "file" && file.length() <= TEXT_PREVIEW_LIMIT && looksLikeText(file)) {
+            kind = "text"
+        }
         val json = JSONObject()
             .put("type", "file")
             .put("id", relative)
@@ -1393,14 +1436,94 @@ class FlashDropServer private constructor(
         else -> emptySet()
     }
 
-    private fun kindFor(name: String): String = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
-        "jpg", "jpeg", "png", "webp", "heic", "gif", "avif", "bmp", "dng" -> "image"
-        "mp4", "mov", "mkv", "webm", "avi", "m4v", "3gp" -> "video"
-        "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus" -> "audio"
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "csv" -> "document"
-        "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> "archive"
-        "apk", "apks", "xapk", "apkm" -> "apk"
-        else -> "file"
+    private val textExtensions = setOf(
+        "txt", "md", "markdown", "mdx", "log", "csv", "tsv", "json", "json5", "xml",
+        "yaml", "yml", "toml", "ini", "cfg", "conf", "properties", "env",
+        "kt", "kts", "java", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "fs", "fsx", "vb",
+        "js", "jsx", "mjs", "cjs", "ts", "tsx", "vue", "svelte", "astro",
+        "py", "pyw", "rb", "php", "pl", "pm", "lua", "r", "go", "rs", "swift", "m", "mm",
+        "scala", "sc", "groovy", "gradle", "sh", "bash", "zsh", "fish", "bat", "cmd", "ps1",
+        "sql", "graphql", "gql", "proto", "html", "htm", "css", "scss", "sass", "less", "styl",
+        "tex", "bib", "dart", "ex", "exs", "erl", "hrl", "hs", "lhs", "clj", "cljs", "cljc", "edn",
+        "asm", "s", "vim", "nix", "dockerfile", "makefile", "mk", "cmake", "bazel", "bzl",
+        "gitignore", "gitattributes", "editorconfig", "npmrc", "yarnrc",
+    )
+
+    private val textFileNames = setOf(
+        "makefile", "dockerfile", "license", "readme", "changelog", "authors", "notice",
+        "gemfile", "rakefile", "procfile", "justfile",
+    )
+
+    private fun kindFor(name: String): String {
+        val lower = name.lowercase(Locale.ROOT)
+        val ext = lower.substringAfterLast('.', "")
+        if (ext in textExtensions || lower in textFileNames ||
+            (lower.startsWith(".") && lower.removePrefix(".") in textFileNames)
+        ) {
+            return "text"
+        }
+        return when (ext) {
+            "jpg", "jpeg", "png", "webp", "heic", "gif", "avif", "bmp", "dng" -> "image"
+            "mp4", "mov", "mkv", "webm", "avi", "m4v", "3gp" -> "video"
+            "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus" -> "audio"
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "rtf" -> "document"
+            "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> "archive"
+            "apk", "apks", "xapk", "apkm" -> "apk"
+            else -> "file"
+        }
+    }
+
+    /** 只看文件头的可读字符，避免把伪装成 .txt/.md 的二进制文件塞进预览。 */
+    private fun looksLikeText(file: File): Boolean {
+        if (file.length() > TEXT_PREVIEW_LIMIT) return false
+        return runCatching {
+            file.inputStream().use { input ->
+                val buffer = ByteArray(4096)
+                val read = input.read(buffer)
+                if (read <= 0) return@use true
+                if (read >= 2) {
+                    val first = buffer[0].toInt() and 0xFF
+                    val second = buffer[1].toInt() and 0xFF
+                    if ((first == 0xFF && second == 0xFE) || (first == 0xFE && second == 0xFF)) return@use true
+                }
+                var bad = 0
+                for (index in 0 until read) {
+                    val byte = buffer[index].toInt() and 0xFF
+                    if (byte == 0) return@use false
+                    if (byte == 9 || byte == 10 || byte == 13 || byte in 32..126 || byte >= 0x80) continue
+                    bad += 1
+                }
+                bad == 0
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun decodeText(bytes: ByteArray): String? {
+        if (bytes.isEmpty()) return ""
+        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            return runCatching { String(bytes, 3, bytes.size - 3, Charsets.UTF_8) }.getOrNull()
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
+            return runCatching { String(bytes, 2, bytes.size - 2, Charset.forName("UTF-16LE")) }.getOrNull()
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
+            return runCatching { String(bytes, 2, bytes.size - 2, Charset.forName("UTF-16BE")) }.getOrNull()
+        }
+        val utf8 = runCatching {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        }.getOrNull()
+        if (utf8 != null) return utf8.removePrefix("\uFEFF")
+        return runCatching {
+            Charset.forName("GB18030").newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        }.getOrNull()
     }
 
     private fun decodeSampledBitmap(file: File, target: Int): Bitmap? {
@@ -1584,6 +1707,7 @@ class FlashDropServer private constructor(
         private const val MAX_ATTEMPTS = 5
         private const val PAGE_SIZE = 250
         private const val CATEGORY_CACHE_MS = 8_000L
+        private const val TEXT_PREVIEW_LIMIT = 1024L * 1024L
         private const val APP_CACHE_MS = 30_000L
         private const val SALT_BYTES = 16
         private const val GCM_IV_BYTES = 12

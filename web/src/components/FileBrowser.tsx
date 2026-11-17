@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   CaretRight,
   Check,
-  Copy,
   DownloadSimple,
   File as FileIcon,
   FileArchive,
@@ -64,7 +63,6 @@ interface FileBrowserProps {
   onNavigatePath: (path: string) => void
   onOpenEntry: (entry: Entry) => void
   onDownload: (entry: Entry) => void
-  onCopy: (entry: FileEntry) => void
   onUpload: () => void
   onClearQuery: () => void
   onRetry: () => void
@@ -192,7 +190,7 @@ function entryMeta(entry: Entry): ReactNode {
 function rowAction(entry: Entry): { label: string; icon: ReactNode } {
   if (entry.type === 'folder') return { label: `打开 ${entry.name}`, icon: <CaretRight size={16} weight="regular" /> }
   if (entry.type === 'app') return { label: `下载 ${entry.name} 安装包`, icon: <DownloadSimple size={17} weight="regular" /> }
-  if (entry.kind === 'text') return { label: `复制 ${entry.name}`, icon: <Copy size={16} weight="regular" /> }
+  if (entry.kind === 'text') return { label: `预览 ${entry.name}`, icon: <FileText size={16} weight="regular" /> }
   return { label: `下载 ${entry.name}`, icon: <DownloadSimple size={17} weight="regular" /> }
 }
 
@@ -369,7 +367,6 @@ export function FileBrowser({
   onNavigatePath,
   onOpenEntry,
   onDownload,
-  onCopy,
   onUpload,
   onClearQuery,
   onRetry,
@@ -665,7 +662,7 @@ export function FileBrowser({
                     title={action.label}
                     onClick={() => {
                       if (entry.type === 'folder') onOpenFolder(entry as FolderEntry)
-                      else if (entry.type === 'file' && entry.kind === 'text') onCopy(entry as FileEntry)
+                      else if (entry.type === 'file' && entry.kind === 'text') onOpenEntry(entry as FileEntry)
                       else onDownload(entry as AppEntry | FileEntry)
                     }}
                   >

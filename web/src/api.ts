@@ -376,6 +376,12 @@ export function mediaUrl(entry: FileEntry): string | null {
   return withToken(`/api/media?path=${encodeURIComponent(entry.path)}&preview=1`) ?? null
 }
 
+export async function readTextFile(path: string, signal?: AbortSignal): Promise<string> {
+  const response = await apiFetch(`/api/text?path=${encodeURIComponent(path)}`, { signal })
+  const data = (await response.json()) as { text?: string }
+  return data.text ?? ''
+}
+
 export async function fetchEntryBlob(entry: FileEntry, signal?: AbortSignal): Promise<Blob> {
   const response = await apiFetch(`/api/download?path=${encodeURIComponent(entry.path)}&preview=1`, { signal })
   const raw = new Uint8Array(await response.arrayBuffer())

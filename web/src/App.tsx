@@ -1148,7 +1148,6 @@ export default function App() {
               onNavigatePath={handleNavigatePath}
               onOpenEntry={setSelected}
               onDownload={(entry) => void handleDownload(entry)}
-              onCopy={handleCopy}
               onUpload={() => openUploadQueue()}
               onClearQuery={clearQuery}
               onRetry={() => setRefreshKey((value) => value + 1)}

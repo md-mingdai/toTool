@@ -2687,12 +2687,28 @@ input[type='checkbox'] {
 }
 
 .detail-preview.is-text {
+  height: 230px;
   padding: 18px;
   place-items: start stretch;
 }
 
+.detail-text-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  justify-self: center;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.detail-text-state.is-error {
+  color: var(--muted);
+  text-align: center;
+}
+
 .detail-preview.is-text p {
-  max-height: 150px;
+  max-height: 194px;
   overflow: auto;
   color: var(--text);
   font-family: var(--font-mono);

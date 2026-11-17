@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  CircleNotch,
   Copy,
   DownloadSimple,
   File as FileIcon,
@@ -13,9 +14,12 @@ import {
   PlayCircle,
   X,
 } from '@phosphor-icons/react'
+import * as api from '../api'
 import { entryKindLabel, formatBytes } from '../data'
 import type { Entry, FileEntry } from '../types'
 import { AppIconTile } from './AppIconTile'
+
+const TEXT_PREVIEW_LIMIT = 1024 * 1024
 
 interface DetailsDialogProps {
   entry: Entry | null
@@ -50,6 +54,46 @@ function DetailGlyph({ entry, size = 28 }: { entry: Entry; size?: number }) {
 
 export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia }: DetailsDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const [textContent, setTextContent] = useState<string | null>(null)
+  const [textLoading, setTextLoading] = useState(false)
+  const [textError, setTextError] = useState('')
+
+  useEffect(() => {
+    if (!entry || entry.type !== 'file' || entry.kind !== 'text') {
+      setTextContent(null)
+      setTextError('')
+      setTextLoading(false)
+      return
+    }
+    if (entry.size > TEXT_PREVIEW_LIMIT) {
+      setTextContent(null)
+      setTextLoading(false)
+      setTextError('文件超过 1 MiB，请下载后查看')
+      return
+    }
+    let cancelled = false
+    const controller = new AbortController()
+    setTextContent(null)
+    setTextError('')
+    setTextLoading(true)
+    void api.readTextFile(entry.path, controller.signal).then((text) => {
+      if (cancelled) return
+      setTextContent(text)
+      setTextLoading(false)
+    }).catch((caught: unknown) => {
+      if (cancelled) return
+      setTextError(caught instanceof api.ApiError && caught.code === 'not-text'
+        ? '文件不像纯文本，请下载后查看'
+        : caught instanceof api.ApiError && caught.code === 'text-too-large'
+          ? '文件超过 1 MiB，请下载后查看'
+          : '无法读取文本内容')
+      setTextLoading(false)
+    })
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [entry])
 
   useEffect(() => {
     if (!entry) return
@@ -83,7 +127,7 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
     rows.push({ label: '大小', value: formatBytes(entry.size), mono: true })
     rows.push({ label: '修改时间', value: entry.modified })
     rows.push({ label: '路径', value: entry.path, mono: true })
-    if (isText && entry.text) rows.push({ label: '字符数', value: `${entry.text.length}`, mono: true })
+    if (isText && textContent !== null) rows.push({ label: '字符数', value: `${textContent.length}`, mono: true })
   } else {
     rows.push({ label: '类型', value: '文件夹' })
     rows.push({ label: '内容', value: `${entry.itemCount.toLocaleString('zh-CN')} 项` })
@@ -110,10 +154,19 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
         <div
           className={`detail-preview${previewImage ? ' has-image' : ''}${isText ? ' is-text' : ''}${entry.type === 'app' ? ' is-app' : ''}${isMedia ? ' is-media' : ''}`}
         >
-          {previewImage ? (
+          {isText ? (
+            textLoading ? (
+              <span className="detail-text-state">
+                <CircleNotch className="spin" size={18} weight="regular" />
+                正在读取文本
+              </span>
+            ) : textError ? (
+              <span className="detail-text-state is-error">{textError}</span>
+            ) : (
+              <p>{textContent ?? ''}</p>
+            )
+          ) : previewImage ? (
             <img src={previewImage} alt="" draggable={false} onDragStart={(event) => event.preventDefault()} />
-          ) : isText ? (
-            <p>{entry.type === 'file' ? entry.text : ''}</p>
           ) : (
             <span className="detail-glyph" aria-hidden="true">
               <DetailGlyph entry={entry} />
@@ -153,11 +206,13 @@ export function DetailsDialog({ entry, onClose, onDownload, onCopy, onOpenMedia 
 
         <div className="detail-actions">
           <button type="button" className="btn btn-primary" onClick={() => {
-            if (isText) onCopy(entry as FileEntry)
+            if (isText && textContent !== null) onCopy({ ...(entry as FileEntry), text: textContent })
             else onDownload(entry)
           }}>
-            {isText ? <Copy size={16} weight="regular" /> : <DownloadSimple size={16} weight="regular" />}
-            {isText ? '复制内容' : entry.type === 'app' ? '下载 APK' : '下载到电脑'}
+            {isText && textContent !== null
+              ? <Copy size={16} weight="regular" />
+              : <DownloadSimple size={16} weight="regular" />}
+            {isText && textContent !== null ? '复制内容' : entry.type === 'app' ? '下载 APK' : '下载到电脑'}
           </button>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             关闭
