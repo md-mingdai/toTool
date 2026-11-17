@@ -88,6 +88,12 @@ class FlashDropServer(
     private val failedAttempts = mutableListOf<Long>()
 
     @Volatile
+    private var appsCache: List<AppInfo>? = null
+
+    @Volatile
+    private var appsCacheAt = 0L
+
+    @Volatile
     private var customCodeEnabled = initialCustomCodeEnabled
 
     @Volatile
@@ -473,19 +479,18 @@ class FlashDropServer(
 
     @Suppress("DEPRECATION")
     private fun installedApps(): List<AppInfo> {
+        val now = System.currentTimeMillis()
+        appsCache?.takeIf { now - appsCacheAt < APP_CACHE_MS }?.let { return it }
+
         val pm = appContext.packageManager
-        val applicationInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
+        val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
         } else {
-            pm.getInstalledApplications(0)
+            pm.getInstalledPackages(0)
         }
-        return applicationInfos.mapNotNull { info ->
+        val result = packages.mapNotNull { packageInfo ->
             runCatching {
-                val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    pm.getPackageInfo(info.packageName, PackageManager.PackageInfoFlags.of(0))
-                } else {
-                    pm.getPackageInfo(info.packageName, 0)
-                }
+                val info = packageInfo.applicationInfo ?: return@runCatching null
                 val versionName = packageInfo.versionName.orEmpty()
                 val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
                 val size = buildList {
@@ -504,6 +509,10 @@ class FlashDropServer(
                 )
             }.getOrNull()
         }.sortedBy { it.name.lowercase(Locale.getDefault()) }
+
+        appsCache = result
+        appsCacheAt = now
+        return result
     }
 
     private fun handleIcon(session: IHTTPSession): Response {
@@ -740,7 +749,7 @@ class FlashDropServer(
     private fun readJson(session: IHTTPSession): JSONObject {
         val max = 64 * 1024
         val body = readRequestBody(session, max)
-        return JSONObject(body.toString(Charsets.UTF_8.name()))
+        return JSONObject(String(body, Charsets.UTF_8))
     }
 
     /**
@@ -1017,6 +1026,7 @@ class FlashDropServer(
         private const val MAX_ATTEMPTS = 5
         private const val MAX_LIST_ITEMS = 500
         private const val MAX_SCAN_DIRS = 2_000
+        private const val APP_CACHE_MS = 30_000L
         private const val SALT_BYTES = 16
         private const val GCM_IV_BYTES = 12
         private const val GCM_TAG_BYTES = 16
