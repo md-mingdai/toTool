@@ -60,6 +60,27 @@ object BarcodeScanner {
 
     private val nonQrFormats = allFormats.filter { it != BarcodeFormat.QR_CODE }
 
+    private val oneDFormats = listOf(
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.CODE_93,
+        BarcodeFormat.CODABAR,
+        BarcodeFormat.ITF,
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+    )
+
+    private val verticalOneDHints: Map<DecodeHintType, Any> = mapOf(
+        DecodeHintType.POSSIBLE_FORMATS to oneDFormats,
+        DecodeHintType.TRY_HARDER to true,
+        DecodeHintType.CHARACTER_SET to "UTF-8",
+    )
+
+    private val oneDLabels = setOf(
+        "Code 128", "Code 39", "Code 93", "Codabar", "ITF", "EAN-13", "EAN-8", "UPC-A",
+    )
+
     private val galleryHints: Map<DecodeHintType, Any> = mapOf(
         DecodeHintType.POSSIBLE_FORMATS to allFormats,
         DecodeHintType.TRY_HARDER to true,
@@ -147,16 +168,27 @@ object BarcodeScanner {
      * 这两个自带解码器是按「整张图只有一个码」写的，在画面里找不到就会把所有候选版本试一遍，
      * 非常慢，所以必须有截止时间，并且不能和快路径放在同一个线程里（旧代码里它们会拖住所有 QR 的结果）。
      */
-    fun scanSlow(frame: LumaFrame, phase: SlowPhase, deadlineNs: Long): List<ScanResult> {
+    fun scanSlow(
+        frame: LumaFrame,
+        phase: SlowPhase,
+        deadlineNs: Long,
+        preferVerticalOneD: Boolean = false,
+    ): List<ScanResult> {
         val found = ArrayList<ScanResult>(4)
         val source = LumaSource(frame, allowRotate = true)
         if (phase == SlowPhase.ZXING) {
-            // 一维码量条高用的矩阵：和 ZXing 内部那份分开，免得被 ALSO_INVERTED 翻转
-            val matrix = runCatching { HybridBinarizer(source).blackMatrix }.getOrNull()
-            runCatching { HybridBinarizer(source.invert()).blackMatrix }.getOrNull()?.let { inverted ->
-                scanQr(inverted, frame, true, found, null)
+            var verticalScanned = false
+            // 竖放一维码：自己旋转后显式扫描，不依赖 ZXing 内部的单次 CCW 旋转。
+            // 只在定位器看到竖直长边候选时先扫，避免每轮都白扫两次旋转图。
+            if (preferVerticalOneD) {
+                val verticalDeadline = minOf(deadlineNs, System.nanoTime() + 260_000_000L)
+                found.addAll(scanVerticalOneD(frame, verticalDeadline))
+                verticalScanned = true
             }
+            // 先扫一维码 / 二维慢格式，再扫反色 QR，避免 QR 检测耗时后把一维码挤掉。
             if (System.nanoTime() < deadlineNs) {
+                // 一维码量条高用的矩阵：和 ZXing 内部那份分开，免得被 ALSO_INVERTED 翻转
+                val matrix = runCatching { HybridBinarizer(source).blackMatrix }.getOrNull()
                 runCatching {
                     GenericMultipleBarcodeReader(MultiFormatReader()).decodeMultiple(
                         BinaryBitmap(HybridBinarizer(source)),
@@ -164,6 +196,18 @@ object BarcodeScanner {
                     )
                 }.getOrNull()?.forEach { r ->
                     toFrameResult(r, matrix, frame, true)?.let { found.add(it) }
+                }
+            }
+            // 定位器没给出竖直候选、ZXing 自己也没解出一维码时，再兜底显式转两次。
+            if (!verticalScanned && found.none { it.formatLabel in oneDLabels } &&
+                System.nanoTime() < deadlineNs
+            ) {
+                val verticalDeadline = minOf(deadlineNs, System.nanoTime() + 260_000_000L)
+                found.addAll(scanVerticalOneD(frame, verticalDeadline))
+            }
+            if (System.nanoTime() < deadlineNs) {
+                runCatching { HybridBinarizer(source.invert()).blackMatrix }.getOrNull()?.let { inverted ->
+                    scanQr(inverted, frame, true, found, null)
                 }
             }
         } else {
@@ -180,6 +224,54 @@ object BarcodeScanner {
             }
         }
         return dedupe(found)
+    }
+
+    /**
+     * 显式把整帧顺 / 逆时针各转 90° 后只扫一维码，再把四个角映射回原帧。
+     * ZXing 的 1D 解读器只会在 TRY_HARDER 下尝试一次逆时针旋转，且部分格式反向时容易失败；
+     * 这里两个方向都试，几何也在旋转坐标系里算好再映射，竖放的码不会丢框或框歪。
+     */
+    private fun scanVerticalOneD(frame: LumaFrame, deadlineNs: Long): List<ScanResult> {
+        val results = ArrayList<ScanResult>(2)
+        for (clockwise in booleanArrayOf(true, false)) {
+            if (System.nanoTime() > deadlineNs) break
+            val rotated = if (clockwise) frame.rotatedClockwise() else frame.rotatedCounterClockwise()
+            try {
+                val source = LumaSource(rotated, allowRotate = false)
+                val bitmap = BinaryBitmap(HybridBinarizer(source))
+                val matrix = runCatching { bitmap.blackMatrix }.getOrNull() ?: continue
+                runCatching {
+                    GenericMultipleBarcodeReader(MultiFormatReader()).decodeMultiple(bitmap, verticalOneDHints)
+                }.getOrNull()?.forEach { result ->
+                    val text = result.text
+                    if (text.isNullOrEmpty()) return@forEach
+                    val rotatedQuad = CodeGeometry.quadFromResult(result, matrix) ?: return@forEach
+                    val quad = FloatArray(8)
+                    for (i in 0 until 4) {
+                        val xr = rotatedQuad[i * 2]
+                        val yr = rotatedQuad[i * 2 + 1]
+                        val x = if (clockwise) yr else frame.width - 1 - yr
+                        val y = if (clockwise) frame.height - 1 - xr else xr
+                        quad[i * 2] = x.coerceIn(0f, (frame.width - 1).toFloat())
+                        quad[i * 2 + 1] = y.coerceIn(0f, (frame.height - 1).toFloat())
+                    }
+                    val mapped = CodeGeometry.canonical(quad) ?: return@forEach
+                    results.add(
+                        ScanResult(
+                            text = text,
+                            formatLabel = formatLabel(result.barcodeFormat),
+                            quad = mapped,
+                            frameWidth = frame.width,
+                            frameHeight = frame.height,
+                            slow = true,
+                        ),
+                    )
+                }
+            } finally {
+                rotated.release()
+            }
+        }
+        return dedupe(results)
     }
 
     /**

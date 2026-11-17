@@ -23,6 +23,35 @@ class LumaFrame internal constructor(
 ) {
     fun release() = LumaPool.release(data)
 
+    /** 顺时针转 90°，只用于慢路径的竖放一维码；调用方用完必须 release。 */
+    fun rotatedClockwise(): LumaFrame {
+        val newW = height
+        val newH = width
+        val out = LumaPool.acquire(newW * newH)
+        for (y in 0 until height) {
+            val src = y * width
+            val xp = height - 1 - y
+            for (x in 0 until width) {
+                out[x * newW + xp] = data[src + x]
+            }
+        }
+        return LumaFrame(out, newW, newH, timeNs)
+    }
+
+    /** 逆时针转 90°，只用于慢路径的竖放一维码；调用方用完必须 release。 */
+    fun rotatedCounterClockwise(): LumaFrame {
+        val newW = height
+        val newH = width
+        val out = LumaPool.acquire(newW * newH)
+        for (y in 0 until height) {
+            val src = y * width
+            for (x in 0 until width) {
+                out[(width - 1 - x) * height + y] = data[src + x]
+            }
+        }
+        return LumaFrame(out, newW, newH, timeNs)
+    }
+
     companion object {
         /**
          * 从 ImageProxy 拷出一份转正后的灰度图；格式不对或数据异常时返回 null。

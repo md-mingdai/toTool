@@ -7,9 +7,12 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
+import kotlin.math.hypot
 
 private const val SLOW_MIN_GAP_NS = 80_000_000L
 private const val SLOW_BUDGET_NS = 700_000_000L
+private const val MAX_CUSTOM_STREAK = 2
 
 /**
  * 实时扫描引擎：把相机帧变成「每个码一条平滑、不丢的轨迹」，界面只管读 [snapshot] 画出来。
@@ -41,6 +44,7 @@ class ScanEngine {
 
     @Volatile
     private var nextSlowPhase = SlowPhase.ZXING
+    private var customStreak = 0
     private var lastSlowStartNs = 0L
 
     private var analysisExecutor: ExecutorService? = null
@@ -123,10 +127,20 @@ class ScanEngine {
         motion.end()
         if (running) snapshot = tracker.snapshot(nowNs)
 
-        return startSlow(frame, nowNs)
+        val verticalOneD = located.any { isVerticalBars(it.quad) }
+        return startSlow(frame, nowNs, verticalOneD)
     }
 
-    private fun startSlow(frame: LumaFrame, nowNs: Long): Boolean {
+    /** 定位器给出的条码区域长边接近竖直时，让慢路径优先显式旋转扫一维码。 */
+    private fun isVerticalBars(quad: FloatArray): Boolean {
+        val first = hypot(quad[2] - quad[0], quad[3] - quad[1])
+        val second = hypot(quad[4] - quad[2], quad[5] - quad[3])
+        val dx = if (first >= second) quad[2] - quad[0] else quad[4] - quad[2]
+        val dy = if (first >= second) quad[3] - quad[1] else quad[5] - quad[3]
+        return abs(dy) > abs(dx) * 1.15f
+    }
+
+    private fun startSlow(frame: LumaFrame, nowNs: Long, preferVerticalOneD: Boolean): Boolean {
         val executor = slowExecutor ?: return false
         if (nowNs - lastSlowStartNs < SLOW_MIN_GAP_NS) return false
         if (!slowBusy.compareAndSet(false, true)) return false
@@ -137,7 +151,7 @@ class ScanEngine {
                 var customHit = false
                 try {
                     val deadline = System.nanoTime() + SLOW_BUDGET_NS
-                    val results = BarcodeScanner.scanSlow(frame, phase, deadline)
+                    val results = BarcodeScanner.scanSlow(frame, phase, deadline, preferVerticalOneD)
                     if (running && results.isNotEmpty()) slowQueue.add(SlowBatch(results, frame.timeNs))
                     customHit = phase == SlowPhase.CUSTOM && results.isNotEmpty()
                 } catch (e: Throwable) {
@@ -146,9 +160,18 @@ class ScanEngine {
                     frame.release()
                     // 汉信码刚命中就继续盯着它，否则两种活轮流做
                     nextSlowPhase = when {
-                        phase == SlowPhase.CUSTOM && customHit -> SlowPhase.CUSTOM
-                        phase == SlowPhase.ZXING -> SlowPhase.CUSTOM
-                        else -> SlowPhase.ZXING
+                        phase == SlowPhase.CUSTOM && customHit && customStreak < MAX_CUSTOM_STREAK -> {
+                            customStreak += 1
+                            SlowPhase.CUSTOM
+                        }
+                        phase == SlowPhase.ZXING -> {
+                            customStreak = 0
+                            SlowPhase.CUSTOM
+                        }
+                        else -> {
+                            customStreak = 0
+                            SlowPhase.ZXING
+                        }
                     }
                     slowBusy.set(false)
                 }
