@@ -25,6 +25,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
@@ -39,7 +40,12 @@ import io.ktor.server.response.respondText
 import io.ktor.server.response.header
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.webSocket
 import io.ktor.utils.io.jvm.javaio.copyTo
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -169,8 +175,28 @@ class FlashDropServer private constructor(
         listener.onClientsChanged(0)
     }
 
-    private fun Application.configureServer() {
-        routing {
+    private fun configureServer(application: Application) {
+        application.install(WebSockets)
+        application.routing {
+            webSocket("/ws") {
+                val token = call.request.queryParameters["token"]
+                val session = token?.let { sessions[it] }
+                if (session == null || session.expiresAt < System.currentTimeMillis()) {
+                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "unauthorized"))
+                    return@webSocket
+                }
+                send(Frame.Text("""{"type":"connected"}"""))
+                for (frame in incoming) {
+                    val live = sessions[token]
+                    if (live == null || live.expiresAt < System.currentTimeMillis()) {
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "session-ended"))
+                        break
+                    }
+                    if (frame is Frame.Text && frame.readText() == "ping") {
+                        send(Frame.Text("pong"))
+                    }
+                }
+            }
             route("/") { handle { dispatch(call) } }
             route("/{path...}") { handle { dispatch(call) } }
         }
@@ -767,17 +793,17 @@ class FlashDropServer private constructor(
                 ContentType.Application.OctetStream,
                 HttpStatusCode.OK,
                 file.length() + GCM_IV_BYTES + GCM_TAG_BYTES,
-            ) { output ->
-                output.write(iv)
-                CipherInputStream(FileInputStream(file), cipher).use { it.copyTo(output) }
+            ) {
+                write(iv)
+                CipherInputStream(FileInputStream(file), cipher).use { it.copyTo(this) }
             }
         } else {
             call.respondOutputStream(
                 ContentType.Application.OctetStream,
                 HttpStatusCode.OK,
                 file.length(),
-            ) { output ->
-                FileInputStream(file).use { it.copyTo(output) }
+            ) {
+                FileInputStream(file).use { it.copyTo(this) }
             }
         }
     }
@@ -818,8 +844,8 @@ class FlashDropServer private constructor(
                 if (candidate.startsWith("assets/")) "public, max-age=31536000, immutable" else "no-store",
             )
             addSecurityHeaders(call)
-            call.respondOutputStream(ContentType.parse(mimeType(candidate)), HttpStatusCode.OK) { output ->
-                stream.use { it.copyTo(output) }
+            call.respondOutputStream(ContentType.parse(mimeType(candidate)), HttpStatusCode.OK) {
+                stream.use { it.copyTo(this) }
             }
             return
         }
@@ -1134,7 +1160,7 @@ class FlashDropServer private constructor(
                     listener = listener,
                 )
                 val engine = embeddedServer(CIO, port = port, host = "0.0.0.0") {
-                    server.configureServer()
+                    server.configureServer(this)
                 }
                 try {
                     engine.start(wait = false)

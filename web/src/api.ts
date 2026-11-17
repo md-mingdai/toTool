@@ -74,6 +74,13 @@ export function isEncryptionActive(): boolean {
   return encryptionKey !== null
 }
 
+/** 浏览器的 WebSocket 不支持自定义 Header，token 走查询参数。 */
+export function websocketUrl(): string | null {
+  if (!token) return null
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${protocol}://${window.location.host}/ws?token=${encodeURIComponent(token)}`
+}
+
 export function clearSession(): void {
   token = ''
   encryptionKey = null

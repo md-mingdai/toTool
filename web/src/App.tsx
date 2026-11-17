@@ -268,16 +268,116 @@ export default function App() {
       setConnectionLost(false)
       return
     }
-    let cancelled = false
-    const check = async () => {
-      const ok = await api.ping()
-      if (!cancelled) setConnectionLost(!ok)
+
+    let disposed = false
+    let socket: WebSocket | null = null
+    let opened = false
+    let lastPong = Date.now()
+    let pollTimer: number | null = null
+    let heartbeatTimer: number | null = null
+    let watchdogTimer: number | null = null
+
+    const clearPolling = () => {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer)
+        pollTimer = null
+      }
     }
-    void check()
-    const timer = window.setInterval(() => void check(), 5000)
+
+    // WebSocket 不可用或断开后才回退到 HTTP 探活。
+    const startPolling = () => {
+      if (disposed || pollTimer !== null) return
+      const check = async () => {
+        const ok = await api.ping()
+        if (!disposed) setConnectionLost(!ok)
+      }
+      void check()
+      pollTimer = window.setInterval(() => void check(), 5000)
+    }
+
+    const url = api.websocketUrl()
+    if (!url || typeof WebSocket === 'undefined') {
+      startPolling()
+      return () => {
+        disposed = true
+        clearPolling()
+      }
+    }
+
+    try {
+      socket = new WebSocket(url)
+    } catch {
+      startPolling()
+      return () => {
+        disposed = true
+        clearPolling()
+      }
+    }
+
+    watchdogTimer = window.setTimeout(() => {
+      if (disposed || !socket || socket.readyState === WebSocket.OPEN) return
+      try {
+        socket.close()
+      } catch {
+        // ignore
+      }
+      startPolling()
+    }, 4000)
+
+    socket.onopen = () => {
+      if (disposed) return
+      opened = true
+      setConnectionLost(false)
+      clearPolling()
+    }
+    socket.onmessage = (event) => {
+      if (disposed) return
+      lastPong = Date.now()
+      if (event.data === 'pong') setConnectionLost(false)
+    }
+    socket.onerror = () => {
+      // 随后的 onclose 会切换到回退轮询
+    }
+    socket.onclose = () => {
+      if (disposed) return
+      if (watchdogTimer !== null) {
+        window.clearTimeout(watchdogTimer)
+        watchdogTimer = null
+      }
+      if (opened) setConnectionLost(true)
+      startPolling()
+    }
+
+    heartbeatTimer = window.setInterval(() => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return
+      const started = Date.now()
+      lastPong = started
+      try {
+        socket.send('ping')
+      } catch {
+        return
+      }
+      window.setTimeout(() => {
+        if (!disposed && socket?.readyState === WebSocket.OPEN && lastPong <= started) {
+          try {
+            socket.close()
+          } catch {
+            // ignore
+          }
+        }
+      }, 6000)
+    }, 20000)
+
     return () => {
-      cancelled = true
-      window.clearInterval(timer)
+      disposed = true
+      clearPolling()
+      if (watchdogTimer !== null) window.clearTimeout(watchdogTimer)
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
+      try {
+        socket?.close()
+      } catch {
+        // ignore
+      }
     }
   }, [paired])
 

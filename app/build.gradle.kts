@@ -151,6 +151,7 @@ dependencies {
     val ktorVersion = "3.6.1"
     implementation("io.ktor:ktor-server-core-jvm:$ktorVersion")
     implementation("io.ktor:ktor-server-cio-jvm:$ktorVersion")
+    implementation("io.ktor:ktor-server-websockets-jvm:$ktorVersion")
     implementation("org.slf4j:slf4j-nop:2.0.19")
 
     // 条码扫描：CameraX 负责相机预览与逐帧分析
