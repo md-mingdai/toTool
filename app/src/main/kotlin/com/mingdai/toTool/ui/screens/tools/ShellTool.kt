@@ -78,6 +78,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -161,6 +162,9 @@ fun ShellTool(padding: PaddingValues) {
 
     var command by rememberSaveable { mutableStateOf("") }
     var script by remember { mutableStateOf<ShellScript?>(null) }
+    var scriptArgs by rememberSaveable { mutableStateOf("") }
+    var fixedStdin by rememberSaveable { mutableStateOf(false) }
+    var stdinText by rememberSaveable { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var currentRun by remember { mutableStateOf<ShellRun?>(null) }
 
@@ -204,7 +208,12 @@ fun ShellTool(padding: PaddingValues) {
 
     KeepScreenOn(running)
 
-    fun execute(shown: String, text: String) {
+    fun execute(
+        shown: String,
+        text: String,
+        arguments: List<String> = emptyList(),
+        stdinValue: String? = null,
+    ) {
         if (running) return
         if (state != ShizukuState.READY) {
             Toast.makeText(context, "Shizuku 还没有授权，不能执行", Toast.LENGTH_SHORT).show()
@@ -226,7 +235,7 @@ fun ShellTool(padding: PaddingValues) {
             var failure: String? = null
             try {
                 exitCode = withContext(Dispatchers.IO) {
-                    runShizukuShell(text, run) { isError, line ->
+                    runShizukuShell(text, run, arguments, stdinValue) { isError, line ->
                         log.add(if (isError) ShellLineKind.ERR else ShellLineKind.OUT, line)
                     }
                 }
@@ -351,7 +360,22 @@ fun ShellTool(padding: PaddingValues) {
                 script = importedScript,
                 canRun = canRun,
                 busy = running,
-                onRun = { execute("脚本 ${importedScript.name}（${importedScript.lineCount} 行）", importedScript.text) },
+                args = scriptArgs,
+                onArgsChange = { scriptArgs = it },
+                fixedStdin = fixedStdin,
+                onFixedStdinChange = { fixedStdin = it },
+                stdinText = stdinText,
+                onStdinTextChange = { stdinText = it },
+                onRun = {
+                    val arguments = parseShellArguments(scriptArgs)
+                    execute(
+                        "脚本 ${importedScript.name}（${importedScript.lineCount} 行）" +
+                            if (arguments.isEmpty()) "" else " + ${arguments.size} 个参数",
+                        importedScript.text,
+                        arguments,
+                        if (fixedStdin) stdinText else null,
+                    )
+                },
                 onReplace = { scriptPicker.launch(arrayOf("*/*")) },
                 onRemove = { script = null },
             )
@@ -500,6 +524,12 @@ private fun ScriptCard(
     script: ShellScript,
     canRun: Boolean,
     busy: Boolean,
+    args: String,
+    onArgsChange: (String) -> Unit,
+    fixedStdin: Boolean,
+    onFixedStdinChange: (Boolean) -> Unit,
+    stdinText: String,
+    onStdinTextChange: (String) -> Unit,
     onRun: () -> Unit,
     onReplace: () -> Unit,
     onRemove: () -> Unit,
@@ -536,6 +566,57 @@ private fun ScriptCard(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
+                )
+            }
+            TextField(
+                value = args,
+                onValueChange = onArgsChange,
+                label = "脚本参数（可选）",
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                ),
+            )
+            Text(
+                "参数按空白拆分并支持引号，脚本内用 \$1、\$2 读取；不会做变量展开。",
+                style = MiuixTheme.textStyles.footnote2,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("固定标准输入", style = MiuixTheme.textStyles.body2)
+                    Text(
+                        "开启后只写入下面的内容，写完立即 EOF，脚本无法再读取其它输入。",
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = colors.onSurfaceVariantSummary,
+                    )
+                }
+                Switch(
+                    checked = fixedStdin,
+                    onCheckedChange = onFixedStdinChange,
+                    enabled = !busy,
+                )
+            }
+            if (fixedStdin) {
+                TextField(
+                    value = stdinText,
+                    onValueChange = onStdinTextChange,
+                    label = "标准输入内容",
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 8,
+                )
+            } else {
+                Text(
+                    "未设置时标准输入为空，脚本读取会立即得到 EOF。",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.onSurfaceVariantSummary,
                 )
             }
             Row(

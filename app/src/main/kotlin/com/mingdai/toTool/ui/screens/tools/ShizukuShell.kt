@@ -305,9 +305,13 @@ private fun pumpStream(
 internal fun runShizukuShell(
     script: String,
     run: ShellRun,
+    arguments: List<String> = emptyList(),
+    stdinText: String? = null,
     onLine: (isError: Boolean, line: String) -> Unit,
 ): Int {
-    val process = newRemoteProcess(arrayOf("sh", "-c", script))
+    // sh -c 后的第一个参数会成为 $0，所以再放一个 "sh"，后面的 arguments 才是 $1、$2…
+    val command = arrayOf("sh", "-c", script, "sh") + arguments.toTypedArray()
+    val process = newRemoteProcess(command)
     run.process = process
     // 启动的同时刚好点了停止：进程还没登记上，stop() 没能结束它
     if (run.stopped) {
@@ -321,15 +325,41 @@ internal fun runShizukuShell(
     val stdin = process.outputStream
     val stdout = process.inputStream
     val stderr = process.errorStream
-    // 标准输入立刻关掉：命令里要读输入时拿到的是 EOF，而不是一直卡着等
+    // 标准输入：没设置固定值时立刻关掉，命令读到 EOF 而不是一直卡着等；
+    // 设置固定值后只写入这份内容并关闭，脚本无法再读到其它输入。
+    val stdinThread = if (stdinText != null) {
+        thread(name = "shell-stdin", isDaemon = true) {
+            try {
+                stdin.write(stdinText.toByteArray(Charsets.UTF_8))
+                stdin.flush()
+            } catch (e: Exception) {
+                // 脚本没读输入就退出时管道会断，忽略
+            } finally {
+                try {
+                    stdin.close()
+                } catch (e: Exception) {
+                    // 忽略
+                }
+            }
+        }
+    } else {
+        try {
+            stdin.close()
+        } catch (e: Exception) {
+            // 忽略
+        }
+        null
+    }
+    val outThread = pumpStream(stdout, false, onLine)
+    val errThread = pumpStream(stderr, true, onLine)
+    val code = process.waitFor()
+    // 进程结束后关闭标准输入，叫醒可能被管道写满卡住的写入线程。
     try {
         stdin.close()
     } catch (e: Exception) {
         // 忽略
     }
-    val outThread = pumpStream(stdout, false, onLine)
-    val errThread = pumpStream(stderr, true, onLine)
-    val code = process.waitFor()
+    stdinThread?.join(800)
     // 进程结束后两条管道很快会读到 EOF。如果命令留下了仍然握着管道的后台子进程，EOF 迟迟不来，
     // 这里等一会儿就放弃，并关闭流把读取线程叫醒，免得线程一直泄漏。
     outThread.join(2000)
@@ -349,6 +379,52 @@ internal fun runShizukuShell(
         errThread.join(500)
     }
     return code
+}
+
+/**
+ * 把「脚本参数」输入框拆成真正的 argv：支持单引号、双引号和反斜杠转义，
+ * 不做变量展开，也不会把参数拼回 shell 命令里执行。
+ */
+internal fun parseShellArguments(input: String): List<String> {
+    val result = mutableListOf<String>()
+    val current = StringBuilder()
+    var quote = 0 // 0 = 无引号，1 = 单引号，2 = 双引号
+    var started = false
+    var index = 0
+    while (index < input.length) {
+        val ch = input[index]
+        if (quote == 0) {
+            when {
+                ch == '\'' -> { quote = 1; started = true }
+                ch == '"' -> { quote = 2; started = true }
+                ch == '\\' -> {
+                    started = true
+                    if (index + 1 < input.length) current.append(input[++index]) else current.append(ch)
+                }
+                ch.isWhitespace() -> {
+                    if (started) {
+                        result.add(current.toString())
+                        current.setLength(0)
+                        started = false
+                    }
+                }
+                else -> { current.append(ch); started = true }
+            }
+        } else if (quote == 1) {
+            if (ch == '\'') quote = 0 else current.append(ch)
+        } else {
+            when {
+                ch == '"' -> quote = 0
+                ch == '\\' -> {
+                    if (index + 1 < input.length) current.append(input[++index]) else current.append(ch)
+                }
+                else -> current.append(ch)
+            }
+        }
+        index += 1
+    }
+    if (started) result.add(current.toString())
+    return result
 }
 
 /* ───────────────────────── 脚本文件 ───────────────────────── */

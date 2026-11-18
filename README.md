@@ -4,9 +4,9 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：46 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：47 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.1.10-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.2.0-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [许可证](#许可证)
 
@@ -46,7 +46,7 @@
 | 日常工具 | 条码处理、颜色选择器、秒表、手电筒 / SOS、分贝仪、尺子、指南针、量角器、简易画板、时间屏幕、比赛记分牌 |
 | 文本工具 | 字符统计、大小写转换、密码生成、UUID、Base64、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
-| 设备工具 | 设备信息、电池、网络、传感器、水平仪、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
+| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。

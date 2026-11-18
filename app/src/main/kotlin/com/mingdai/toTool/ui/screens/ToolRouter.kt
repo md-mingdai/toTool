@@ -49,6 +49,7 @@ import com.mingdai.toTool.ui.screens.tools.ImageRoundRectTool
 import com.mingdai.toTool.ui.screens.tools.ImageWatermarkTool
 import com.mingdai.toTool.ui.screens.tools.JsonTool
 import com.mingdai.toTool.ui.screens.tools.LoanTool
+import com.mingdai.toTool.ui.screens.tools.MetalDetectorTool
 import com.mingdai.toTool.ui.screens.tools.NetworkTool
 import com.mingdai.toTool.ui.screens.tools.PasswordTool
 import com.mingdai.toTool.ui.screens.tools.PercentTool
@@ -99,6 +100,7 @@ private val ToolWindowSpecs: Map<String, ToolWindowSpec> = mapOf(
     "daily_stopwatch" to ToolWindowSpec(keepOn = true),
     "daily_scoreboard" to ToolWindowSpec(keepOn = true),
     "dev_level" to ToolWindowSpec(keepOn = true),
+    "dev_metal" to ToolWindowSpec(keepOn = true),
     "daily_compass" to ToolWindowSpec(keepOn = true),
     "daily_decibel" to ToolWindowSpec(keepOn = true),
     // 网页服务要一直可达，屏幕常亮避免用户刚连上就息屏
@@ -215,6 +217,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_network" -> NetworkTool(padding)
             "dev_sensor" -> SensorListTool(padding)
             "dev_level" -> SpiritLevelTool(padding)
+            "dev_metal" -> MetalDetectorTool(padding)
             "dev_apk" -> ApkExtractorTool(padding)
             "dev_vibrate" -> VibratorTool(padding)
             "dev_installer" -> SplitInstallerTool(padding)
