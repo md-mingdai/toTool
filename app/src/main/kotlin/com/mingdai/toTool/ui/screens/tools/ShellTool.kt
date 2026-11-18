@@ -619,13 +619,23 @@ private fun ScriptCard(
                     color = colors.onSurfaceVariantSummary,
                 )
             }
+            PrimaryButton(
+                onClick = onRun,
+                enabled = canRun,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("执行脚本", maxLines = 1)
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PrimaryButton(onClick = onRun, enabled = canRun, modifier = Modifier.weight(1f)) { Text("执行脚本") }
-                SecondaryButton(onClick = onReplace, enabled = !busy, modifier = Modifier.weight(1f)) { Text("换一个") }
-                SecondaryButton(onClick = onRemove, enabled = !busy, modifier = Modifier.weight(1f)) { Text("移除") }
+                SecondaryButton(onClick = onReplace, enabled = !busy, modifier = Modifier.weight(1f)) {
+                    Text("换一个", maxLines = 1)
+                }
+                SecondaryButton(onClick = onRemove, enabled = !busy, modifier = Modifier.weight(1f)) {
+                    Text("移除", maxLines = 1)
+                }
             }
         }
     }
