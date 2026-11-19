@@ -122,7 +122,7 @@ internal class WeakNetProxyServer(
         activeSockets.clear()
         acceptThread?.join(500)
         acceptThread = null
-        connectionThreads.toList().forEach { it.join(300) }
+        connectionThreads.toList().forEach { it.interrupt() }
         connectionThreads.clear()
     }
 

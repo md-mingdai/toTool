@@ -70,6 +70,7 @@ private val WeakNetOk = Color(0xFF54A84A)
 fun WeakNetTool(padding: PaddingValues) {
     val context = LocalContext.current
     val state by WeakNetManager.state.collectAsState()
+    val running = state.running
     val stored = remember { WeakNetStore.load(context) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -125,6 +126,7 @@ fun WeakNetTool(padding: PaddingValues) {
     }
     val overlayLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         overlayGranted = Settings.canDrawOverlays(context)
+        if (overlayGranted && running) WeakNetVpnService.update(context)
     }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -155,7 +157,6 @@ fun WeakNetTool(padding: PaddingValues) {
         selectedPreset = name
     }
 
-    val running = state.running
     val colors = MiuixTheme.colorScheme
 
     ToolBody(padding) {

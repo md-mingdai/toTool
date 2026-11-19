@@ -18,7 +18,6 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
-import java.util.Locale
 
 class WeakNetVpnService : VpnService() {
     companion object {
