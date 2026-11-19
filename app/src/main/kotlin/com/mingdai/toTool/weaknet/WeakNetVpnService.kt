@@ -150,8 +150,9 @@ class WeakNetVpnService : VpnService() {
             .addDnsServer("10.66.0.1")
             .setBlocking(false)
         try {
-            if (config.packageName != null) {
-                builder.addAllowedApplication(config.packageName)
+            val targetPackage = config.packageName
+            if (targetPackage != null) {
+                builder.addAllowedApplication(targetPackage)
             } else {
                 val selfPackage = packageName
                 builder.addDisallowedApplication(selfPackage)
