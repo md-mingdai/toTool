@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 import kotlin.math.max
 
+private const val MAX_CONNECTIONS = 64
+
 /**
  * 本地 HTTP/HTTPS 代理。VPN 只负责把目标应用导向系统 HTTP 代理，
  * 真正的限速、延迟和目标主机过滤都在这里完成。
