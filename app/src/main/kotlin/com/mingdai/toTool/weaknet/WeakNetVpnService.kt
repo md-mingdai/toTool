@@ -126,7 +126,7 @@ class WeakNetVpnService : VpnService() {
                     config = WeakNetStore.load(this)
                     proxy?.updateConfig(config)
                     WeakNetManager.update { it.copy(config = config) }
-                    if (config.showOverlay) showOverlay() else hideOverlay(false)
+                    if (config.showOverlay) showOverlay() else hideOverlay()
                 }
                 return START_STICKY
             }
@@ -246,21 +246,15 @@ class WeakNetVpnService : VpnService() {
                 this,
                 onTogglePause = { togglePause() },
                 onStop = { stopEverything() },
-                onHide = { hideOverlay(true) },
             )
         }
         overlay?.show()
         overlay?.refresh(WeakNetManager.state.value)
     }
 
-    private fun hideOverlay(save: Boolean) {
+    private fun hideOverlay() {
         overlay?.hide()
         overlay = null
-        if (save) {
-            config = config.copy(showOverlay = false)
-            WeakNetStore.save(this, config)
-            WeakNetManager.update { it.copy(config = config) }
-        }
     }
 
     private fun stopEverything() {
@@ -282,7 +276,7 @@ class WeakNetVpnService : VpnService() {
             tun = null
         }
         handler.removeCallbacks(statsTick)
-        hideOverlay(false)
+        hideOverlay()
         WeakNetManager.update {
             it.copy(
                 running = false,
@@ -330,7 +324,7 @@ class WeakNetVpnService : VpnService() {
             tun = null
         }
         handler.removeCallbacks(statsTick)
-        hideOverlay(false)
+        hideOverlay()
         WeakNetManager.update {
             it.copy(
                 running = false,

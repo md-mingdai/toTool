@@ -1,5 +1,8 @@
 package com.mingdai.toTool.weaknet
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -28,7 +31,6 @@ internal class WeakNetOverlay(
     private val context: Context,
     private val onTogglePause: () -> Unit,
     private val onStop: () -> Unit,
-    private val onHide: () -> Unit,
 ) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val accent = Color.rgb(199, 244, 100)
@@ -44,6 +46,9 @@ internal class WeakNetOverlay(
     private var pauseButton: TextView? = null
     private var expanded = false
     private var lastState: WeakNetState? = null
+    private var ballX = 0
+    private var ballY = 0
+    private var snapAnimator: ValueAnimator? = null
 
     fun show() {
         if (root != null || !Settings.canDrawOverlays(context)) return
@@ -102,10 +107,8 @@ internal class WeakNetOverlay(
         }
         title.setOnTouchListener(dragOnly())
         val collapse = smallButton("−") { collapse() }
-        val close = smallButton("×") { onHide() }
         header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         header.addView(collapse)
-        header.addView(close)
         body.addView(header)
 
         statusText = TextView(context).apply {
@@ -150,8 +153,11 @@ internal class WeakNetOverlay(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (context.resources.displayMetrics.widthPixels - dp(68)).coerceAtLeast(dp(8))
-            y = dp(130)
+            val margin = dp(8)
+            ballX = (context.resources.displayMetrics.widthPixels - dp(52) - margin).coerceAtLeast(margin)
+            ballY = dp(130)
+            x = ballX
+            y = ballY
         }
         try {
             windowManager.addView(frame, lp)
@@ -193,19 +199,6 @@ internal class WeakNetOverlay(
         pauseButton?.text = if (state.paused) "继续限制" else "暂停限制"
     }
 
-    /** 旋转屏幕后把折叠图标或展开面板拉回可见区域。 */
-    fun refreshPosition() {
-        val current = root ?: return
-        val currentParams = params ?: return
-        val width = if (expanded) dp(246) else dp(52)
-        val screenWidth = context.resources.displayMetrics.widthPixels
-        val screenHeight = context.resources.displayMetrics.heightPixels
-        currentParams.width = width
-        currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
-        currentParams.y = currentParams.y.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
-        runCatching { windowManager.updateViewLayout(current, currentParams) }
-    }
-
     fun hide() {
         val current = root ?: return
         runCatching { windowManager.removeView(current) }
@@ -221,30 +214,126 @@ internal class WeakNetOverlay(
         pauseButton = null
         expanded = false
         lastState = null
+        cancelSnap()
+        ballX = 0
+        ballY = 0
     }
 
     private fun expand() {
         if (expanded) return
-        val currentParams = params ?: return
+        cancelSnap()
+        val current = params ?: return
+        ballX = current.x
+        ballY = current.y
         val width = dp(246)
         val screenWidth = context.resources.displayMetrics.widthPixels
-        currentParams.width = width
-        currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        current.width = width
+        current.x = if (ballX + dp(26) < screenWidth / 2) {
+            dp(8)
+        } else {
+            (screenWidth - width - dp(8)).coerceAtLeast(dp(8))
+        }
+        current.y = ballY.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
         iconContainer?.visibility = View.GONE
         panel?.visibility = View.VISIBLE
         expanded = true
-        runCatching { windowManager.updateViewLayout(root ?: return, currentParams) }
+        runCatching { windowManager.updateViewLayout(root ?: return, current) }
         lastState?.let { refresh(it) }
     }
 
     private fun collapse() {
         if (!expanded) return
-        val currentParams = params ?: return
-        currentParams.width = dp(52)
+        cancelSnap()
+        val current = params ?: return
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        current.width = dp(52)
+        current.x = ballX.coerceIn(dp(8), (screenWidth - dp(52) - dp(8)).coerceAtLeast(dp(8)))
+        current.y = ballY.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
         panel?.visibility = View.GONE
         iconContainer?.visibility = View.VISIBLE
         expanded = false
-        runCatching { windowManager.updateViewLayout(root ?: return, currentParams) }
+        runCatching { windowManager.updateViewLayout(root ?: return, current) }
+        // 从展开前悬浮球的位置出现，然后再吸到最近的侧边。
+        snapBallToSide(true)
+    }
+
+    /** 拖动结束后让悬浮球吸附到最近的左右侧边。 */
+    private fun snapBallToSide(animate: Boolean) {
+        val current = params ?: return
+        if (expanded) return
+        val width = dp(52)
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        val margin = dp(8)
+        val targetX = if (current.x + width / 2 < screenWidth / 2) {
+            margin
+        } else {
+            (screenWidth - width - margin).coerceAtLeast(margin)
+        }
+        val targetY = current.y.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
+        if (!animate || current.x == targetX) {
+            current.x = targetX
+            current.y = targetY
+            ballX = targetX
+            ballY = targetY
+            runCatching { windowManager.updateViewLayout(root ?: return, current) }
+            return
+        }
+        cancelSnap()
+        val animator = ValueAnimator.ofInt(current.x, targetX).setDuration(180)
+        animator.addUpdateListener {
+            current.x = it.animatedValue as Int
+            current.y = targetY
+            runCatching { windowManager.updateViewLayout(root ?: return@addUpdateListener, current) }
+        }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                current.x = targetX
+                current.y = targetY
+                ballX = targetX
+                ballY = targetY
+                snapAnimator = null
+                runCatching { windowManager.updateViewLayout(root ?: return, current) }
+            }
+        })
+        snapAnimator = animator
+        animator.start()
+    }
+
+    private fun cancelSnap() {
+        // removeAllListeners 防止 cancel() 触发 onAnimationEnd 把球瞬间拉到目标侧边。
+        snapAnimator?.apply {
+            removeAllListeners()
+            cancel()
+        }
+        snapAnimator = null
+    }
+
+    /** 旋转屏幕后把折叠图标或展开面板拉回可见区域。 */
+    fun refreshPosition() {
+        val current = root ?: return
+        val currentParams = params ?: return
+        cancelSnap()
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        if (expanded) {
+            val width = dp(246)
+            currentParams.width = width
+            currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+            currentParams.y = currentParams.y.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
+        } else {
+            currentParams.width = dp(52)
+            currentParams.x = ballX
+            currentParams.y = ballY
+            currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - dp(52) - dp(8)).coerceAtLeast(dp(8)))
+            currentParams.y = currentParams.y.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
+            ballX = currentParams.x
+            ballY = currentParams.y
+        }
+        runCatching { windowManager.updateViewLayout(current, currentParams) }
+        if (!expanded) snapBallToSide(false)
     }
 
     /** 图标：轻点是展开，按住拖动则移动窗口。 */
@@ -259,6 +348,7 @@ internal class WeakNetOverlay(
             val current = params ?: return@OnTouchListener false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    cancelSnap()
                     downX = event.rawX
                     downY = event.rawY
                     startX = current.x
@@ -275,7 +365,15 @@ internal class WeakNetOverlay(
                         runCatching { windowManager.updateViewLayout(root ?: return@OnTouchListener true, current) }
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!moved) onTap()
+                MotionEvent.ACTION_UP -> {
+                    if (moved) {
+                        ballX = current.x
+                        ballY = current.y
+                        snapBallToSide(true)
+                    } else {
+                        onTap()
+                    }
+                }
             }
             true
         }
