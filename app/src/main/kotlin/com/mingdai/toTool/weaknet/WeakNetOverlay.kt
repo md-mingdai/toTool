@@ -193,6 +193,19 @@ internal class WeakNetOverlay(
         pauseButton?.text = if (state.paused) "继续限制" else "暂停限制"
     }
 
+    /** 旋转屏幕后把折叠图标或展开面板拉回可见区域。 */
+    fun refreshPosition() {
+        val current = root ?: return
+        val currentParams = params ?: return
+        val width = if (expanded) dp(246) else dp(52)
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        currentParams.width = width
+        currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+        currentParams.y = currentParams.y.coerceIn(dp(8), (screenHeight - dp(72)).coerceAtLeast(dp(8)))
+        runCatching { windowManager.updateViewLayout(current, currentParams) }
+    }
+
     fun hide() {
         val current = root ?: return
         runCatching { windowManager.removeView(current) }

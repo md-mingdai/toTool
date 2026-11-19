@@ -70,6 +70,22 @@ internal class WeakNetProxyServer(
                     break
                 }
                 client.tcpNoDelay = true
+                if (connections.get() >= MAX_CONNECTIONS) {
+                    try {
+                        client.getOutputStream().write(
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                                .toByteArray(Charsets.ISO_8859_1),
+                        )
+                    } catch (e: Exception) {
+                        // 忽略
+                    }
+                    try {
+                        client.close()
+                    } catch (e: Exception) {
+                        // 忽略
+                    }
+                    continue
+                }
                 activeSockets.add(client)
                 connections.incrementAndGet()
                 val worker = thread(name = "weaknet-conn", isDaemon = true) {

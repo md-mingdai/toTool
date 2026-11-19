@@ -15,7 +15,7 @@ data class WeakNetConfig(
         hostFilter = hostFilter.trim().take(200),
         downloadKBps = downloadKBps.coerceIn(1, 102400),
         uploadKBps = uploadKBps.coerceIn(1, 102400),
-        latencyMs = latencyMs.coerceIn(0, 10_000),
+        latencyMs = latencyMs.coerceIn(0, 5_000),
         appLabel = appLabel?.take(80),
         packageName = packageName?.take(200),
     )
