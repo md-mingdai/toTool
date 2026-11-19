@@ -153,7 +153,8 @@ class WeakNetVpnService : VpnService() {
             if (config.packageName != null) {
                 builder.addAllowedApplication(config.packageName)
             } else {
-                builder.addDisallowedApplication(packageName)
+                val selfPackage = packageName
+                builder.addDisallowedApplication(selfPackage)
             }
             builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", port))
         } catch (e: Exception) {
