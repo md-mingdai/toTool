@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Percent
@@ -106,6 +107,7 @@ object ToolRegistry {
         // --- 设备工具 ---
         Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.DEVICE, Icons.Filled.Devices),
         Tool("dev_weaknet", "弱网助手", "用系统 VPN 代理限制应用或目标主机的带宽与延迟", ToolCategory.DEVICE, Icons.Filled.Speed),
+        Tool("dev_notif_hide", "隐藏系统通知", "选择通知打盹隐藏，可随时恢复", ToolCategory.DEVICE, Icons.Filled.NotificationsOff),
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
         Tool("dev_battery", "电池信息", "电量、状态与温度", ToolCategory.DEVICE, Icons.Filled.BatteryFull),
         Tool("dev_network", "网络信息", "连接类型与本地 IP", ToolCategory.DEVICE, Icons.Filled.Wifi),

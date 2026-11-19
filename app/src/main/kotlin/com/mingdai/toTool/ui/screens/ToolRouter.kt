@@ -51,6 +51,7 @@ import com.mingdai.toTool.ui.screens.tools.JsonTool
 import com.mingdai.toTool.ui.screens.tools.LoanTool
 import com.mingdai.toTool.ui.screens.tools.MetalDetectorTool
 import com.mingdai.toTool.ui.screens.tools.NetworkTool
+import com.mingdai.toTool.ui.screens.tools.NotificationHiderTool
 import com.mingdai.toTool.ui.screens.tools.PasswordTool
 import com.mingdai.toTool.ui.screens.tools.PercentTool
 import com.mingdai.toTool.ui.screens.tools.PixelCheckFullscreen
@@ -214,6 +215,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             // --- 设备工具 ---
             "dev_flashdrop" -> FlashDropTool(padding)
             "dev_weaknet" -> WeakNetTool(padding)
+            "dev_notif_hide" -> NotificationHiderTool(padding)
             "dev_device" -> DeviceInfoTool(padding)
             "dev_battery" -> BatteryTool(padding)
             "dev_network" -> NetworkTool(padding)
