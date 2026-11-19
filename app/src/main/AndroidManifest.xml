@@ -36,6 +36,12 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
 
+    <!-- 弱网助手：VPN 代理、前台服务、通知和悬浮窗。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -172,6 +178,20 @@
             <meta-data
                 android:name="android.service.wallpaper"
                 android:resource="@xml/video_wallpaper" />
+        </service>
+
+        <!-- 弱网助手：系统 VPN + 本地 HTTP 代理，前台服务期间保持运行。 -->
+        <service
+            android:name=".weaknet.WeakNetVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="weak_network_proxy" />
         </service>
 
         <!-- Shizuku：「执行 Shell 指令」工具靠它拿到 shell 权限。

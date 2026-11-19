@@ -68,6 +68,7 @@ import com.mingdai.toTool.ui.screens.tools.UrlTool
 import com.mingdai.toTool.ui.screens.tools.UuidTool
 import com.mingdai.toTool.ui.screens.tools.VibratorTool
 import com.mingdai.toTool.ui.screens.tools.VideoWallpaperTool
+import com.mingdai.toTool.ui.screens.tools.WeakNetTool
 import com.mingdai.toTool.ui.screens.tools.WallpaperExtractorTool
 import com.mingdai.toTool.ui.screens.tools.WhiteboardFullscreen
 import com.mingdai.toTool.ui.screens.tools.WhiteboardTool
@@ -212,6 +213,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "calc_plot" -> FunctionPlotTool(padding)
             // --- 设备工具 ---
             "dev_flashdrop" -> FlashDropTool(padding)
+            "dev_weaknet" -> WeakNetTool(padding)
             "dev_device" -> DeviceInfoTool(padding)
             "dev_battery" -> BatteryTool(padding)
             "dev_network" -> NetworkTool(padding)

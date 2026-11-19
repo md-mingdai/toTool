@@ -4,7 +4,7 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：47 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：48 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.2.0-blue)](https://github.com/md-mingdai/toTool/actions)
 
@@ -46,7 +46,7 @@
 | 日常工具 | 条码处理、颜色选择器、秒表、手电筒 / SOS、分贝仪、尺子、指南针、量角器、简易画板、时间屏幕、比赛记分牌 |
 | 文本工具 | 字符统计、大小写转换、密码生成、UUID、Base64、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
-| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
+| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。
@@ -60,6 +60,7 @@
 - FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译。
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 放进 APK。
 - 手机端内嵌 Ktor 服务器，提供静态页面和同源 API；文件通过「所有文件访问权限」读写，上传默认保存到 `Download/toTool/FlashDrop/`。
+- 弱网助手通过 VPN 把所选应用导向本地 HTTP 代理，按 KB/s 和附加延迟限速，并支持目标主机过滤与悬浮窗监控。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 
 ## 隐私与权限
