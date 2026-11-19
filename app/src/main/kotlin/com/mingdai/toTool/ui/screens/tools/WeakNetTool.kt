@@ -83,6 +83,7 @@ fun WeakNetTool(padding: PaddingValues) {
     var showOverlay by rememberSaveable { mutableStateOf(stored.showOverlay) }
     var showAppPicker by remember { mutableStateOf(false) }
     var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var pendingStart by remember { mutableStateOf(false) }
     var selectedPreset by rememberSaveable { mutableStateOf("") }
 
     val apps = remember { loadApps(context) }
@@ -126,20 +127,33 @@ fun WeakNetTool(padding: PaddingValues) {
     }
     val overlayLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         overlayGranted = Settings.canDrawOverlays(context)
-        if (overlayGranted && running) WeakNetVpnService.update(context)
+        if (overlayGranted && WeakNetManager.state.value.running) WeakNetVpnService.update(context)
     }
-    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    fun requestVpnConsent() {
+        val intent = VpnService.prepare(context)
+        if (intent != null) vpnLauncher.launch(intent) else startService()
+    }
+
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        if (pendingStart) {
+            pendingStart = false
+            requestVpnConsent()
+        }
+    }
 
     fun requestStart() {
         save()
+        pendingStart = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            pendingStart = false
+            requestVpnConsent()
         }
-        val intent = VpnService.prepare(context)
-        if (intent != null) vpnLauncher.launch(intent) else startService()
     }
 
     fun requestOverlay() {

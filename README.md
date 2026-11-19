@@ -76,6 +76,8 @@
 | `REQUEST_INSTALL_PACKAGES` | 安装 APKS / XAPK / APKM |
 | 媒体读取权限 | 格式转换读取用户选择的媒体 |
 | `MANAGE_EXTERNAL_STORAGE` | 读取真实壁纸；隔空闪传浏览 / 上传 / 下载手机文件 |
+| `SYSTEM_ALERT_WINDOW` | 弱网助手悬浮窗 |
+| `POST_NOTIFICATIONS` / 前台服务 | 弱网助手运行状态通知 |
 
 > 隔空闪传是局域网 HTTP 服务，配对码和接口请求不经过 TLS；请只在可信 Wi-Fi 下使用。
 

@@ -262,7 +262,7 @@ internal class WeakNetProxyServer(
         limiter: RateLimiter?,
         counter: AtomicLong,
     ) {
-        val buffer = ByteArray(16 * 1024)
+        val buffer = ByteArray(4 * 1024)
         try {
             while (running) {
                 val read = input.read(buffer)
