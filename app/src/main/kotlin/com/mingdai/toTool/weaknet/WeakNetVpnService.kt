@@ -50,13 +50,30 @@ class WeakNetVpnService : VpnService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val stateLock = Any()
+
+    @Volatile
     private var proxy: WeakNetProxyServer? = null
+
+    @Volatile
     private var dns: WeakNetDnsForwarder? = null
+
+    @Volatile
     private var tun: ParcelFileDescriptor? = null
+
     private var overlay: WeakNetOverlay? = null
+
+    @Volatile
     private var config = WeakNetConfig()
+
+    @Volatile
     private var paused = false
+
+    @Volatile
     private var running = false
+
+    @Volatile
+    private var starting = false
 
     private val statsTick = object : Runnable {
         private var lastRx = 0L
@@ -123,6 +140,7 @@ class WeakNetVpnService : VpnService() {
     }
 
     private fun startWeakNet() {
+        if (running || starting) return
         config = WeakNetStore.load(this)
         paused = false
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -130,63 +148,85 @@ class WeakNetVpnService : VpnService() {
             fail("弱网助手需要 Android 10 及以上系统")
             return
         }
-        val server = try {
-            WeakNetProxyServer(this, config)
-        } catch (e: Exception) {
-            fail("无法启动本地代理：${e.message ?: e.javaClass.simpleName}")
-            return
-        }
-        val port = try {
-            server.start()
-        } catch (e: Exception) {
-            fail("无法监听本地代理端口：${e.message ?: e.javaClass.simpleName}")
-            return
-        }
-        val builder = Builder()
-            .setSession("toTool 弱网助手")
-            .setMtu(1500)
-            .addAddress("10.66.0.2", 32)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("10.66.0.1")
-            .setBlocking(false)
-        try {
-            val targetPackage = config.packageName
-            if (targetPackage != null) {
-                builder.addAllowedApplication(targetPackage)
-            } else {
-                val selfPackage = packageName
-                builder.addDisallowedApplication(selfPackage)
+        starting = true
+        val startConfig = config
+        thread(name = "weaknet-start", isDaemon = true) {
+            var server: WeakNetProxyServer? = null
+            var descriptor: ParcelFileDescriptor? = null
+            try {
+                val startedServer = WeakNetProxyServer(this, startConfig)
+                server = startedServer
+                val port = startedServer.start()
+                val builder = Builder()
+                    .setSession("toTool 弱网助手")
+                    .setMtu(1500)
+                    .addAddress("10.66.0.2", 32)
+                    .addRoute("0.0.0.0", 0)
+                    .addDnsServer("10.66.0.1")
+                    .setBlocking(false)
+                val targetPackage = startConfig.packageName
+                if (targetPackage != null) {
+                    builder.addAllowedApplication(targetPackage)
+                } else {
+                    val selfPackage = packageName
+                    builder.addDisallowedApplication(selfPackage)
+                }
+                builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", port))
+                val established = builder.establish()
+                    ?: throw IllegalStateException("VPN 授权未完成，或系统拒绝了代理网络")
+                descriptor = established
+                synchronized(stateLock) {
+                    if (!starting) {
+                        try {
+                            startedServer.stop()
+                        } catch (e: Exception) {
+                            // 忽略
+                        }
+                        try {
+                            established.close()
+                        } catch (e: Exception) {
+                            // 忽略
+                        }
+                        return@thread
+                    }
+                    proxy = startedServer
+                    tun = established
+                    dns = WeakNetDnsForwarder(this, established).also { it.start() }
+                    running = true
+                    starting = false
+                }
+                handler.post {
+                    if (!running) return@post
+                    WeakNetManager.update {
+                        WeakNetState(
+                            running = true,
+                            paused = false,
+                            port = port,
+                            config = startConfig,
+                        )
+                    }
+                    if (startConfig.showOverlay) showOverlay()
+                    handler.post(statsTick)
+                }
+            } catch (e: Exception) {
+                try {
+                    server?.stop()
+                } catch (ignored: Exception) {
+                    // 忽略
+                }
+                try {
+                    descriptor?.close()
+                } catch (ignored: Exception) {
+                    // 忽略
+                }
+                val canceled = synchronized(stateLock) { !starting }
+                if (!canceled) {
+                    handler.post {
+                        if (starting) fail("无法启动弱网助手：${e.message ?: e.javaClass.simpleName}")
+                    }
+                }
             }
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", port))
-        } catch (e: Exception) {
-            server.stop()
-            fail("应用包名或系统代理不可用：${e.message ?: e.javaClass.simpleName}")
-            return
         }
-        val descriptor = try {
-            builder.establish()
-        } catch (e: Exception) {
-            null
-        }
-        if (descriptor == null) {
-            server.stop()
-            fail("VPN 授权未完成，或系统拒绝了代理网络")
-            return
-        }
-        tun = descriptor
-        proxy = server
-        dns = WeakNetDnsForwarder(this, descriptor).also { it.start() }
-        running = true
-        WeakNetManager.update {
-            WeakNetState(
-                running = true,
-                paused = false,
-                port = port,
-                config = config,
-            )
-        }
-        if (config.showOverlay) showOverlay()
-        handler.post(statsTick)
     }
 
     private fun togglePause() {
@@ -223,22 +263,24 @@ class WeakNetVpnService : VpnService() {
     }
 
     private fun stopEverything() {
-        if (!running && proxy == null && dns == null && tun == null) {
-            stopSelf()
-            return
+        var p: WeakNetProxyServer? = null
+        var d: WeakNetDnsForwarder? = null
+        var t: ParcelFileDescriptor? = null
+        synchronized(stateLock) {
+            if (!running && !starting && proxy == null && dns == null && tun == null) {
+                stopSelf()
+                return
+            }
+            running = false
+            starting = false
+            p = proxy
+            d = dns
+            t = tun
+            proxy = null
+            dns = null
+            tun = null
         }
-        running = false
         handler.removeCallbacks(statsTick)
-        proxy?.stop()
-        proxy = null
-        dns?.stop()
-        dns = null
-        try {
-            tun?.close()
-        } catch (e: Exception) {
-            // 忽略
-        }
-        tun = null
         hideOverlay(false)
         WeakNetManager.update {
             it.copy(
@@ -252,21 +294,41 @@ class WeakNetVpnService : VpnService() {
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        // 关闭 socket / TUN / DNS 线程可能涉及系统调用，放到后台，避免停止或转屏时卡住主线程。
+        thread(name = "weaknet-stop", isDaemon = true) {
+            try {
+                p?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                d?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                t?.close()
+            } catch (e: Exception) {
+                // 忽略
+            }
+        }
     }
 
     private fun fail(message: String) {
-        running = false
-        handler.removeCallbacks(statsTick)
-        proxy?.stop()
-        proxy = null
-        dns?.stop()
-        dns = null
-        try {
-            tun?.close()
-        } catch (e: Exception) {
-            // 忽略
+        var p: WeakNetProxyServer? = null
+        var d: WeakNetDnsForwarder? = null
+        var t: ParcelFileDescriptor? = null
+        synchronized(stateLock) {
+            running = false
+            starting = false
+            p = proxy
+            d = dns
+            t = tun
+            proxy = null
+            dns = null
+            tun = null
         }
-        tun = null
+        handler.removeCallbacks(statsTick)
         hideOverlay(false)
         WeakNetManager.update {
             it.copy(
@@ -279,21 +341,29 @@ class WeakNetVpnService : VpnService() {
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        thread(name = "weaknet-fail-cleanup", isDaemon = true) {
+            try {
+                p?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                d?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                t?.close()
+            } catch (e: Exception) {
+                // 忽略
+            }
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        overlay?.refreshPosition()
-    }
-
-    override fun onRevoke() {
-        stopEverything()
-        super.onRevoke()
-    }
-
-    override fun onDestroy() {
-        stopEverything()
-        super.onDestroy()
+        // WindowManager 的配置更新也在主线程排队，延后到当前转屏消息处理完再 reposition。
+        handler.postDelayed({ overlay?.refreshPosition() }, 120)
     }
 
     private fun createChannel() {
