@@ -82,6 +82,7 @@ fun WeakNetTool(padding: PaddingValues) {
     var latencyText by rememberSaveable { mutableStateOf(stored.latencyMs.toString()) }
     var showOverlay by rememberSaveable { mutableStateOf(stored.showOverlay) }
     var showAppPicker by remember { mutableStateOf(false) }
+    var showWarning by rememberSaveable { mutableStateOf(true) }
     var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var pendingStart by remember { mutableStateOf(false) }
     var selectedPreset by rememberSaveable { mutableStateOf("") }
@@ -394,6 +395,18 @@ fun WeakNetTool(padding: PaddingValues) {
         }
 
         HintText("弱网助手通过系统 VPN 的 HTTP 代理限速，适合浏览器和遵循系统代理的 HTTP/HTTPS 应用。不使用代理的 App 或非 HTTP 协议可能没有网络；这是代理级模拟，不是内核级流量整形。目标主机留空时会限制该应用的全部代理流量。")
+    }
+
+    if (showWarning) {
+        AppDialog(
+            show = true,
+            title = "使用警告",
+            summary = "弱网助手仅供个人学习与参考使用。请仅对自己所有或已获得明确授权的应用、设备和系统使用，不得用于绕过他人网络管理、干扰他人服务或未经授权的测试。",
+            confirmText = "我已了解",
+            dismissText = null,
+            onDismiss = {},
+            onConfirm = { showWarning = false },
+        )
     }
 
     if (showAppPicker) {
