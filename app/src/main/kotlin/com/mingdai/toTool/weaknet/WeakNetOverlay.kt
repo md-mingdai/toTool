@@ -4,18 +4,26 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** 独立于 Activity 的悬浮窗：显示状态、速率和连接数，并可暂停限速或停止服务。 */
+/**
+ * 独立于 Activity 的悬浮窗：默认只显示目标应用的 1:1 图标，拖动可移动，点击才展开；
+ * 展开后显示状态、速率和连接数，并可暂停限速或停止服务。
+ */
 internal class WeakNetOverlay(
     private val context: Context,
     private val onTogglePause: () -> Unit,
@@ -23,26 +31,65 @@ internal class WeakNetOverlay(
     private val onHide: () -> Unit,
 ) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    private var root: LinearLayout? = null
+    private val accent = Color.rgb(199, 244, 100)
+    private var root: FrameLayout? = null
     private var params: WindowManager.LayoutParams? = null
+    private var iconContainer: FrameLayout? = null
+    private var iconView: ImageView? = null
+    private var statusDot: View? = null
+    private var panel: LinearLayout? = null
     private var statusText: TextView? = null
     private var targetText: TextView? = null
     private var speedText: TextView? = null
     private var pauseButton: TextView? = null
+    private var expanded = false
+    private var lastState: WeakNetState? = null
 
     fun show() {
         if (root != null || !Settings.canDrawOverlays(context)) return
-        val accent = Color.rgb(199, 244, 100)
-        val layout = LinearLayout(context).apply {
+        val frame = FrameLayout(context)
+
+        val bubble = FrameLayout(context).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(15).toFloat()
+                setColor(Color.argb(247, 255, 255, 255))
+                setStroke(dp(1), Color.argb(90, 199, 244, 100))
+            }
+            contentDescription = "弱网助手，点击展开"
+            isClickable = true
+            setOnTouchListener(dragOrTap {
+                expand()
+            })
+        }
+        iconView = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+            setImageDrawable(currentAppIcon())
+        }
+        bubble.addView(iconView, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
+        statusDot = View(context).apply {
+            background = dot(Color.argb(215, 120, 130, 110))
+        }
+        bubble.addView(statusDot, FrameLayout.LayoutParams(dp(11), dp(11), Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = dp(4)
+            bottomMargin = dp(4)
+        })
+        frame.addView(bubble, FrameLayout.LayoutParams(dp(52), dp(52)))
+        iconContainer = bubble
+
+        val body = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(14), dp(10), dp(14), dp(12))
             background = GradientDrawable().apply {
                 cornerRadius = dp(16).toFloat()
-                setColor(Color.argb(238, 18, 23, 15))
-                setStroke(dp(1), Color.argb(70, 199, 244, 100))
+                setColor(Color.argb(240, 18, 23, 15))
+                setStroke(dp(1), Color.argb(80, 199, 244, 100))
             }
+            visibility = View.GONE
         }
-
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -53,23 +100,18 @@ internal class WeakNetOverlay(
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
         }
-        val close = TextView(context).apply {
-            text = "×"
-            setTextColor(Color.argb(190, 238, 242, 230))
-            textSize = 20f
-            gravity = Gravity.CENTER
-            setPadding(dp(8), 0, dp(4), dp(2))
-            isClickable = true
-            setOnClickListener { onHide() }
-        }
+        title.setOnTouchListener(dragOnly())
+        val collapse = smallButton("−") { collapse() }
+        val close = smallButton("×") { onHide() }
         header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(collapse)
         header.addView(close)
-        layout.addView(header)
+        body.addView(header)
 
         statusText = TextView(context).apply {
             setTextColor(Color.WHITE)
             textSize = 12f
-            setPadding(0, dp(4), 0, 0)
+            setPadding(0, dp(3), 0, 0)
         }
         targetText = TextView(context).apply {
             setTextColor(Color.argb(200, 238, 242, 230))
@@ -83,22 +125,24 @@ internal class WeakNetOverlay(
             setTypeface(Typeface.MONOSPACE)
             setPadding(0, dp(5), 0, 0)
         }
-        layout.addView(statusText)
-        layout.addView(targetText)
-        layout.addView(speedText)
+        body.addView(statusText)
+        body.addView(targetText)
+        body.addView(speedText)
 
         val controls = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(10), 0, 0)
+            setPadding(0, dp(9), 0, 0)
         }
         pauseButton = actionButton("暂停限制", accent) { onTogglePause() }
         val stop = actionButton("停止", Color.rgb(255, 152, 0)) { onStop() }
         controls.addView(pauseButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { marginEnd = dp(8) })
         controls.addView(stop, LinearLayout.LayoutParams(0, dp(34), 1f))
-        layout.addView(controls)
+        body.addView(controls)
+        frame.addView(body, FrameLayout.LayoutParams(dp(246), FrameLayout.LayoutParams.WRAP_CONTENT))
+        panel = body
 
         val lp = WindowManager.LayoutParams(
-            dp(246),
+            dp(52),
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -106,38 +150,14 @@ internal class WeakNetOverlay(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = context.resources.displayMetrics.widthPixels - dp(262)
+            x = (context.resources.displayMetrics.widthPixels - dp(68)).coerceAtLeast(dp(8))
             y = dp(130)
         }
-        val drag = object : View.OnTouchListener {
-            private var downX = 0f
-            private var downY = 0f
-            private var startX = 0
-            private var startY = 0
-            override fun onTouch(view: View, event: MotionEvent): Boolean {
-                val current = params ?: return false
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        downX = event.rawX
-                        downY = event.rawY
-                        startX = current.x
-                        startY = current.y
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        current.x = (startX + event.rawX - downX).roundToInt()
-                        current.y = (startY + event.rawY - downY).roundToInt()
-                        runCatching { windowManager.updateViewLayout(layout, current) }
-                    }
-                }
-                return false
-            }
-        }
-        header.setOnTouchListener(drag)
-        title.setOnTouchListener(drag)
         try {
-            windowManager.addView(layout, lp)
-            root = layout
+            windowManager.addView(frame, lp)
+            root = frame
             params = lp
+            expanded = false
         } catch (e: Exception) {
             // 权限被撤销或窗口服务拒绝
         }
@@ -145,13 +165,23 @@ internal class WeakNetOverlay(
 
     fun refresh(state: WeakNetState) {
         val current = root ?: return
-        val status = when {
+        lastState = state
+        val dotColor = when {
+            state.error != null -> Color.rgb(220, 80, 70)
+            state.paused -> Color.rgb(228, 163, 59)
+            state.running -> accent
+            else -> Color.argb(215, 120, 130, 110)
+        }
+        statusDot?.background = dot(dotColor)
+        iconContainer?.alpha = if (state.running) 1f else 0.7f
+        if (!expanded) return
+        current.alpha = 1f
+        statusText?.text = when {
             state.error != null -> "异常：${state.error}"
             state.paused -> "已暂停限速"
             state.running -> "运行中"
             else -> "已停止"
         }
-        statusText?.text = status
         targetText?.text = state.config.targetLabel
         speedText?.text = String.format(
             Locale.US,
@@ -161,11 +191,6 @@ internal class WeakNetOverlay(
             state.connections,
         )
         pauseButton?.text = if (state.paused) "继续限制" else "暂停限制"
-        if (!state.running && state.error == null) {
-            current.alpha = 0.72f
-        } else {
-            current.alpha = 1f
-        }
     }
 
     fun hide() {
@@ -173,11 +198,114 @@ internal class WeakNetOverlay(
         runCatching { windowManager.removeView(current) }
         root = null
         params = null
+        iconContainer = null
+        iconView = null
+        statusDot = null
+        panel = null
         statusText = null
         targetText = null
         speedText = null
         pauseButton = null
+        expanded = false
+        lastState = null
     }
+
+    private fun expand() {
+        if (expanded) return
+        val currentParams = params ?: return
+        val width = dp(246)
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        currentParams.width = width
+        currentParams.x = currentParams.x.coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+        iconContainer?.visibility = View.GONE
+        panel?.visibility = View.VISIBLE
+        expanded = true
+        runCatching { windowManager.updateViewLayout(root ?: return, currentParams) }
+        lastState?.let { refresh(it) }
+    }
+
+    private fun collapse() {
+        if (!expanded) return
+        val currentParams = params ?: return
+        currentParams.width = dp(52)
+        panel?.visibility = View.GONE
+        iconContainer?.visibility = View.VISIBLE
+        expanded = false
+        runCatching { windowManager.updateViewLayout(root ?: return, currentParams) }
+    }
+
+    /** 图标：轻点是展开，按住拖动则移动窗口。 */
+    private fun dragOrTap(onTap: () -> Unit): View.OnTouchListener {
+        val slop = ViewConfiguration.get(context).scaledTouchSlop
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+        var moved = false
+        return View.OnTouchListener { _, event ->
+            val current = params ?: return@OnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    startX = current.x
+                    startY = current.y
+                    moved = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downX
+                    val dy = event.rawY - downY
+                    if (abs(dx) > slop || abs(dy) > slop) moved = true
+                    if (moved) {
+                        current.x = startX + dx.roundToInt()
+                        current.y = startY + dy.roundToInt()
+                        runCatching { windowManager.updateViewLayout(root ?: return@OnTouchListener true, current) }
+                    }
+                }
+                MotionEvent.ACTION_UP -> if (!moved) onTap()
+            }
+            true
+        }
+    }
+
+    /** 展开后的标题栏拖动。 */
+    private fun dragOnly(): View.OnTouchListener {
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+        return View.OnTouchListener { _, event ->
+            val current = params ?: return@OnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    startX = current.x
+                    startY = current.y
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    current.x = startX + (event.rawX - downX).roundToInt()
+                    current.y = startY + (event.rawY - downY).roundToInt()
+                    runCatching { windowManager.updateViewLayout(root ?: return@OnTouchListener true, current) }
+                }
+            }
+            true
+        }
+    }
+
+    private fun currentAppIcon(): Drawable? =
+        runCatching { context.applicationInfo.loadIcon(context.packageManager) }.getOrNull()
+
+    private fun smallButton(label: String, onClick: () -> Unit): TextView =
+        TextView(context).apply {
+            text = label
+            setTextColor(Color.argb(190, 238, 242, 230))
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(4), dp(2))
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
 
     private fun actionButton(label: String, color: Int, onClick: () -> Unit): TextView =
         TextView(context).apply {
@@ -193,6 +321,12 @@ internal class WeakNetOverlay(
             isClickable = true
             setOnClickListener { onClick() }
         }
+
+    private fun dot(color: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(color)
+        setStroke(dp(1), Color.argb(90, 18, 23, 15))
+    }
 
     private fun speedText(bytesPerSecond: Long): String = when {
         bytesPerSecond >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bytesPerSecond / 1048576.0)

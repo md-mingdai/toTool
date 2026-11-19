@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,8 @@ import com.mingdai.toTool.weaknet.WeakNetManager
 import com.mingdai.toTool.weaknet.WeakNetStore
 import com.mingdai.toTool.weaknet.WeakNetVpnService
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
@@ -87,7 +90,13 @@ fun WeakNetTool(padding: PaddingValues) {
     var pendingStart by remember { mutableStateOf(false) }
     var selectedPreset by rememberSaveable { mutableStateOf("") }
 
-    val apps = remember { loadApps(context) }
+    var apps by remember { mutableStateOf<List<AppChoice>>(emptyList()) }
+    var appsLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.IO) { loadApps(context) }
+        appsLoading = false
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -412,6 +421,7 @@ fun WeakNetTool(padding: PaddingValues) {
     if (showAppPicker) {
         AppPickerDialog(
             apps = apps,
+            loading = appsLoading,
             onDismiss = { showAppPicker = false },
             onSelect = { app ->
                 packageName = app.packageName
@@ -437,6 +447,7 @@ private fun SpeedValue(label: String, value: Long, color: Color) {
 @Composable
 private fun AppPickerDialog(
     apps: List<AppChoice>,
+    loading: Boolean,
     onDismiss: () -> Unit,
     onSelect: (AppChoice) -> Unit,
 ) {
@@ -461,6 +472,14 @@ private fun AppPickerDialog(
             label = "搜索应用或包名",
             modifier = Modifier.fillMaxWidth(),
         )
+        if (loading) {
+            Text(
+                "正在读取应用列表…",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 14.dp),
+            )
+        }
         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 8.dp)) {
             items(filtered, key = { it.packageName }) { app ->
                 Column(
