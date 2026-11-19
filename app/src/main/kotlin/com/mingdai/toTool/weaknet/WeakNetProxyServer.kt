@@ -19,6 +19,7 @@ import kotlin.concurrent.thread
 import kotlin.math.max
 
 private const val MAX_CONNECTIONS = 64
+private const val MAX_BURST_BYTES = 64 * 1024
 
 /**
  * 本地 HTTP/HTTPS 代理。VPN 只负责把目标应用导向系统 HTTP 代理，
@@ -256,6 +257,8 @@ internal class WeakNetProxyServer(
                 rxBytes,
             )
         }
+        connectionThreads.add(upload)
+        connectionThreads.add(download)
         upload.join(120_000)
         download.join(120_000)
         if (upload.isAlive) {
@@ -272,6 +275,8 @@ internal class WeakNetProxyServer(
                 // 忽略
             }
         }
+        connectionThreads.remove(upload)
+        connectionThreads.remove(download)
     }
 
     private fun pipe(
@@ -426,6 +431,8 @@ internal class RateLimiter {
         val elapsed = (now - lastNs) / 1_000_000_000.0
         lastNs = now
         if (bytesPerSecond <= 0) return
-        tokens = (tokens + elapsed * bytesPerSecond).coerceAtMost(bytesPerSecond)
+        // 桶容量至少覆盖一次 64KB 读取；否则 1KB/s 等低速档永远攒不够一块，连接会永久等待。
+        val capacity = maxOf(bytesPerSecond, MAX_BURST_BYTES.toDouble())
+        tokens = (tokens + elapsed * bytesPerSecond).coerceAtMost(capacity)
     }
 }
