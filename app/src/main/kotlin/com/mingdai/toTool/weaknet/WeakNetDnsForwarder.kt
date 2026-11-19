@@ -67,7 +67,7 @@ internal class WeakNetDnsForwarder(
         } catch (e: Exception) {
             // 忽略
         }
-        worker?.join(800)
+        worker?.join(200)
         worker = null
     }
 

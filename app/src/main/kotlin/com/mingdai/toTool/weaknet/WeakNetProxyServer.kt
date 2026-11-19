@@ -138,7 +138,7 @@ internal class WeakNetProxyServer(
             }
         }
         activeSockets.clear()
-        acceptThread?.join(500)
+        acceptThread?.join(200)
         acceptThread = null
         connectionThreads.toList().forEach { it.interrupt() }
         connectionThreads.clear()
@@ -387,28 +387,32 @@ internal class WeakNetProxyServer(
 
 /** 共享令牌桶；每 1 KB/s 对应 1024 字节/秒。0 表示不限速。 */
 internal class RateLimiter {
+    private val lock = Any()
     private var bytesPerSecond = 0.0
     private var tokens = 0.0
     private var lastNs = System.nanoTime()
 
-    @Synchronized
     fun setRate(kilobytesPerSecond: Int) {
-        bytesPerSecond = max(0, kilobytesPerSecond) * 1024.0
-        if (bytesPerSecond <= 0) tokens = 0.0
-        refill()
+        synchronized(lock) {
+            bytesPerSecond = max(0, kilobytesPerSecond) * 1024.0
+            if (bytesPerSecond <= 0) tokens = 0.0
+            refillLocked()
+        }
     }
 
-    @Synchronized
     fun acquire(bytes: Int) {
-        if (bytesPerSecond <= 0) return
         while (true) {
-            refill()
-            if (tokens >= bytes) {
-                tokens -= bytes
-                return
+            val waitMs = synchronized(lock) {
+                if (bytesPerSecond <= 0) return
+                refillLocked()
+                if (tokens >= bytes) {
+                    tokens -= bytes
+                    return
+                }
+                ((bytes - tokens) / bytesPerSecond * 1000.0).toLong().coerceIn(1, 200)
             }
-            val waitMs = ((bytes - tokens) / bytesPerSecond * 1000.0).toLong().coerceIn(1, 200)
             try {
+                // 睡眠时不持有锁，暂停/停止或更新限速不会被等待中的连接卡住。
                 Thread.sleep(waitMs)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -417,7 +421,7 @@ internal class RateLimiter {
         }
     }
 
-    private fun refill() {
+    private fun refillLocked() {
         val now = System.nanoTime()
         val elapsed = (now - lastNs) / 1_000_000_000.0
         lastNs = now
