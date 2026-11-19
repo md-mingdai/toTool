@@ -142,7 +142,7 @@ class WeakNetVpnService : VpnService() {
             fail("无法监听本地代理端口：${e.message ?: e.javaClass.simpleName}")
             return
         }
-        val builder = VpnService.Builder()
+        val builder = Builder()
             .setSession("toTool 弱网助手")
             .setMtu(1500)
             .addAddress("10.66.0.2", 32)
