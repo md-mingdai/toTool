@@ -1,8 +1,6 @@
 package com.mingdai.toTool.ui.screens.tools
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -65,6 +63,8 @@ import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.WarnColor
 import com.mingdai.toTool.ui.components.copyText
+import com.mingdai.toTool.shizuku.ShizukuAccess
+import com.mingdai.toTool.shizuku.ShizukuState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -86,8 +86,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 执行 Shell 指令：向 Shizuku 申请授权，然后执行单条命令或导入的 .sh 脚本，把输出实时打印成日志。
  * 后台部分（状态检查、远程进程、日志缓冲）在 ShizukuShell.kt。
  */
-
-private const val SHIZUKU_RELEASES_URL = "https://github.com/RikkaApps/Shizuku/releases"
 
 /** 日志窗口的最大高度；输出更多时在窗口里滚动。 */
 private val LogMaxHeight = 420.dp
@@ -116,15 +114,15 @@ fun ShellTool(padding: PaddingValues) {
 
     /* ───────── Shizuku 状态 ───────── */
 
-    var state by remember { mutableStateOf(shizukuState(context)) }
+    var state by remember { mutableStateOf(ShizukuAccess.state(context)) }
     var identity by remember { mutableStateOf<String?>(null) }
     // 刚进页面时 Binder 可能还在路上：先显示“正在连接”，过一会儿还没来才当作“没有运行”
     var settled by remember { mutableStateOf(false) }
 
     fun refresh() {
-        val now = shizukuState(context)
+        val now = ShizukuAccess.state(context)
         state = now
-        identity = if (now == ShizukuState.READY) shizukuIdentity() else null
+        identity = if (now == ShizukuState.READY) ShizukuAccess.identity() else null
     }
 
     LaunchedEffect(Unit) {
@@ -304,9 +302,21 @@ fun ShellTool(padding: PaddingValues) {
             state = state,
             connecting = !settled && state == ShizukuState.NOT_RUNNING,
             identity = identity,
-            onRequest = { requestShizukuPermission(context) },
-            onOpenShizuku = { openShizukuApp(context) },
-            onDownload = { openWebPage(context, SHIZUKU_RELEASES_URL) },
+            onRequest = {
+                ShizukuAccess.requestPermission()?.let {
+                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                }
+            },
+            onOpenShizuku = {
+                if (!ShizukuAccess.openShizuku(context)) {
+                    Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDownload = {
+                if (!ShizukuAccess.openDownload(context)) {
+                    Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
+                }
+            },
             onRecheck = { refresh() },
         )
 
@@ -724,38 +734,3 @@ private fun scriptPreview(script: ShellScript): String {
 
 private fun shellFormatBytes(bytes: Int): String =
     if (bytes < 1024) "$bytes 字节" else String.format(Locale.US, "%.1f KB", bytes / 1024.0)
-
-private fun requestShizukuPermission(context: Context) {
-    try {
-        if (!Shizuku.pingBinder()) {
-            Toast.makeText(context, "Shizuku 还没有运行", Toast.LENGTH_SHORT).show()
-        } else if (Shizuku.isPreV11()) {
-            Toast.makeText(context, "Shizuku 版本太旧，请先更新", Toast.LENGTH_SHORT).show()
-        } else {
-            Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
-        }
-    } catch (e: Throwable) {
-        Toast.makeText(context, "无法发起授权请求：${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-    }
-}
-
-private fun openShizukuApp(context: Context) {
-    val launch = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
-    if (launch == null) {
-        Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
-        return
-    }
-    try {
-        context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (e: Exception) {
-        Toast.makeText(context, "无法打开 Shizuku", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private fun openWebPage(context: Context, url: String) {
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (e: Exception) {
-        Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
-    }
-}

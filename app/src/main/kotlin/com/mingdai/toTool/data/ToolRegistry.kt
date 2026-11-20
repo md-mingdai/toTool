@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.RoundedCorner
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Straighten
@@ -108,6 +109,7 @@ object ToolRegistry {
         Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.DEVICE, Icons.Filled.Devices),
         Tool("dev_weaknet", "弱网助手", "用系统 VPN 代理限制应用或目标主机的带宽与延迟", ToolCategory.DEVICE, Icons.Filled.Speed),
         Tool("dev_notif_hide", "隐藏系统通知", "选择通知打盹隐藏，可随时恢复", ToolCategory.DEVICE, Icons.Filled.NotificationsOff),
+        Tool("dev_gacha", "米游记录获取", "通过 Shizuku 从系统日志提取米游抽卡记录链接", ToolCategory.DEVICE, Icons.Filled.SportsEsports),
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
         Tool("dev_battery", "电池信息", "电量、状态与温度", ToolCategory.DEVICE, Icons.Filled.BatteryFull),
         Tool("dev_network", "网络信息", "连接类型与本地 IP", ToolCategory.DEVICE, Icons.Filled.Wifi),

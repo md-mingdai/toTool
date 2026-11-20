@@ -1,7 +1,6 @@
 package com.mingdai.toTool.ui.screens.tools
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
@@ -21,12 +20,6 @@ import rikka.shizuku.Shizuku
  * 用无线调试 / adb 启动的是 shell（uid 2000），用 root 启动的是 root（uid 0）。
  */
 
-/** Shizuku 管理器的包名。 */
-internal const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-
-/** 申请授权时用的请求码，回调里靠它认出是自己发的请求。 */
-internal const val SHIZUKU_REQUEST_CODE = 7001
-
 /** 脚本文件的大小上限。整份脚本是作为 `sh -c` 的一个参数传过去的，单个参数不能超过约 128 KB。 */
 internal const val SHELL_SCRIPT_MAX_BYTES = 100 * 1024
 
@@ -35,68 +28,6 @@ private const val SHELL_LOG_MAX_LINES = 20000
 
 /** 单行最多保留的字符数。没有换行的超长输出（比如二进制）会按这个长度硬折行，免得撑爆内存。 */
 private const val SHELL_LINE_MAX_CHARS = 4000
-
-/* ───────────────────────── Shizuku 状态 ───────────────────────── */
-
-/** Shizuku 现在能为我们做什么。 */
-internal enum class ShizukuState {
-    /** 没有安装 Shizuku，也没有 Sui。 */
-    NOT_INSTALLED,
-
-    /** 装了，但服务没有启动。 */
-    NOT_RUNNING,
-
-    /** 服务版本太旧（v11 之前），不支持授权流程。 */
-    UNSUPPORTED,
-
-    /** 服务在运行，本应用还没被授权。 */
-    NEEDS_PERMISSION,
-
-    /** 用户选过「拒绝且不再询问」，只能去 Shizuku 里手动打开。 */
-    DENIED,
-
-    /** 已授权，可以执行命令。 */
-    READY,
-}
-
-internal fun isShizukuInstalled(context: Context): Boolean =
-    try {
-        context.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
-        true
-    } catch (e: Exception) {
-        false
-    }
-
-/** 读取当前状态。Shizuku 的接口只能在 Binder 活着的时候调用，所以先 ping。 */
-internal fun shizukuState(context: Context): ShizukuState =
-    try {
-        if (!Shizuku.pingBinder()) {
-            if (isShizukuInstalled(context)) ShizukuState.NOT_RUNNING else ShizukuState.NOT_INSTALLED
-        } else if (Shizuku.isPreV11()) {
-            ShizukuState.UNSUPPORTED
-        } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-            ShizukuState.READY
-        } else if (Shizuku.shouldShowRequestPermissionRationale()) {
-            ShizukuState.DENIED
-        } else {
-            ShizukuState.NEEDS_PERMISSION
-        }
-    } catch (e: Throwable) {
-        // 服务恰好在这一刻停掉之类的极端情况：当作没有运行
-        ShizukuState.NOT_RUNNING
-    }
-
-/** Shizuku 服务以什么身份运行：adb 启动是 shell（2000），root 启动是 root（0）。 */
-internal fun shizukuIdentity(): String? =
-    try {
-        when (val uid = Shizuku.getUid()) {
-            0 -> "root（uid 0）"
-            2000 -> "shell（uid 2000）"
-            else -> "uid $uid"
-        }
-    } catch (e: Throwable) {
-        null
-    }
 
 /* ───────────────────────── 日志 ───────────────────────── */
 

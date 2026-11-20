@@ -40,6 +40,7 @@ import com.mingdai.toTool.ui.screens.tools.EquationSolverTool
 import com.mingdai.toTool.ui.screens.tools.FlashDropTool
 import com.mingdai.toTool.ui.screens.tools.FlashlightTool
 import com.mingdai.toTool.ui.screens.tools.FunctionPlotTool
+import com.mingdai.toTool.ui.screens.tools.GachaLinkTool
 import com.mingdai.toTool.ui.screens.tools.HashTool
 import com.mingdai.toTool.ui.screens.tools.ImageBlurTool
 import com.mingdai.toTool.ui.screens.tools.ImageCompressTool
@@ -216,6 +217,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_flashdrop" -> FlashDropTool(padding)
             "dev_weaknet" -> WeakNetTool(padding)
             "dev_notif_hide" -> NotificationHiderTool(padding)
+            "dev_gacha" -> GachaLinkTool(padding)
             "dev_device" -> DeviceInfoTool(padding)
             "dev_battery" -> BatteryTool(padding)
             "dev_network" -> NetworkTool(padding)
