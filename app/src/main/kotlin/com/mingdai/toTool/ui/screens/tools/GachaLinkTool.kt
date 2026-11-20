@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,7 +36,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mingdai.toTool.gacha.GachaLinkBridge
+import com.mingdai.toTool.gacha.GachaLinkResult
 import com.mingdai.toTool.gacha.GachaLinkService
+import com.mingdai.toTool.gacha.GachaRecentReader
 import com.mingdai.toTool.shizuku.ShizukuAccess
 import com.mingdai.toTool.shizuku.ShizukuState
 import com.mingdai.toTool.ui.components.HintText
@@ -45,7 +48,11 @@ import com.mingdai.toTool.ui.components.SectionLabel
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.WarnColor
 import com.mingdai.toTool.ui.components.copyText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
@@ -65,6 +72,11 @@ fun GachaLinkTool(padding: PaddingValues) {
     var identity by remember { mutableStateOf<String?>(null) }
     var settled by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var quickBusy by remember { mutableStateOf(false) }
+    var quickResult by remember { mutableStateOf<GachaLinkResult?>(null) }
+    var quickError by remember { mutableStateOf<String?>(null) }
+    var quickRun by remember { mutableStateOf<ShellRun?>(null) }
 
     fun refreshShizuku() {
         val now = ShizukuAccess.state(context)
@@ -107,8 +119,31 @@ fun GachaLinkTool(padding: PaddingValues) {
         }
     }
 
+    fun fetchRecent() {
+        if (quickBusy || watch.running || state != ShizukuState.READY) return
+        quickBusy = true
+        quickError = null
+        quickResult = null
+        val run = ShellRun()
+        quickRun = run
+        scope.launch {
+            try {
+                quickResult = withContext(Dispatchers.IO) { GachaRecentReader.read(run) }
+            } catch (caught: CancellationException) {
+                throw caught
+            } catch (caught: Throwable) {
+                quickError = caught.message?.takeIf { it.isNotBlank() } ?: "没有找到抽卡记录链接"
+            } finally {
+                quickRun = null
+                quickBusy = false
+            }
+        }
+    }
+
     fun requestStart() {
-        if (watch.running || state != ShizukuState.READY) return
+        if (watch.running || quickBusy || state != ShizukuState.READY) return
+        quickResult = null
+        quickError = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -201,6 +236,22 @@ fun GachaLinkTool(padding: PaddingValues) {
             }
         }
 
+        PrimaryButton(
+            onClick = { fetchRecent() },
+            enabled = state == ShizukuState.READY && !quickBusy && !watch.running,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (quickBusy) "正在读取最近日志…" else "立即读取最近日志（推荐）")
+        }
+        if (quickBusy) {
+            SecondaryButton(
+                onClick = { quickRun?.stop() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("停止读取")
+            }
+        }
+
         if (watch.running) {
             SecondaryButton(
                 onClick = { GachaLinkService.stop(context) },
@@ -209,12 +260,12 @@ fun GachaLinkTool(padding: PaddingValues) {
                 Text("停止后台获取")
             }
         } else {
-            PrimaryButton(
+            SecondaryButton(
                 onClick = { requestStart() },
-                enabled = state == ShizukuState.READY,
+                enabled = state == ShizukuState.READY && !quickBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("开始后台获取")
+                Text("后台等待链接（通知栏显示状态）")
             }
         }
 
@@ -234,7 +285,7 @@ fun GachaLinkTool(padding: PaddingValues) {
             }
         }
 
-        watch.error?.let { message ->
+        (quickError ?: watch.error)?.let { message ->
             Text(
                 message,
                 color = WarnColor,
@@ -243,15 +294,18 @@ fun GachaLinkTool(padding: PaddingValues) {
             )
         }
 
-        if (watch.link != null) {
-            val url = watch.link ?: ""
+        val result = quickResult
+        val resultUrl = result?.url ?: watch.link
+        val resultGame = result?.game ?: watch.game
+        if (resultUrl != null) {
+            val url = resultUrl
             SectionLabel("获取结果")
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(watch.game ?: "米游", style = MiuixTheme.textStyles.headline2)
+                    Text(resultGame ?: "米游", style = MiuixTheme.textStyles.headline2)
                     Text(
                         url,
                         style = MiuixTheme.textStyles.footnote1.copy(

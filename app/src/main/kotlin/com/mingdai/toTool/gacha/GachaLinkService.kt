@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.MainActivity
@@ -52,6 +53,8 @@ class GachaLinkService : Service() {
 
     @Volatile
     private var stopping = false
+
+    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
