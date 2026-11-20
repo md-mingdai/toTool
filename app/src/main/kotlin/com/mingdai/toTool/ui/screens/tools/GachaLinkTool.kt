@@ -163,7 +163,7 @@ fun GachaLinkTool(padding: PaddingValues) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "推荐先点「立即读取最近日志」：在原神、崩坏：星穹铁道或绝区零中打开「抽卡/跃迁记录」，等页面加载后回到 toTool 读取。需要边玩游戏边等待时，可用「后台等待链接」，通知栏会显示状态。",
+                    "推荐使用「后台等待链接」：先启动后台监听，再切到原神、崩坏：星穹铁道或绝区零打开「抽卡/跃迁记录」。链接一出现在日志里就会被立即抓取，不用赶在日志被淹没前回到 toTool。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -236,12 +236,29 @@ fun GachaLinkTool(padding: PaddingValues) {
             }
         }
 
-        PrimaryButton(
+        if (watch.running) {
+            PrimaryButton(
+                onClick = { GachaLinkService.stop(context) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("停止后台等待")
+            }
+        } else {
+            PrimaryButton(
+                onClick = { requestStart() },
+                enabled = state == ShizukuState.READY && !quickBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("开始后台等待（推荐）")
+            }
+        }
+
+        SecondaryButton(
             onClick = { fetchRecent() },
             enabled = state == ShizukuState.READY && !quickBusy && !watch.running,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (quickBusy) "正在读取最近日志…" else "立即读取最近日志（推荐）")
+            Text(if (quickBusy) "正在读取最近日志…" else "立即读取最近日志")
         }
         if (quickBusy) {
             SecondaryButton(
@@ -249,23 +266,6 @@ fun GachaLinkTool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("停止读取")
-            }
-        }
-
-        if (watch.running) {
-            SecondaryButton(
-                onClick = { GachaLinkService.stop(context) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("停止后台获取")
-            }
-        } else {
-            SecondaryButton(
-                onClick = { requestStart() },
-                enabled = state == ShizukuState.READY && !quickBusy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("后台等待链接（通知栏显示状态）")
             }
         }
 
