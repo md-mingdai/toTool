@@ -26,7 +26,7 @@ class WeakNetVpnService : VpnService() {
         const val ACTION_START = "com.mingdai.toTool.weaknet.START"
         const val ACTION_STOP = "com.mingdai.toTool.weaknet.STOP"
         const val ACTION_UPDATE = "com.mingdai.toTool.weaknet.UPDATE"
-        const val ACTION_TOGGLE_PAUSE = "com.mingdai.toTool.weaknet.TOGGLE_PAUSE"
+        const val ACTION_PAUSE = "com.mingdai.toTool.weaknet.PAUSE"
         private const val CHANNEL_ID = "weaknet"
         private const val NOTIFICATION_ID = 4201
 
@@ -45,8 +45,8 @@ class WeakNetVpnService : VpnService() {
             context.startService(Intent(context, WeakNetVpnService::class.java).setAction(ACTION_UPDATE))
         }
 
-        fun togglePause(context: Context) {
-            context.startService(Intent(context, WeakNetVpnService::class.java).setAction(ACTION_TOGGLE_PAUSE))
+        fun pause(context: Context) {
+            context.startService(Intent(context, WeakNetVpnService::class.java).setAction(ACTION_PAUSE))
         }
     }
 
@@ -130,9 +130,9 @@ class WeakNetVpnService : VpnService() {
                 }
                 return START_STICKY
             }
-            ACTION_TOGGLE_PAUSE -> {
-                if (running) togglePause()
-                return START_STICKY
+            ACTION_PAUSE -> {
+                if (running || starting) stopEverything(keepPaused = true)
+                return START_NOT_STICKY
             }
             ACTION_START -> if (!running) startWeakNet()
             else -> if (!running) startWeakNet()
@@ -230,21 +230,12 @@ class WeakNetVpnService : VpnService() {
         }
     }
 
-    private fun togglePause() {
-        paused = !paused
-        proxy?.setPaused(paused)
-        WeakNetManager.update { it.copy(paused = paused) }
-        overlay?.refresh(WeakNetManager.state.value)
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(NOTIFICATION_ID, buildNotification())
-    }
-
     private fun showOverlay() {
         if (!Settings.canDrawOverlays(this)) return
         if (overlay == null) {
             overlay = WeakNetOverlay(
                 this,
-                onTogglePause = { togglePause() },
+                onTogglePause = { stopEverything(keepPaused = true) },
                 onStop = { stopEverything() },
             )
         }
@@ -257,7 +248,7 @@ class WeakNetVpnService : VpnService() {
         overlay = null
     }
 
-    private fun stopEverything() {
+    private fun stopEverything(keepPaused: Boolean = false) {
         var p: WeakNetProxyServer? = null
         var d: WeakNetDnsForwarder? = null
         var t: ParcelFileDescriptor? = null
@@ -280,7 +271,7 @@ class WeakNetVpnService : VpnService() {
         WeakNetManager.update {
             it.copy(
                 running = false,
-                paused = false,
+                paused = keepPaused,
                 port = null,
                 rxSpeed = 0,
                 txSpeed = 0,

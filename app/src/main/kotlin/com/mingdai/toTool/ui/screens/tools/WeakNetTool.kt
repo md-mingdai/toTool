@@ -244,10 +244,10 @@ fun WeakNetTool(padding: PaddingValues) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         SecondaryButton(
-                            onClick = { WeakNetVpnService.togglePause(context) },
+                            onClick = { WeakNetVpnService.pause(context) },
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(if (state.paused) "继续限制" else "暂停限制", maxLines = 1)
+                            Text("暂停限制", maxLines = 1)
                         }
                         SecondaryButton(
                             onClick = { WeakNetVpnService.stop(context) },
@@ -258,10 +258,13 @@ fun WeakNetTool(padding: PaddingValues) {
                     }
                 } else {
                     Text(
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                            "弱网助手需要 Android 10 及以上系统"
-                        } else {
-                            "配置目标应用或主机后启动，VPN 会保持运行并可通过悬浮窗控制。"
+                        when {
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ->
+                                "弱网助手需要 Android 10 及以上系统"
+                            state.paused ->
+                                "已暂停限制，VPN 已关闭。点下方「继续限制」重新开启。"
+                            else ->
+                                "配置目标应用或主机后启动，VPN 会保持运行并可通过悬浮窗控制。"
                         },
                         style = MiuixTheme.textStyles.footnote1,
                         color = colors.onSurfaceVariantSummary,
@@ -399,7 +402,7 @@ fun WeakNetTool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxWidth(),
                 enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
             ) {
-                Text("启动弱网助手")
+                Text(if (state.paused) "继续限制" else "启动弱网助手")
             }
         }
 
