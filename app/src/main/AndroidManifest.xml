@@ -180,6 +180,16 @@
                 android:resource="@xml/video_wallpaper" />
         </service>
 
+        <!-- 米游记录获取：前台监听 logcat，等待游戏输出抽卡记录链接。 -->
+        <service
+            android:name=".gacha.GachaLinkService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="gacha_link_watcher" />
+        </service>
+
         <!-- 隐藏系统通知：通过通知使用权把选中的通知 snooze 数年，可本地恢复。 -->
         <service
             android:name=".notification.NotificationHiderService"
