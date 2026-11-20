@@ -163,7 +163,7 @@ fun GachaLinkTool(padding: PaddingValues) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "点下方「开始后台获取」，然后切换到原神、崩坏：星穹铁道或绝区零，打开「抽卡/跃迁记录」。后台会先读取最近日志，并持续等待新的记录链接。",
+                    "推荐先点「立即读取最近日志」：在原神、崩坏：星穹铁道或绝区零中打开「抽卡/跃迁记录」，等页面加载后回到 toTool 读取。需要边玩游戏边等待时，可用「后台等待链接」，通知栏会显示状态。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
