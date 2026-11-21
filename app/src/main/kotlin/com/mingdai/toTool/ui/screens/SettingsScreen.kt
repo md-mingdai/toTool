@@ -241,7 +241,7 @@ fun SettingsScreen(navController: NavHostController) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        "执行 Shell、米游记录获取等高级工具时使用的权限来源。",
+                        "选择执行高级操作时使用的权限来源。",
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
