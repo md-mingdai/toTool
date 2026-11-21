@@ -7,6 +7,7 @@ internal fun buildFfmpegAttempts(
     inputPath: String,
     coverPath: String?,
     sourceDurationMs: Long,
+    musicPath: String? = null,
 ): List<List<String>> {
     val encoders = capabilities.encoders
     return when (plan.branch) {
@@ -15,22 +16,39 @@ internal fun buildFfmpegAttempts(
                 ?: throw ConvertException("不支持的目标视频格式：${plan.target.id}")
             val video = firstAvailable(spec.videoEncoders, encoders)
                 ?: throw ConvertException("没有可用的 ${plan.target.id} 视频编码器")
-            val seconds = plan.durationSeconds
-                ?: throw ConvertException("请输入视频时长")
-            listOf(
-                mutableListOf(
-                    "-loop", "1",
-                    "-framerate", "25",
-                    "-i", inputPath,
-                    "-t", formatSeconds(seconds),
-                    "-an",
-                    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-                    "-r", "25",
-                    "-c:v", video,
-                ).apply {
-                    addAll(encoderArgs(video))
-                },
+            val audio = musicPath?.let {
+                firstAvailable(spec.audioEncoders, encoders)
+                    ?: throw ConvertException("没有可用的 ${plan.target.id} 音频编码器")
+            }
+            val args = mutableListOf<String>()
+            val staticDuration = if (plan.source.animated) {
+                null
+            } else {
+                plan.durationSeconds ?: throw ConvertException("请输入视频时长")
+            }
+            if (plan.source.animated) {
+                args += listOf("-i", inputPath)
+            } else {
+                args += listOf("-loop", "1", "-framerate", "25", "-i", inputPath)
+            }
+            if (musicPath != null) {
+                args += listOf("-stream_loop", "-1", "-i", musicPath)
+                args += listOf("-map", "0:v:0", "-map", "1:a:0", "-shortest")
+            } else {
+                args += "-an"
+            }
+            args += listOf(
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                "-r", "25",
+                "-c:v", video,
             )
+            args += encoderArgs(video)
+            if (audio != null) {
+                args += listOf("-c:a", audio)
+                args += encoderArgs(audio)
+            }
+            staticDuration?.let { args += listOf("-t", formatSeconds(it)) }
+            listOf(args)
         }
 
         ConversionBranch.AUDIO_VIDEO -> {
@@ -79,6 +97,18 @@ internal fun buildFfmpegAttempts(
                     },
                 )
             }
+        }
+
+        ConversionBranch.VIDEO_GIF,
+        ConversionBranch.IMAGE_GIF -> {
+            listOf(
+                mutableListOf(
+                    "-i", inputPath,
+                    "-an",
+                    "-vf", "fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse=dither=sierra2_4a",
+                    "-loop", "0",
+                ),
+            )
         }
 
         ConversionBranch.VIDEO_VIDEO,

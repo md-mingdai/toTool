@@ -58,6 +58,7 @@ internal fun imageMime(fmt: String): String = when (fmt) {
     "PNG" -> "image/png"
     "WEBP" -> "image/webp"
     "BMP" -> "image/bmp"
+    "GIF" -> "image/gif"
     else -> "application/octet-stream"
 }
 
@@ -122,6 +123,7 @@ internal fun buildAttempts(fmt: String, sourceExt: String, available: Set<String
 internal fun targetOption(fmt: String): TargetOption? {
     val spec = FORMAT_SPECS[fmt]
     return when {
+        fmt == "GIF" -> TargetOption("GIF", MediaKind.IMAGE, "gif", imageMime("GIF"))
         fmt in IMAGE_FORMATS -> TargetOption(fmt, MediaKind.IMAGE, fmt.lowercase(Locale.ROOT), imageMime(fmt))
         spec?.audioOnly == true -> TargetOption(fmt, MediaKind.AUDIO, fmt.lowercase(Locale.ROOT), spec.mime)
         spec != null -> TargetOption(fmt, MediaKind.VIDEO, fmt.lowercase(Locale.ROOT), spec.mime)
@@ -144,13 +146,22 @@ internal fun targetGroupsFor(
     sourceExt: String,
     capabilities: FfmpegCapabilities?,
     ffmpegAvailable: Boolean,
+    sourceAnimated: Boolean = false,
 ): List<TargetGroup> {
     if (source == MediaKind.UNKNOWN) return emptyList()
     val encoders = capabilities?.encoders
     val order = TARGET_MEDIUM_ORDER[source].orEmpty()
     return order.mapNotNull { medium ->
         val options = when (medium) {
-            MediaKind.IMAGE -> IMAGE_FORMATS.mapNotNull(::targetOption)
+            MediaKind.IMAGE -> {
+                val images = IMAGE_FORMATS.mapNotNull(::targetOption).toMutableList()
+                val gifSupported = ffmpegAvailable &&
+                    (capabilities?.encoders == null || "gif" in capabilities.encoders)
+                if (gifSupported && (source == MediaKind.VIDEO || (source == MediaKind.IMAGE && sourceAnimated))) {
+                    targetOption("GIF")?.let(images::add)
+                }
+                images
+            }
             MediaKind.VIDEO -> {
                 if (!ffmpegAvailable) emptyList()
                 else listOf("MP4", "MKV", "MOV", "AVI", "WEBM")
@@ -177,8 +188,9 @@ internal fun defaultTarget(
     sourceExt: String,
     capabilities: FfmpegCapabilities?,
     ffmpegAvailable: Boolean,
+    sourceAnimated: Boolean = false,
 ): TargetOption? {
-    val groups = targetGroupsFor(source, sourceExt, capabilities, ffmpegAvailable)
+    val groups = targetGroupsFor(source, sourceExt, capabilities, ffmpegAvailable, sourceAnimated)
     val sameGroup = groups.firstOrNull { it.medium == source } ?: groups.firstOrNull()
     return sameGroup?.options?.firstOrNull { it.extension != sourceExt }
         ?: groups.firstNotNullOfOrNull { group ->

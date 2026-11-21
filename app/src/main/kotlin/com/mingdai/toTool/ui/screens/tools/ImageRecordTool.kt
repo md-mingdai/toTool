@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
+import android.media.MediaPlayer
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -44,6 +45,7 @@ import com.mingdai.toTool.media.publishToDownloads
 import com.mingdai.toTool.media.queryFileName
 import com.mingdai.toTool.media.queryFileSize
 import com.mingdai.toTool.media.sanitizeFileName
+import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.KeepScreenOn
 import com.mingdai.toTool.ui.components.LabeledPickerCard
@@ -70,6 +72,8 @@ private enum class RecordMode(val label: String) {
     DECODE("还原音频"),
 }
 
+private enum class PendingRecordAction { ENCODE, DECODE }
+
 @Composable
 fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     val context = LocalContext.current
@@ -86,6 +90,28 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     var errorText by remember { mutableStateOf<String?>(null) }
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     var decodedMeta by remember { mutableStateOf<AudioRecordCodec.RecordMeta?>(null) }
+    var decodedFile by remember { mutableStateOf<File?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    val playerRef = remember { arrayOfNulls<MediaPlayer>(1) }
+    var warningDialog by remember { mutableStateOf(false) }
+    var warningMessage by remember { mutableStateOf("") }
+    var warningAction by remember { mutableStateOf(PendingRecordAction.ENCODE) }
+
+    fun releasePlayer() {
+        playerRef[0]?.let { player ->
+            runCatching { if (player.isPlaying) player.stop() }
+            runCatching { player.release() }
+        }
+        playerRef[0] = null
+        isPlaying = false
+    }
+
+    fun discardDecodedAudio() {
+        releasePlayer()
+        decodedFile?.delete()
+        decodedFile = null
+        decodedMeta = null
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -95,7 +121,7 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         resultText = null
         noticeText = null
         errorText = null
-        decodedMeta = null
+        discardDecodedAudio()
         preview = null
     }
 
@@ -107,7 +133,11 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     }
 
     DisposableEffect(Unit) {
-        onDispose { canceled.set(true) }
+        onDispose {
+            canceled.set(true)
+            releasePlayer()
+            decodedFile?.delete()
+        }
     }
     LaunchedEffect(isRunning) { canceled.set(false) }
     KeepScreenOn(isRunning)
@@ -119,32 +149,29 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         sourceName = null
         sourceSize = -1L
         preview = null
-        decodedMeta = null
+        discardDecodedAudio()
         resultText = null
         noticeText = null
         errorText = null
+        warningDialog = false
     }
 
     fun startEncode() {
         val uri = sourceUri ?: return
         val name = sourceName ?: "audio"
         if (isRunning) return
+        discardDecodedAudio()
         canceled.set(false)
         isRunning = true
         resultText = null
         noticeText = null
         errorText = null
-        decodedMeta = null
         scope.launch {
             try {
                 val outcome = withContext(Dispatchers.IO) {
-                    val bytes = readLimitedBytes(context, uri, AudioRecordCodec.MAX_AUDIO_BYTES, canceled)
+                    val bytes = readAllBytes(context, uri, canceled)
                     val mime = mimeOf(context, uri, name)
-                    val maxPixels = minOf(
-                        AudioRecordCodec.MAX_RECORD_PIXELS,
-                        MemoryBudget.maxPixels(context, 12.0),
-                    )
-                    val encoded = AudioRecordCodec.encode(bytes, name, mime, maxPixels)
+                    val encoded = AudioRecordCodec.encode(bytes, name, mime)
                     if (canceled.get()) throw ConvertCanceledException()
                     val bitmap = Bitmap.createBitmap(encoded.width, encoded.height, Bitmap.Config.ARGB_8888)
                     bitmap.setPixels(encoded.pixels, 0, encoded.width, 0, 0, encoded.width, encoded.height)
@@ -169,6 +196,8 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
                 noticeText = "图片唱片是娱乐功能，不是加密；请保留原始 PNG，压缩、转 JPG、截图或编辑都会导致无法还原。"
             } catch (e: ConvertCanceledException) {
                 noticeText = "已取消"
+            } catch (e: OutOfMemoryError) {
+                errorText = "内存不足：文件太大，设备无法完成图片唱片编码。"
             } catch (e: Exception) {
                 errorText = friendlyError(e)
             } finally {
@@ -180,28 +209,16 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     fun startDecode() {
         val uri = sourceUri ?: return
         if (isRunning) return
+        discardDecodedAudio()
         canceled.set(false)
         isRunning = true
         resultText = null
         noticeText = null
         errorText = null
-        decodedMeta = null
         scope.launch {
-            var temp: File? = null
+            var created: File? = null
             try {
                 val outcome = withContext(Dispatchers.IO) {
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    context.contentResolver.openInputStream(uri)?.use {
-                        BitmapFactory.decodeStream(it, null, bounds)
-                    }
-                    val pixelCount = bounds.outWidth.toLong() * bounds.outHeight
-                    if (bounds.outWidth > AudioRecordCodec.MAX_DIMENSION ||
-                        bounds.outHeight > AudioRecordCodec.MAX_DIMENSION ||
-                        pixelCount > AudioRecordCodec.MAX_RECORD_PIXELS ||
-                        pixelCount > MemoryBudget.maxPixels(context, 8.0)
-                    ) {
-                        throw ConvertException("图片尺寸过大或超出当前内存预算，拒绝解码")
-                    }
                     val source = ImageDecoder.createSource(context.contentResolver, uri)
                     val bitmap = ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
                         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
@@ -213,42 +230,154 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
                         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                         val decoded = AudioRecordCodec.decode(pixels, bitmap.width, bitmap.height)
                         val name = sanitizeFileName(decoded.meta.name, "restored_audio")
-                        val mime = decoded.meta.mime.ifBlank { mimeForName(name) }
                         val output = File(context.cacheDir, "conv_record_${System.nanoTime()}_$name")
                         output.outputStream().use { it.write(decoded.audioBytes) }
-                        temp = output
-                        val published = publishToDownloads(context, output, mime, canceled) {}
-                        val result = if (published.path != null) {
-                            "已保存到：${published.path}"
-                        } else {
-                            throw ConvertException(
-                                "无法保存音频" + (published.error?.let { "（$it）" } ?: ""),
-                            )
-                        }
-                        Triple(result, decoded.meta, decoded.meta.originalSize)
+                        created = output
+                        Triple(output, decoded.meta, decoded.meta.originalSize)
                     } finally {
                         bitmap.recycle()
                     }
                 }
-                temp = null
+                created = null
+                decodedFile = outcome.first
                 decodedMeta = outcome.second
-                resultText = outcome.first
-                noticeText = "已还原 ${outcome.second.name}（原始大小 ${humanSize(outcome.third)}）。"
+                noticeText = "已读取 ${outcome.second.name}（原始大小 ${humanSize(outcome.third)}）。可以先试听，再决定是否导出。"
             } catch (e: ConvertCanceledException) {
                 noticeText = "已取消"
+            } catch (e: OutOfMemoryError) {
+                errorText = "内存不足：图片太大，设备无法完成解码。"
             } catch (e: Exception) {
                 errorText = friendlyError(e)
             } finally {
-                temp?.delete()
+                created?.delete()
                 isRunning = false
             }
         }
     }
 
+    fun togglePlayback() {
+        val file = decodedFile ?: return
+        errorText = null
+        val current = playerRef[0]
+        if (current != null) {
+            if (runCatching { current.isPlaying }.getOrDefault(false)) {
+                runCatching { current.pause() }
+                isPlaying = false
+            } else {
+                runCatching { current.start() }
+                    .onSuccess { isPlaying = true }
+                    .onFailure {
+                        releasePlayer()
+                        errorText = "无法播放这段音频"
+                    }
+            }
+            return
+        }
+        val player = MediaPlayer()
+        playerRef[0] = player
+        player.setOnPreparedListener { prepared ->
+            if (playerRef[0] !== prepared) {
+                runCatching { prepared.release() }
+                return@setOnPreparedListener
+            }
+            runCatching { prepared.start() }
+                .onSuccess { isPlaying = true }
+                .onFailure {
+                    releasePlayer()
+                    errorText = "无法播放这段音频"
+                }
+        }
+        player.setOnCompletionListener { isPlaying = false }
+        player.setOnErrorListener { _, _, _ ->
+            releasePlayer()
+            errorText = "无法播放这段音频（格式可能不被系统支持）"
+            true
+        }
+        try {
+            player.setDataSource(file.absolutePath)
+            player.prepareAsync()
+        } catch (e: Exception) {
+            releasePlayer()
+            errorText = "无法播放这段音频：${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    fun exportDecodedAudio() {
+        val file = decodedFile ?: return
+        val meta = decodedMeta ?: return
+        if (isRunning) return
+        releasePlayer()
+        canceled.set(false)
+        isRunning = true
+        resultText = null
+        noticeText = null
+        errorText = null
+        scope.launch {
+            try {
+                val mime = meta.mime.ifBlank { mimeForName(meta.name) }
+                val published = withContext(Dispatchers.IO) {
+                    publishToDownloads(context, file, mime, canceled) {}
+                }
+                val path = published.path
+                if (path == null) {
+                    throw ConvertException(
+                        "无法保存音频" + (published.error?.let { "（$it）" } ?: ""),
+                    )
+                }
+                decodedFile = null
+                resultText = "已保存到：$path"
+                noticeText = "已导出 ${meta.name}（${humanSize(meta.originalSize)}）。"
+            } catch (e: ConvertCanceledException) {
+                noticeText = "已取消导出"
+            } catch (e: Exception) {
+                errorText = friendlyError(e)
+            } finally {
+                isRunning = false
+            }
+        }
+    }
+
+    fun requestDecode() {
+        val uri = sourceUri ?: return
+        if (isRunning) return
+        scope.launch {
+            isRunning = true
+            var proceed = false
+            try {
+                val bounds = withContext(Dispatchers.IO) {
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it, null, options)
+                    }
+                    options
+                }
+                val pixels = bounds.outWidth.toLong() * bounds.outHeight
+                val tooLarge = bounds.outWidth > AudioRecordCodec.MAX_DIMENSION ||
+                    bounds.outHeight > AudioRecordCodec.MAX_DIMENSION ||
+                    pixels > AudioRecordCodec.MAX_RECORD_PIXELS ||
+                    pixels > MemoryBudget.maxPixels(context, 8.0)
+                if (tooLarge) {
+                    warningMessage = "图片约 ${bounds.outWidth}×${bounds.outHeight}，超过建议的试听/还原尺寸。" +
+                        "\n\n继续解码可能会占用大量内存，导致卡顿、内存不足，甚至应用被系统终止。" +
+                        "仍可继续，但建议先使用原尺寸较小图片或关闭其他应用。"
+                    warningAction = PendingRecordAction.DECODE
+                    warningDialog = true
+                } else {
+                    proceed = true
+                }
+            } catch (e: Exception) {
+                errorText = friendlyError(e)
+            } finally {
+                isRunning = false
+            }
+            if (proceed) startDecode()
+        }
+    }
+
     val isEncode = mode == RecordMode.ENCODE
     val tooLarge = isEncode && sourceSize > AudioRecordCodec.MAX_AUDIO_BYTES
-    val canRun = sourceUri != null && !isRunning && !tooLarge
-    val expected = if (isEncode && sourceSize in 1..AudioRecordCodec.MAX_AUDIO_BYTES.toLong()) {
+    val canRun = sourceUri != null && !isRunning
+    val expected = if (isEncode && sourceSize in 1..Int.MAX_VALUE.toLong()) {
         runCatching {
             AudioRecordCodec.layoutFor(
                 sourceSize.toInt(),
@@ -258,6 +387,31 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         }.getOrNull()
     } else {
         null
+    }
+
+    fun requestEncode() {
+        if (isRunning) return
+        if (sourceUri == null) return
+        val budget = MemoryBudget.maxPixels(context, 12.0)
+        val layout = expected
+        val tooLarge = sourceSize > AudioRecordCodec.MAX_AUDIO_BYTES ||
+            (layout != null && (
+                layout.width > AudioRecordCodec.MAX_DIMENSION ||
+                    layout.height > AudioRecordCodec.MAX_DIMENSION ||
+                    layout.totalPixels > budget
+                ))
+        if (tooLarge) {
+            warningMessage = buildString {
+                append("音频约 ${humanSize(sourceSize)}")
+                if (layout != null) append("，生成的图片约 ${layout.width}×${layout.height}")
+                append("。\n\n继续可能会占用大量内存，导致卡顿、内存不足，甚至应用被系统终止。")
+                append("图片唱片仍会尝试生成，但建议先压缩音频或关闭其他应用。")
+            }
+            warningAction = PendingRecordAction.ENCODE
+            warningDialog = true
+            return
+        }
+        startEncode()
     }
 
     ToolBody(padding) {
@@ -298,7 +452,7 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
             )
             if (tooLarge) {
                 Text(
-                    "音频超过 ${AudioRecordCodec.MAX_AUDIO_BYTES / (1024 * 1024)} MB，请先压缩或换一个文件。",
+                    "音频超过建议的 ${AudioRecordCodec.MAX_AUDIO_BYTES / (1024 * 1024)} MB；开始时只弹窗警告，不会强制拒绝，但可能占用大量内存。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.error,
                 )
@@ -334,6 +488,23 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
+        if (!isEncode && decodedFile != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SecondaryButton(
+                    onClick = { togglePlayback() },
+                    enabled = !isRunning,
+                    modifier = Modifier.weight(1f),
+                ) { Text(if (isPlaying) "暂停试听" else "试听") }
+                PrimaryButton(
+                    onClick = { exportDecodedAudio() },
+                    enabled = !isRunning,
+                    modifier = Modifier.weight(1f),
+                ) { Text("导出音频") }
+            }
+        }
 
         errorText?.let {
             MessageCard(
@@ -354,7 +525,7 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         resultText?.let { ResultBox(it, label = "输出") }
 
         PrimaryButton(
-            onClick = { if (isEncode) startEncode() else startDecode() },
+            onClick = { if (isEncode) requestEncode() else requestDecode() },
             enabled = canRun,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -362,7 +533,7 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
                 when {
                     isRunning -> "处理中…"
                     isEncode -> "生成图片唱片"
-                    else -> "提取音频"
+                    else -> "读取唱片"
                 },
             )
         }
@@ -375,26 +546,38 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
             content = MiuixTheme.colorScheme.onSecondaryContainer,
         )
     }
+
+    AppDialog(
+        show = warningDialog,
+        title = "文件较大",
+        summary = null,
+        confirmText = "仍然继续",
+        dismissText = "取消",
+        onDismiss = { warningDialog = false },
+        onConfirm = {
+            warningDialog = false
+            when (warningAction) {
+                PendingRecordAction.ENCODE -> startEncode()
+                PendingRecordAction.DECODE -> startDecode()
+            }
+        },
+    ) {
+        Text(warningMessage, style = MiuixTheme.textStyles.footnote1)
+    }
 }
 
-private fun readLimitedBytes(
+private fun readAllBytes(
     context: Context,
     uri: Uri,
-    limit: Int,
     canceled: AtomicBoolean,
 ): ByteArray {
-    val known = queryFileSize(context, uri)
-    if (known > limit) throw ConvertException("音频太大（最大 ${limit / (1024 * 1024)} MB）")
     val output = ByteArrayOutputStream()
     context.contentResolver.openInputStream(uri)?.use { input ->
         val buffer = ByteArray(64 * 1024)
-        var total = 0
         while (true) {
             if (canceled.get()) throw ConvertCanceledException()
             val n = input.read(buffer)
             if (n < 0) break
-            total += n
-            if (total > limit) throw ConvertException("音频太大（最大 ${limit / (1024 * 1024)} MB）")
             output.write(buffer, 0, n)
         }
     } ?: throw ConvertException("无法读取音频文件")

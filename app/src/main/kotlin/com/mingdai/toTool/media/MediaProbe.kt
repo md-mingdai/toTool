@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import kotlin.math.roundToInt
 
 internal data class VideoFrameInfo(
@@ -159,4 +161,156 @@ private fun rotateFrame(source: Bitmap, degrees: Int): Bitmap {
     val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
     if (rotated !== source) source.recycle()
     return rotated
+}
+
+
+internal data class MediaSignature(
+    val kind: MediaKind,
+    val extension: String,
+    val animated: Boolean,
+)
+
+/**
+ * 先读取文件头判断真实媒体类型；文件头无法判断时才退回扩展名 / MIME。
+ * 同时识别 GIF / APNG / 动画 WebP 的动画标记。
+ */
+internal fun detectMediaSignature(
+    context: Context,
+    uri: Uri,
+    name: String?,
+    mime: String?,
+): MediaSignature {
+    val ext = normalizedExtension(name)
+    val header = readHeader(context, uri)
+    if (header.size >= 12) {
+        when {
+            header.startsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) -> {
+                return MediaSignature(MediaKind.IMAGE, "png", header.containsAscii("acTL"))
+            }
+            header.startsWith(0xFF, 0xD8, 0xFF) ->
+                return MediaSignature(MediaKind.IMAGE, "jpg", false)
+            header.startsWith(0x47, 0x49, 0x46, 0x38) ->
+                return MediaSignature(MediaKind.IMAGE, "gif", countPairs(header, 0x21, 0xF9) >= 2)
+            header.startsWith(0x42, 0x4D) ->
+                return MediaSignature(MediaKind.IMAGE, "bmp", false)
+            header.startsWith(0x52, 0x49, 0x46, 0x46) -> {
+                val riff = header.ascii(8, 4)
+                when (riff) {
+                    "WEBP" -> {
+                        // FFmpeg 的 WebP 解码器对动画 WebP 支持不稳定；这里按静态图处理。
+                        return MediaSignature(MediaKind.IMAGE, "webp", false)
+                    }
+                    "WAVE" -> return MediaSignature(MediaKind.AUDIO, "wav", false)
+                    "AVI " -> return MediaSignature(MediaKind.VIDEO, "avi", false)
+                }
+            }
+            header.ascii(4, 4) == "ftyp" -> {
+                val brand = header.ascii(8, 4)
+                when {
+                    brand in setOf("heic", "heix", "hevc", "hevx", "mif1", "msf1") ->
+                        return MediaSignature(MediaKind.IMAGE, "heic", false)
+                    brand in setOf("avif", "avis") ->
+                        return MediaSignature(MediaKind.IMAGE, "avif", false)
+                    brand in setOf("M4A ", "M4B ", "M4P ", "F4A ", "F4B ") ->
+                        return MediaSignature(MediaKind.AUDIO, "m4a", false)
+                    brand == "qt  " ->
+                        return MediaSignature(MediaKind.VIDEO, ext.ifBlank { "mov" }, false)
+                    brand in setOf("3gp4", "3gp5", "3g2a") ->
+                        return MediaSignature(MediaKind.VIDEO, "3gp", false)
+                    brand in setOf("isom", "iso2", "mp41", "mp42", "avc1", "M4V ", "dash") ->
+                        return MediaSignature(MediaKind.VIDEO, ext.ifBlank { "mp4" }, false)
+                }
+            }
+            header.startsWith(0x1A, 0x45, 0xDF, 0xA3) -> {
+                val isAudio = mime?.startsWith("audio/") == true
+                return MediaSignature(
+                    if (isAudio) MediaKind.AUDIO else MediaKind.VIDEO,
+                    ext.ifBlank { if (isAudio) "mka" else "mkv" },
+                    false,
+                )
+            }
+            header.startsWith(0x66, 0x4C, 0x61, 0x43) ->
+                return MediaSignature(MediaKind.AUDIO, "flac", false)
+            header.startsWith(0x4F, 0x67, 0x67, 0x53) ->
+                return MediaSignature(
+                    if (ext == "ogv") MediaKind.VIDEO else MediaKind.AUDIO,
+                    ext.ifBlank { "ogg" },
+                    false,
+                )
+            header.startsWith(0x49, 0x44, 0x33) ->
+                return MediaSignature(MediaKind.AUDIO, "mp3", false)
+            header.startsWith(0x66, 0x4C, 0x56) ->
+                return MediaSignature(MediaKind.VIDEO, "flv", false)
+            header.size >= 2 && (header[0].toInt() and 0xFF) == 0xFF &&
+                (header[1].toInt() and 0xE0) == 0xE0 -> {
+                val isAdts = (header[1].toInt() and 0xF6) == 0xF0
+                return MediaSignature(
+                    MediaKind.AUDIO,
+                    if (isAdts && (ext == "aac" || mime?.contains("aac") == true)) "aac" else "mp3",
+                    false,
+                )
+            }
+        }
+    }
+    val kind = detectMediaKind(name, mime)
+    return MediaSignature(kind, ext, false)
+}
+
+private fun readHeader(context: Context, uri: Uri): ByteArray {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { input -> input.readHeaderBytes(64 * 1024) }
+            ?: ByteArray(0)
+    } catch (e: Exception) {
+        ByteArray(0)
+    }
+}
+
+private fun InputStream.readHeaderBytes(limit: Int): ByteArray {
+    val out = ByteArrayOutputStream(limit.coerceAtMost(8192))
+    val buffer = ByteArray(8192)
+    var total = 0
+    while (total < limit) {
+        val read = read(buffer, 0, minOf(buffer.size, limit - total))
+        if (read < 0) break
+        out.write(buffer, 0, read)
+        total += read
+    }
+    return out.toByteArray()
+}
+
+private fun ByteArray.startsWith(vararg bytes: Int): Boolean {
+    if (size < bytes.size) return false
+    bytes.forEachIndexed { index, value ->
+        if (this[index].toInt() and 0xFF != value) return false
+    }
+    return true
+}
+
+private fun ByteArray.ascii(start: Int, count: Int): String {
+    if (start < 0 || start + count > size) return ""
+    return String(this, start, count, Charsets.US_ASCII)
+}
+
+private fun ByteArray.containsAscii(value: String): Boolean {
+    val needle = value.toByteArray(Charsets.US_ASCII)
+    if (needle.isEmpty() || needle.size > size) return false
+    for (index in 0..size - needle.size) {
+        var match = true
+        for (j in needle.indices) {
+            if (this[index + j] != needle[j]) {
+                match = false
+                break
+            }
+        }
+        if (match) return true
+    }
+    return false
+}
+
+private fun countPairs(bytes: ByteArray, first: Int, second: Int): Int {
+    var count = 0
+    for (index in 0 until bytes.size - 1) {
+        if ((bytes[index].toInt() and 0xFF) == first && (bytes[index + 1].toInt() and 0xFF) == second) count++
+    }
+    return count
 }

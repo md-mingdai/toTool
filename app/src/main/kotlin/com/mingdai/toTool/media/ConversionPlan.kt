@@ -22,8 +22,10 @@ internal enum class ConversionBranch {
     VIDEO_VIDEO,
     VIDEO_AUDIO,
     VIDEO_IMAGE,
+    VIDEO_GIF,
     AUDIO_AUDIO,
     AUDIO_VIDEO,
+    IMAGE_GIF,
 }
 
 internal data class SourceMedia(
@@ -33,6 +35,7 @@ internal data class SourceMedia(
     val kind: MediaKind,
     val extension: String,
     val mime: String?,
+    val animated: Boolean = false,
 )
 
 internal data class ConversionPlan(
@@ -45,6 +48,7 @@ internal data class ConversionPlan(
     val resolution: ResolutionPreset = ResolutionPreset.P720,
     val solidColor: Int = 0xFF162018.toInt(),
     val customImage: Uri? = null,
+    val music: Uri? = null,
 ) {
     val baseName: String get() = baseNameOf(source.name)
 
@@ -58,16 +62,20 @@ internal data class ConversionPlan(
         }
 }
 
-internal fun branchFor(source: MediaKind, target: MediaKind): ConversionBranch? = when (source) {
+internal fun branchFor(
+    source: MediaKind,
+    target: MediaKind,
+    targetFormat: String,
+): ConversionBranch? = when (source) {
     MediaKind.IMAGE -> when (target) {
-        MediaKind.IMAGE -> ConversionBranch.IMAGE_IMAGE
+        MediaKind.IMAGE -> if (targetFormat == "GIF") ConversionBranch.IMAGE_GIF else ConversionBranch.IMAGE_IMAGE
         MediaKind.VIDEO -> ConversionBranch.IMAGE_VIDEO
         else -> null
     }
     MediaKind.VIDEO -> when (target) {
         MediaKind.VIDEO -> ConversionBranch.VIDEO_VIDEO
         MediaKind.AUDIO -> ConversionBranch.VIDEO_AUDIO
-        MediaKind.IMAGE -> ConversionBranch.VIDEO_IMAGE
+        MediaKind.IMAGE -> if (targetFormat == "GIF") ConversionBranch.VIDEO_GIF else ConversionBranch.VIDEO_IMAGE
         else -> null
     }
     MediaKind.AUDIO -> when (target) {

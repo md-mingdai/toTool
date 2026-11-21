@@ -59,7 +59,7 @@ import com.mingdai.toTool.media.VideoFrameInfo
 import com.mingdai.toTool.media.VisualMode
 import com.mingdai.toTool.media.branchFor
 import com.mingdai.toTool.media.defaultTarget
-import com.mingdai.toTool.media.detectMediaKind
+import com.mingdai.toTool.media.detectMediaSignature
 import com.mingdai.toTool.media.extractVideoFrame
 import com.mingdai.toTool.media.ffmpegBinary
 import com.mingdai.toTool.media.ffmpegUnavailableMessage
@@ -67,7 +67,6 @@ import com.mingdai.toTool.media.friendlyError
 import com.mingdai.toTool.media.isSameFormat
 import com.mingdai.toTool.media.humanSize
 import com.mingdai.toTool.media.needsFfmpeg
-import com.mingdai.toTool.media.normalizedExtension
 import com.mingdai.toTool.media.probeAudio
 import com.mingdai.toTool.media.probeCapabilities
 import com.mingdai.toTool.media.probeImage
@@ -75,7 +74,6 @@ import com.mingdai.toTool.media.probeVideo
 import com.mingdai.toTool.media.queryFileName
 import com.mingdai.toTool.media.queryFileSize
 import com.mingdai.toTool.media.runConversion
-import com.mingdai.toTool.media.sourceMimeFor
 import com.mingdai.toTool.media.targetGroupsFor
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.KeepScreenOn
@@ -114,11 +112,14 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var sourceKind by remember { mutableStateOf(MediaKind.IMAGE) }
+    var sourceKind by remember { mutableStateOf(MediaKind.UNKNOWN) }
     var sourceUri by remember { mutableStateOf<Uri?>(null) }
     var sourceName by remember { mutableStateOf<String?>(null) }
     var sourceSize by remember { mutableStateOf(-1L) }
     var sourceMime by remember { mutableStateOf<String?>(null) }
+    var sourceExtension by remember { mutableStateOf("") }
+    var sourceAnimated by remember { mutableStateOf(false) }
+    var recognizing by remember { mutableStateOf(false) }
     var videoInfo by remember { mutableStateOf<VideoFrameInfo?>(null) }
     var audioInfo by remember { mutableStateOf<AudioProbeInfo?>(null) }
     var imageInfo by remember { mutableStateOf<ImageProbeInfo?>(null) }
@@ -138,6 +139,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var solidColor by rememberSaveable { mutableStateOf(SOLID_COLORS.first()) }
     var customCoverUri by remember { mutableStateOf<Uri?>(null) }
     var customCoverName by remember { mutableStateOf<String?>(null) }
+    var musicUri by remember { mutableStateOf<Uri?>(null) }
+    var musicName by remember { mutableStateOf<String?>(null) }
 
     var framePreview by remember { mutableStateOf<Bitmap?>(null) }
     var frameLoading by remember { mutableStateOf(false) }
@@ -150,6 +153,12 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var noticeText by remember { mutableStateOf<String?>(null) }
     var errorText by remember { mutableStateOf<String?>(null) }
     val control = remember { ConversionControl() }
+
+    fun clearResult() {
+        resultText = null
+        noticeText = null
+        errorText = null
+    }
 
     LaunchedEffect(Unit) {
         val ffmpeg = withContext(Dispatchers.IO) { ffmpegBinary(context) }
@@ -171,13 +180,13 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     }
     KeepScreenOn(isRunning)
 
-    val sourceExt = normalizedExtension(sourceName)
-    val groups = remember(sourceKind, sourceExt, capabilities, capabilityState) {
-        targetGroupsFor(sourceKind, sourceExt, capabilities, capabilityState == CapabilityState.READY)
+    val sourceExt = sourceExtension
+    val groups = remember(sourceKind, sourceExt, capabilities, capabilityState, sourceAnimated) {
+        targetGroupsFor(sourceKind, sourceExt, capabilities, capabilityState == CapabilityState.READY, sourceAnimated)
     }
-    val branch = target?.let { branchFor(sourceKind, it.medium) }
+    val branch = target?.let { branchFor(sourceKind, it.medium, it.id) }
 
-    LaunchedEffect(sourceKind, sourceExt, sourceUri, capabilities, capabilityState) {
+    LaunchedEffect(sourceKind, sourceExt, sourceUri, capabilities, capabilityState, sourceAnimated) {
         if (sourceUri == null) {
             target = null
             targetManual = false
@@ -188,7 +197,9 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 !(selected.medium == sourceKind && isSameFormat(sourceExt, selected))
         } == true
         if (!stillValid || !targetManual) {
-            target = defaultTarget(sourceKind, sourceExt, capabilities, capabilityState == CapabilityState.READY)
+            target = defaultTarget(
+                sourceKind, sourceExt, capabilities, capabilityState == CapabilityState.READY, sourceAnimated,
+            )
             if (!stillValid) targetManual = false
         }
     }
@@ -198,33 +209,67 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             val name = queryFileName(context, uri)
             val size = queryFileSize(context, uri)
             val mime = context.contentResolver.getType(uri)
-            val kind = detectMediaKind(name, mime)
-            if (kind == MediaKind.UNKNOWN) {
-                errorText = "无法识别这个文件的媒体类型。"
-            } else {
-                sourceKind = kind
-                sourceUri = uri
-                sourceName = name
-                sourceSize = size
-                sourceMime = mime
-                videoInfo = null
-                audioInfo = null
-                imageInfo = null
-                framePreview = null
-                frameError = null
-                customCoverUri = null
-                customCoverName = null
-                durationText = "5"
-                frameText = "1"
-                resultText = null
-                noticeText = null
-                errorText = null
-                stageText = ""
-                progress = 0f
-                val ext = normalizedExtension(name)
-                targetManual = false
-                target = defaultTarget(kind, ext, capabilities, capabilityState == CapabilityState.READY)
+            recognizing = true
+            sourceUri = null
+            sourceName = null
+            sourceSize = -1L
+            sourceMime = null
+            sourceExtension = ""
+            sourceAnimated = false
+            sourceKind = MediaKind.UNKNOWN
+            videoInfo = null
+            audioInfo = null
+            imageInfo = null
+            framePreview = null
+            frameError = null
+            target = null
+            targetManual = false
+            errorText = null
+            clearResult()
+            scope.launch {
+                val signature = withContext(Dispatchers.IO) {
+                    detectMediaSignature(context, uri, name, mime)
+                }
+                recognizing = false
+                if (signature.kind == MediaKind.UNKNOWN) {
+                    errorText = "无法识别这个文件的媒体类型（文件头和扩展名都不匹配）。"
+                } else {
+                    sourceKind = signature.kind
+                    sourceUri = uri
+                    sourceName = name
+                    sourceSize = size
+                    sourceMime = mime
+                    sourceExtension = signature.extension
+                    sourceAnimated = signature.animated
+                    videoInfo = null
+                    audioInfo = null
+                    imageInfo = null
+                    framePreview = null
+                    frameError = null
+                    customCoverUri = null
+                    customCoverName = null
+                    durationText = "5"
+                    frameText = "1"
+                    resultText = null
+                    noticeText = null
+                    errorText = null
+                    stageText = ""
+                    progress = 0f
+                    targetManual = false
+                    target = defaultTarget(
+                        signature.kind, signature.extension, capabilities,
+                        capabilityState == CapabilityState.READY, signature.animated,
+                    )
+                }
             }
+        }
+    }
+
+    val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            musicUri = uri
+            musicName = queryFileName(context, uri)
+            clearResult()
         }
     }
 
@@ -302,44 +347,20 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
 
     val selectedTarget = target
     val selectedBranch = branch
-    val canConvert = sourceUri != null &&
+    val canConvert = sourceKind != MediaKind.UNKNOWN &&
+        sourceUri != null &&
         sourceName != null &&
         selectedTarget != null &&
         selectedBranch != null &&
         !(selectedTarget.medium == sourceKind && isSameFormat(sourceExt, selectedTarget)) &&
         !isRunning &&
+        !recognizing &&
         (selectedBranch.needsFfmpeg().not() || capabilityState == CapabilityState.READY) &&
-        (selectedBranch != ConversionBranch.IMAGE_VIDEO || durationValid) &&
+        (selectedBranch != ConversionBranch.IMAGE_VIDEO || sourceAnimated || durationValid) &&
         (selectedBranch != ConversionBranch.VIDEO_IMAGE || frameValid) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.CUSTOM || customCoverUri != null) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.WAVEFORM || waveformAvailable) &&
         videoHasAudio
-
-    fun clearResult() {
-        resultText = null
-        noticeText = null
-        errorText = null
-    }
-
-    fun selectSourceKind(kind: MediaKind) {
-        if (isRunning || sourceKind == kind) return
-        sourceKind = kind
-        sourceUri = null
-        sourceName = null
-        sourceSize = -1L
-        sourceMime = null
-        videoInfo = null
-        audioInfo = null
-        imageInfo = null
-        framePreview = null
-        customCoverUri = null
-        customCoverName = null
-        targetManual = false
-        target = defaultTarget(kind, "", capabilities, capabilityState == CapabilityState.READY)
-        clearResult()
-        stageText = ""
-        progress = 0f
-    }
 
     fun startConversion() {
         if (!canConvert || isRunning) return
@@ -354,16 +375,20 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 name = name,
                 sizeBytes = sourceSize,
                 kind = sourceKind,
-                extension = normalizedExtension(name),
+                extension = sourceExtension,
                 mime = sourceMime,
+                animated = sourceAnimated,
             ),
             target = targetOption,
-            durationSeconds = durationSeconds.takeIf { conversionBranch == ConversionBranch.IMAGE_VIDEO },
+            durationSeconds = durationSeconds.takeIf {
+                conversionBranch == ConversionBranch.IMAGE_VIDEO && !sourceAnimated
+            },
             frameIndex = frameIndex.takeIf { conversionBranch == ConversionBranch.VIDEO_IMAGE },
             visualMode = visualMode,
             resolution = resolution,
             solidColor = solidColor,
             customImage = customCoverUri,
+            music = musicUri.takeIf { conversionBranch == ConversionBranch.IMAGE_VIDEO },
         )
         control.reset()
         isRunning = true
@@ -405,20 +430,6 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf(MediaKind.IMAGE, MediaKind.VIDEO, MediaKind.AUDIO).forEach { kind ->
-                SelectChip(
-                    selected = sourceKind == kind,
-                    onClick = { selectSourceKind(kind) },
-                    label = kind.label,
-                    enabled = !isRunning,
-                )
-            }
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -426,15 +437,19 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         ) {
             LabeledPickerCard(
                 title = "源文件",
-                value = sourceName ?: "选择${sourceKind.label}…",
-                supporting = sourceSupporting(sourceKind, sourceExt, sourceSize, videoInfo, audioInfo, imageInfo),
+                value = sourceName ?: if (recognizing) "正在识别文件…" else "选择文件…",
+                supporting = if (recognizing) {
+                    "读取文件头判断格式"
+                } else {
+                    sourceSupporting(sourceKind, sourceExt, sourceSize, sourceAnimated, videoInfo, audioInfo, imageInfo)
+                },
                 icon = when (sourceKind) {
                     MediaKind.VIDEO -> Icons.Filled.VideoLibrary
                     MediaKind.AUDIO -> Icons.Filled.AudioFile
                     else -> Icons.Filled.FolderOpen
                 },
-                onClick = { filePicker.launch(sourceMimeFor(sourceKind)) },
-                enabled = !isRunning,
+                onClick = { filePicker.launch("*/*") },
+                enabled = !isRunning && !recognizing,
                 modifier = Modifier.weight(1f),
             )
             Icon(
@@ -456,7 +471,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
 
         if (sourceUri == null) {
             Text(
-                "先选择源文件，再选择目标格式。图片可转视频，视频可提取音频或单帧，音频可配画面生成视频。",
+                "文件类型会自动从文件头和后缀识别，不需要手动选择。图片可转视频，视频可提取音频或单帧，音频可配画面生成视频。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -476,27 +491,55 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text("视频设置", style = MiuixTheme.textStyles.body2)
-                        TextField(
-                            value = durationText,
-                            onValueChange = { value ->
-                                durationText = value.filter { it.isDigit() || it == '.' }.take(8)
-                                clearResult()
-                            },
-                            label = "时长（秒，最大 3600）",
-                            singleLine = true,
+                        if (sourceAnimated) {
+                            Text(
+                                "动图会按自身帧率和时长转换为视频，不需要填写秒数。",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        } else {
+                            TextField(
+                                value = durationText,
+                                onValueChange = { value ->
+                                    durationText = value.filter { it.isDigit() || it == '.' }.take(8)
+                                    clearResult()
+                                },
+                                label = "时长（秒，最大 3600）",
+                                singleLine = true,
+                                enabled = !isRunning,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                if (durationValid) "将生成约 ${durationText} 秒、25 fps 的视频。" else "请输入 0–3600 之间的时长。",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = if (durationValid) {
+                                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                } else {
+                                    MiuixTheme.colorScheme.error
+                                },
+                            )
+                        }
+                        LabeledPickerCard(
+                            title = "配乐（可选）",
+                            value = musicName ?: "选择音频…",
+                            supporting = "会循环到视频结束",
+                            icon = Icons.Filled.AudioFile,
+                            onClick = { musicPicker.launch("audio/*") },
                             enabled = !isRunning,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text(
-                            if (durationValid) "将生成约 ${durationText} 秒、25 fps 的视频。" else "请输入 0–3600 之间的时长。",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = if (durationValid) {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            } else {
-                                MiuixTheme.colorScheme.error
-                            },
-                        )
+                        if (musicUri != null) {
+                            SecondaryButton(
+                                onClick = {
+                                    musicUri = null
+                                    musicName = null
+                                    clearResult()
+                                },
+                                enabled = !isRunning,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("移除配乐") }
+                        }
                     }
                 }
             }
@@ -651,6 +694,15 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 }
             }
 
+            ConversionBranch.VIDEO_GIF,
+            ConversionBranch.IMAGE_GIF -> {
+                Text(
+                    "会重新编码为 12 fps、最长边 480 的动图 GIF；原视频/动图的时长和画面顺序保持不变。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+
             ConversionBranch.VIDEO_AUDIO -> {
                 if (videoInfo?.hasAudio == false) {
                     Text(
@@ -661,6 +713,16 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 } else {
                     Text(
                         "将提取第一条音轨；目标容器不支持当前编码器时会在结果里提示。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+
+            ConversionBranch.IMAGE_IMAGE -> {
+                if (sourceAnimated) {
+                    Text(
+                        "动图转静态图片会取第一帧；如果要保留动画，请选择视频或 GIF 目标。",
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -747,6 +809,7 @@ private fun sourceSupporting(
     kind: MediaKind,
     ext: String,
     size: Long,
+    animated: Boolean,
     videoInfo: VideoFrameInfo?,
     audioInfo: AudioProbeInfo?,
     imageInfo: ImageProbeInfo?,
@@ -754,6 +817,7 @@ private fun sourceSupporting(
     val parts = mutableListOf<String>()
     parts += kind.label
     if (ext.isNotBlank()) parts += ext.uppercase()
+    if (animated) parts += "动图"
     if (size > 0L) parts += humanSize(size)
     when (kind) {
         MediaKind.VIDEO -> videoInfo?.let {

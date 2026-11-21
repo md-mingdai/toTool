@@ -23,7 +23,7 @@ internal object AudioRecordCodec {
     private const val HEADER_FIXED_BYTES = 76
     private const val NAME_LIMIT = 255
     private const val MIME_LIMIT = 64
-    private const val MAX_BASE64_CHARS = 4L * ((MAX_AUDIO_BYTES + 2L) / 3L)
+    private const val MAX_BITMAP_DIMENSION = 32766
     private val MAGIC = byteArrayOf('T'.code.toByte(), 'T'.code.toByte(), 'R'.code.toByte(), 'C'.code.toByte())
 
     data class Layout(val width: Int, val height: Int, val headerBytes: Int, val totalPixels: Int)
@@ -40,11 +40,8 @@ internal object AudioRecordCodec {
 
     class RecordException(message: String) : Exception(message)
 
-    fun layoutFor(audioBytes: Int, name: String, mime: String, maxPixels: Long = MAX_RECORD_PIXELS): Layout {
+    fun layoutFor(audioBytes: Int, name: String, mime: String): Layout {
         if (audioBytes <= 0) throw RecordException("音频文件是空的")
-        if (audioBytes > MAX_AUDIO_BYTES) {
-            throw RecordException("音频太大（最大 ${MAX_AUDIO_BYTES / (1024 * 1024)} MB）")
-        }
         val nameBytes = name.toByteArray(Charsets.UTF_8)
         val mimeBytes = mime.toByteArray(Charsets.UTF_8)
         if (nameBytes.size > NAME_LIMIT) throw RecordException("文件名太长（最多 $NAME_LIMIT 字节）")
@@ -52,13 +49,15 @@ internal object AudioRecordCodec {
         val headerBytes = align3(HEADER_FIXED_BYTES + nameBytes.size + mimeBytes.size)
         val base64Chars = 4L * ((audioBytes + 2L) / 3L)
         val totalPixels = headerBytes / 3L + ((base64Chars + 2L) / 3L)
-        if (totalPixels > maxPixels || totalPixels > MAX_RECORD_PIXELS) {
-            throw RecordException("音频太大，生成的图片会超出内存预算")
+        if (totalPixels > Int.MAX_VALUE) {
+            throw RecordException("音频太大，生成的图片像素数超出 Android Bitmap 上限")
         }
         val width = ceil(sqrt(totalPixels.toDouble())).toInt().coerceAtLeast(1)
         val height = ceil(totalPixels.toDouble() / width).toInt().coerceAtLeast(1)
-        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-            throw RecordException("生成的图片尺寸过大")
+        if (width > MAX_BITMAP_DIMENSION || height > MAX_BITMAP_DIMENSION ||
+            width.toLong() * height > Int.MAX_VALUE
+        ) {
+            throw RecordException("生成的图片尺寸超出 Android Bitmap 上限")
         }
         return Layout(width, height, headerBytes, totalPixels.toInt())
     }
@@ -67,9 +66,8 @@ internal object AudioRecordCodec {
         audioBytes: ByteArray,
         name: String,
         mime: String,
-        maxPixels: Long = MAX_RECORD_PIXELS,
     ): EncodedRecord {
-        val layout = layoutFor(audioBytes.size, name, mime, maxPixels)
+        val layout = layoutFor(audioBytes.size, name, mime)
         val nameBytes = name.toByteArray(Charsets.UTF_8)
         val mimeBytes = mime.toByteArray(Charsets.UTF_8)
         val base64 = Base64.getEncoder().encode(audioBytes)
@@ -112,8 +110,8 @@ internal object AudioRecordCodec {
     }
 
     fun decode(pixels: IntArray, width: Int, height: Int): DecodedRecord {
-        if (width <= 0 || height <= 0 || width.toLong() * height > MAX_RECORD_PIXELS) {
-            throw RecordException("图片尺寸过大，拒绝解码")
+        if (width <= 0 || height <= 0 || width.toLong() * height > Int.MAX_VALUE) {
+            throw RecordException("图片尺寸超出 Android Bitmap 上限")
         }
         if (pixels.size < width * height || pixels.size < 3) throw RecordException("图片数据不完整")
         val firstPixels = readBytes(pixels, 0, 8)
@@ -146,10 +144,10 @@ internal object AudioRecordCodec {
         if (storedWidth != width || storedHeight != height) {
             throw RecordException("图片尺寸与唱片记录不一致")
         }
-        if (audioBytes <= 0L || audioBytes > MAX_AUDIO_BYTES) {
+        if (audioBytes <= 0L || audioBytes > Int.MAX_VALUE) {
             throw RecordException("图片唱片里的音频长度无效")
         }
-        if (base64Chars <= 0L || base64Chars > MAX_BASE64_CHARS ||
+        if (base64Chars <= 0L || base64Chars > Int.MAX_VALUE ||
             nameLen > NAME_LIMIT || mimeLen > MIME_LIMIT) {
             throw RecordException("图片唱片头部无效")
         }

@@ -13,6 +13,8 @@ private fun outputEstimate(plan: ConversionPlan, sourceDurationMs: Long): Long {
     return when (plan.branch) {
         ConversionBranch.IMAGE_VIDEO ->
             ((plan.durationSeconds ?: 5.0) * 4_000_000L).toLong() + 64L * 1024 * 1024
+        ConversionBranch.VIDEO_GIF,
+        ConversionBranch.IMAGE_GIF -> plan.source.sizeBytes + 64L * 1024 * 1024
         ConversionBranch.AUDIO_VIDEO ->
             (durationSec * 2_500_000L / 8L).toLong() + 64L * 1024 * 1024
         ConversionBranch.VIDEO_AUDIO -> plan.source.sizeBytes / 6
@@ -74,7 +76,12 @@ internal fun runConversion(
     val caps = capabilities ?: throw ConvertException(ffmpegUnavailableMessage(context))
     val ffmpeg = ffmpegBinary(context) ?: throw ConvertException(ffmpegUnavailableMessage(context))
     val sourceDurationMs = expectedSourceDurationMs(videoInfo, audioInfo)
-    val need = plan.source.sizeBytes.coerceAtLeast(0L) +
+    val musicSize = if (plan.branch == ConversionBranch.IMAGE_VIDEO && plan.music != null) {
+        queryFileSize(context, plan.music).coerceAtLeast(0L)
+    } else {
+        0L
+    }
+    val need = plan.source.sizeBytes.coerceAtLeast(0L) + musicSize +
         outputEstimate(plan, sourceDurationMs) +
         MIN_FREE_HEADROOM_BYTES
     val workDir = pickWorkDir(context, need)
@@ -85,19 +92,42 @@ internal fun runConversion(
 
     var input: File? = null
     var cover: File? = null
+    var music: File? = null
     var keepOutput = false
     try {
         when (plan.branch) {
             ConversionBranch.IMAGE_VIDEO -> {
-                onStage("正在准备图片…")
+                onStage(if (plan.source.animated) "正在读取动图…" else "正在准备图片…")
                 onProgress(0f)
-                input = prepareLoopImage(
-                    context = context,
-                    uri = plan.source.uri,
-                    dir = workDir,
-                    maxSide = 4096,
-                    canceled = control.flag,
-                )
+                input = if (plan.source.animated) {
+                    copyUriToTemp(
+                        context, plan.source.uri, workDir, plan.source.sizeBytes, control.flag,
+                        prefix = "conv_anim_",
+                    ) { p -> onProgress(p?.let { it * 0.12f }) }
+                } else {
+                    prepareLoopImage(
+                        context = context,
+                        uri = plan.source.uri,
+                        dir = workDir,
+                        maxSide = 4096,
+                        canceled = control.flag,
+                    )
+                }
+                if (plan.music != null) {
+                    onStage("正在读取配乐…")
+                    music = copyUriToTemp(
+                        context, plan.music, workDir, musicSize, control.flag,
+                        prefix = "conv_music_",
+                    ) { p -> onProgress(0.12f + (p ?: 0f) * 0.08f) }
+                }
+            }
+            ConversionBranch.IMAGE_GIF -> {
+                onStage("正在读取动图…")
+                onProgress(0f)
+                input = copyUriToTemp(
+                    context, plan.source.uri, workDir, plan.source.sizeBytes, control.flag,
+                    prefix = "conv_anim_",
+                ) { p -> onProgress(p?.let { it * 0.15f }) }
             }
             ConversionBranch.AUDIO_VIDEO -> {
                 onStage("正在读取音频…")
@@ -140,11 +170,12 @@ internal fun runConversion(
             inputPath = inputFile.absolutePath,
             coverPath = cover?.absolutePath,
             sourceDurationMs = sourceDurationMs,
+            musicPath = music?.absolutePath,
         )
         if (attempts.isEmpty()) throw ConvertException("没有可用的 ${plan.target.id} 编码器")
 
-        val expectedDurationSec = when (plan.branch) {
-            ConversionBranch.IMAGE_VIDEO -> plan.durationSeconds
+        val expectedDurationSec = when {
+            plan.branch == ConversionBranch.IMAGE_VIDEO -> plan.durationSeconds
             else -> sourceDurationMs.takeIf { it > 0L }?.div(1000.0)
         }
 
@@ -174,6 +205,16 @@ internal fun runConversion(
         cover?.delete()
         cover = null
 
+        if (plan.branch == ConversionBranch.VIDEO_GIF || plan.branch == ConversionBranch.IMAGE_GIF) {
+            onStage("正在保存动图到相册…")
+            onProgress(0.9f)
+            val (where, bytes) = saveImageToGallery(context, plan.outputName, "image/gif") { sink ->
+                out.inputStream().use { inputStream -> inputStream.copyTo(sink) }
+            }
+            onProgress(1f)
+            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}）")
+        }
+
         onStage("正在保存到下载目录…")
         onProgress(0.88f)
         val published = publishToDownloads(
@@ -194,6 +235,7 @@ internal fun runConversion(
     } finally {
         input?.delete()
         cover?.delete()
+        music?.delete()
         if (!keepOutput) out.delete()
     }
 }
