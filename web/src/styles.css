@@ -3237,14 +3237,22 @@ input[type='checkbox'] {
 }
 
 .search-overlay-hint {
-  position: relative;
+  position: fixed;
+  top: 146px;
+  left: 50%;
   z-index: 1;
-  margin-top: 12px;
+  max-width: calc(100vw - 32px);
+  transform: translateX(-50%);
   transition: opacity 0.3s ease;
   color: rgba(255, 255, 255, 0.76);
   font-size: 11px;
   letter-spacing: 0.02em;
+  text-align: center;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.search-overlay.is-closing .search-overlay-hint {
+  opacity: 0;
 }
 
 @keyframes fade-in {

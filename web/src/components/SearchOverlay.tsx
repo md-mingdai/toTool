@@ -137,14 +137,13 @@ export function SearchOverlay({ query, onQueryChange, onClose, originRect }: Sea
           autoComplete="off"
           spellCheck={false}
         />
-        {query ? (
-          <button type="button" className="search-clear" onClick={() => onQueryChange('')} aria-label="清除搜索">
-            <X size={16} weight="regular" />
-          </button>
-        ) : (
-          <kbd>Esc</kbd>
-        )}
-        <button type="button" className="search-overlay-close" onClick={beginClose} aria-label="退出搜索">
+        {!query && <kbd>Esc</kbd>}
+        <button
+          type="button"
+          className="search-overlay-close"
+          onClick={() => (query ? onQueryChange('') : beginClose())}
+          aria-label={query ? '清除搜索' : '退出搜索'}
+        >
           <X size={18} weight="regular" />
         </button>
       </div>
