@@ -4,7 +4,7 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：50 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：51 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.2.1-blue)](https://github.com/md-mingdai/toTool/actions)
 
@@ -35,9 +35,12 @@
 
 ### 格式转换
 
-- 基于内置 FFmpeg，图片、音频、视频格式互转，支持预设与自定义参数。
+- 基于内置 FFmpeg，支持图片、视频、音频之间的跨媒体转换：图片可按时长生成视频，视频可提取音频或指定帧图片，音频可配封面、波形、纯色或自定义画面生成视频。
+- 图片格式使用系统编解码器；视频/音频支持 MP4 / MKV / MOV / AVI / WebM、MP3 / WAV / AAC / M4A / FLAC / OGG 等，实际选项按内置编码器探测结果过滤。
+- 视频转图片支持帧号与预览；目标格式按「图片 / 视频 / 音频」分组选择，同源格式自动置灰。
+- 音频与图片互转在「图片唱片」工具中：把音频以 Base64 编码进 PNG 像素，或从 PNG 还原音频（娱乐，不是加密）。
 - 原始 FFmpeg 命令模式，支持输入占位符、实时日志和进度。
-- 输出保存到「下载/toTool」，文件较多时自动打包。
+- 输出保存到「下载/toTool」，文件较多时自动打包；图片保存到「相册/toTool」。
 
 ### 内置工具
 
@@ -47,7 +50,7 @@
 | 文本工具 | 字符统计、大小写转换、密码生成、UUID、Base64、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
 | 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、通知管理、米游记录获取、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
-| 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形 |
+| 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。
 - 亮色 / 暗色 / 跟随系统 / 动态取色 / 自定义种子色。
@@ -57,7 +60,7 @@
 - 单 APK，Jetpack Compose + Miuix，统一管理页面转场、方向锁和沉浸式系统栏；高级权限可由设置页在 Shizuku 与 Root 间切换。
 - 条码使用 ZXing、CameraX 和项目内的汉信码 / Code 49 编解码器；实时扫描分为快慢路径并跟踪多个码框。
 - 方程求解使用任意精度有理数、多项式和根式运算；无法精确求解时转为数值扫描。
-- FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译。
+- FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译；启用 GPL 构建，带 x264（H.264）与 libvpx（VP8/VP9），并保留 mpeg4 兜底。
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 放进 APK。
 - 手机端内嵌 Ktor 服务器，提供静态页面和同源 API；文件通过「所有文件访问权限」读写，上传默认保存到 `Download/toTool/FlashDrop/`。
 - 弱网助手通过 VPN 把所选应用导向本地 HTTP 代理，按 KB/s 和附加延迟限速，并支持目标主机过滤与悬浮窗监控。

@@ -114,11 +114,8 @@ internal fun extractVideoFrame(
     return try {
         retriever.setDataSource(context, uri)
         val index = (frameIndex1Based - 1).coerceAtLeast(0)
-        val frame = if (maxSide != null) {
-            retriever.getScaledFrameAtIndex(index, maxSide, maxSide)
-        } else {
-            retriever.getFrameAtIndex(index)
-        } ?: fallbackFrame(retriever, index)
+        val raw = retriever.getFrameAtIndex(index) ?: fallbackFrame(retriever, index)
+        val frame = if (maxSide != null) scaleDown(raw, maxSide) else raw
         frame?.let { rotateFrame(it, retriever.rotationDegrees()) }
     } catch (e: Exception) {
         null
@@ -139,6 +136,21 @@ private fun fallbackFrame(retriever: MediaMetadataRetriever, index: Int): Bitmap
 
 private fun MediaMetadataRetriever.rotationDegrees(): Int =
     extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+
+private fun scaleDown(source: Bitmap?, maxSide: Int): Bitmap? {
+    if (source == null) return null
+    val longest = maxOf(source.width, source.height)
+    if (longest <= maxSide) return source
+    val scale = maxSide.toFloat() / longest
+    val scaled = Bitmap.createScaledBitmap(
+        source,
+        (source.width * scale).toInt().coerceAtLeast(1),
+        (source.height * scale).toInt().coerceAtLeast(1),
+        true,
+    )
+    if (scaled !== source) source.recycle()
+    return scaled
+}
 
 private fun rotateFrame(source: Bitmap, degrees: Int): Bitmap {
     val normalized = ((degrees % 360) + 360) % 360

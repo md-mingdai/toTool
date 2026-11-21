@@ -43,7 +43,7 @@ internal fun runConversion(
                 uri = plan.source.uri,
                 fmt = plan.target.id,
                 baseName = plan.baseName,
-                canceled = control.canceled,
+                canceled = control.flag,
             )
             return ConversionOutcome("已保存到：${result.where}", result.notice)
         }
@@ -60,7 +60,7 @@ internal fun runConversion(
                     bitmap = frame,
                     fmt = plan.target.id,
                     displayName = plan.outputName,
-                    canceled = control.canceled,
+                    canceled = control.flag,
                 )
                 return ConversionOutcome("已保存到：$where")
             } finally {
@@ -96,14 +96,14 @@ internal fun runConversion(
                     uri = plan.source.uri,
                     dir = workDir,
                     maxSide = 4096,
-                    canceled = control.canceled,
+                    canceled = control.flag,
                 )
             }
             ConversionBranch.AUDIO_VIDEO -> {
                 onStage("正在读取音频…")
                 onProgress(0f)
                 input = copyUriToTemp(
-                    context, plan.source.uri, workDir, plan.source.sizeBytes, control.canceled,
+                    context, plan.source.uri, workDir, plan.source.sizeBytes, control.flag,
                     prefix = "conv_audio_",
                 ) { p -> onProgress(p?.let { it * 0.15f }) }
                 if (plan.visualMode != VisualMode.WAVEFORM) {
@@ -126,7 +126,7 @@ internal fun runConversion(
                 onStage("正在读取文件…")
                 onProgress(0f)
                 input = copyUriToTemp(
-                    context, plan.source.uri, workDir, plan.source.sizeBytes, control.canceled,
+                    context, plan.source.uri, workDir, plan.source.sizeBytes, control.flag,
                     prefix = "conv_in_",
                 ) { p -> onProgress(p?.let { it * 0.15f }) }
             }
@@ -176,7 +176,7 @@ internal fun runConversion(
         onStage("正在保存到下载目录…")
         onProgress(0.88f)
         val published = publishToDownloads(
-            context, out, plan.target.mime, control.canceled,
+            context, out, plan.target.mime, control.flag,
         ) { p -> onProgress(0.88f + (p ?: 0f) * 0.12f) }
         if (published.path != null) {
             onProgress(1f)

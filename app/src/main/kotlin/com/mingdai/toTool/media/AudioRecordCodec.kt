@@ -96,7 +96,7 @@ internal object AudioRecordCodec {
         val headerPixels = layout.headerBytes / 3
         for (i in 0 until headerPixels) {
             val offset = i * 3
-            pixels[i] = argb(header[offset], header[offset + 1], header[offset + 2])
+            pixels[i] = argb(header[offset].toInt(), header[offset + 1].toInt(), header[offset + 2].toInt())
         }
         val payloadStart = headerPixels
         var source = 0

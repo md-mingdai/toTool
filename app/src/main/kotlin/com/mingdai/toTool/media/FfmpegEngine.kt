@@ -67,14 +67,13 @@ private fun runProbe(ffmpeg: File, args: List<String>): String? = try {
 /** 取消标志 + 当前进程；UI 和后台线程共享。 */
 internal class ConversionControl {
     private val process = AtomicReference<Process?>(null)
+    val flag = AtomicBoolean(false)
 
-    @Volatile
-    var canceled = false
-        private set
+    val canceled: Boolean get() = flag.get()
 
     fun attach(target: Process) {
         process.set(target)
-        if (canceled) target.destroyForcibly()
+        if (flag.get()) target.destroyForcibly()
     }
 
     fun detach(target: Process) {
@@ -82,12 +81,12 @@ internal class ConversionControl {
     }
 
     fun cancel() {
-        canceled = true
+        flag.set(true)
         process.get()?.destroyForcibly()
     }
 
     fun reset() {
-        canceled = false
+        flag.set(false)
         process.set(null)
     }
 }
