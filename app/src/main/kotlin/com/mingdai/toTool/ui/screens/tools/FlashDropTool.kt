@@ -169,50 +169,6 @@ fun FlashDropTool(padding: PaddingValues) {
             onRestart = { controller.restart() },
         )
 
-        if (state.running && state.pairRequests.isNotEmpty()) {
-            SectionLabel("交互式配对请求")
-            state.pairRequests.forEach { request ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            request.remoteHost,
-                            style = MiuixTheme.textStyles.body1,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            request.userAgent.ifBlank { "未知浏览器" },
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            formatFileTime(request.createdAt),
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                        PrimaryButton(
-                            onClick = { controller.approvePairRequest(request.id) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("允许本次配对") }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SecondaryButton(
-                                onClick = { controller.denyPairRequest(request.id) },
-                                modifier = Modifier.weight(1f),
-                            ) { Text("拒绝", maxLines = 1) }
-                            SecondaryButton(
-                                onClick = { controller.blockPairRequest(request.id) },
-                                modifier = Modifier.weight(1f),
-                            ) { Text("本次禁止", maxLines = 1) }
-                        }
-                    }
-                }
-            }
-        }
-
         if (!state.storageGranted) {
             PermissionCard(onGrant = { requestStorageAccess() })
         }
@@ -268,6 +224,61 @@ fun FlashDropTool(padding: PaddingValues) {
                 }
                 FlashDropTab.RECEIVED -> ReceivedTab(controller)
                 FlashDropTab.CLIPBOARD -> ClipboardTab(controller)
+            }
+        }
+    }
+
+    val pendingPairRequest = state.pairRequests.firstOrNull()
+    AppDialog(
+        show = pendingPairRequest != null,
+        title = "交互式配对请求",
+        summary = null,
+        confirmText = null,
+        dismissText = null,
+        onDismiss = {},
+        onConfirm = {},
+    ) {
+        pendingPairRequest?.let { request ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    "${request.remoteHost} 请求连接这台手机",
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    request.userAgent.ifBlank { "未知浏览器" },
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "请求时间：${formatFileTime(request.createdAt)}",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                PrimaryButton(
+                    onClick = { controller.approvePairRequest(request.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("允许本次配对") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryButton(
+                        onClick = { controller.denyPairRequest(request.id) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("拒绝", maxLines = 1) }
+                    SecondaryButton(
+                        onClick = { controller.blockPairRequest(request.id) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("暂时拉黑", maxLines = 1) }
+                }
+                Text(
+                    "暂时拉黑只对本次隔空闪传服务生效，关闭服务后解除。",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
             }
         }
     }

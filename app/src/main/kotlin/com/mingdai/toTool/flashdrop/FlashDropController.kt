@@ -117,7 +117,8 @@ class FlashDropController(
                         code = next.code,
                         addresses = localAddresses(),
                         pairedClients = next.pairedCount,
-                        pairRequests = emptyList(),
+                        // 启动期间可能已有配对请求，不能覆盖为空。
+                        pairRequests = next.pendingPairRequests(),
                         encryptionEnabled = next.encryptionActive,
                         storageGranted = hasStorageAccess(),
                         error = null,

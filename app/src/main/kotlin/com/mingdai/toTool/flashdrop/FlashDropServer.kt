@@ -290,14 +290,15 @@ class FlashDropServer private constructor(
         return changed
     }
 
+    fun pendingPairRequests(): List<PairRequestInfo> = synchronized(pairRequests) {
+        pairRequests.values
+            .filter { it.status == "pending" }
+            .sortedBy { it.createdAt }
+            .map { PairRequestInfo(it.id, it.remoteHost, it.userAgent, it.createdAt) }
+    }
+
     private fun notifyPairRequests() {
-        val pending = synchronized(pairRequests) {
-            pairRequests.values
-                .filter { it.status == "pending" }
-                .sortedBy { it.createdAt }
-                .map { PairRequestInfo(it.id, it.remoteHost, it.userAgent, it.createdAt) }
-        }
-        listener.onPairRequestsChanged(pending)
+        listener.onPairRequestsChanged(pendingPairRequests())
     }
 
     private fun configureServer(application: Application) {
