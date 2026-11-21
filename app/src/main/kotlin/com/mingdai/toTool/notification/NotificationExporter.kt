@@ -8,7 +8,7 @@ import java.io.OutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/** 将当前通知列表导出为 zip：notifications.json + media/*.png。 */
+/** 将当前通知列表导出为 zip：通知 JSON 与 media 目录下的图片。 */
 internal object NotificationExporter {
     fun export(items: List<NotificationHiderItem>, output: OutputStream): Int {
         ZipOutputStream(BufferedOutputStream(output)).use { zip ->

@@ -24,6 +24,10 @@ data class HighPermissionStatus(
 
 class HighPermissionRun {
     @Volatile
+    var stopped = false
+        private set
+
+    @Volatile
     private var stopper: (() -> Unit)? = null
 
     internal fun bind(stopper: () -> Unit) {
@@ -31,6 +35,7 @@ class HighPermissionRun {
     }
 
     fun stop() {
+        stopped = true
         runCatching { stopper?.invoke() }
     }
 }

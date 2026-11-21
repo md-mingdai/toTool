@@ -214,7 +214,7 @@ fun GachaLinkTool(padding: PaddingValues) {
                         ShizukuState.READY -> Unit
                         ShizukuState.NEEDS_PERMISSION -> PrimaryButton(
                             onClick = {
-                                HighPermissionManager.requestPermission()?.let {
+                                HighPermissionManager.requestPermission(context)?.let {
                                     Toast.makeText(context, it, Toast.LENGTH_LONG).show()
                                 }
                             },
