@@ -332,6 +332,14 @@ fun NotificationCenterTool(padding: PaddingValues) {
 
         HintText("恢复通知后，当前被隐藏的通知需要系统重新投递或应用重新推送后才会重新出现。")
     }
+
+    selectedNotification?.let { item ->
+        NotificationDetailDialog(
+            item = item,
+            onClose = { selectedNotification = null },
+            onExportMedia = { exportMediaLauncher.launch("totool-notification-media.zip") },
+        )
+    }
 }
 
 @Composable
