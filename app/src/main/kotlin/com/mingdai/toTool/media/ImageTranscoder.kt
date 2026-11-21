@@ -214,11 +214,20 @@ internal fun prepareLoopImage(
     canceled: AtomicBoolean,
 ): File {
     if (canceled.get()) throw ConvertCanceledException()
-    val bitmap = ImageOps.uriToBitmap(context, uri, maxSide)
+    var bitmap = ImageOps.uriToBitmap(context, uri, maxSide)
         ?: throw ConvertException("无法解码这张图片，或图片格式不受系统支持")
     val out = File(dir, "conv_img_${System.nanoTime()}.png")
     try {
         if (canceled.get()) throw ConvertCanceledException()
+        if (bitmap.hasAlpha()) {
+            val flattened = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+            Canvas(flattened).apply {
+                drawColor(android.graphics.Color.WHITE)
+                drawBitmap(bitmap, 0f, 0f, null)
+            }
+            bitmap.recycle()
+            bitmap = flattened
+        }
         out.outputStream().use { stream ->
             if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
                 throw IOException("PNG 编码失败")
