@@ -137,7 +137,7 @@ export function SearchOverlay({ query, onQueryChange, onClose, originRect }: Sea
           autoComplete="off"
           spellCheck={false}
         />
-        {!query && <kbd>Esc</kbd>}
+        <kbd>Esc</kbd>
         <button
           type="button"
           className="search-overlay-close"

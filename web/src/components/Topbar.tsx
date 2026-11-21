@@ -84,13 +84,12 @@ export function Topbar({
           spellCheck={false}
           autoComplete="off"
         />
-        {query ? (
+        {query && (
           <button type="button" className="search-clear" onClick={() => onQueryChange('')} aria-label="清除搜索">
             <X size={15} weight="regular" />
           </button>
-        ) : (
-          <kbd className="search-kbd">{shortcut}</kbd>
         )}
+        <kbd className="search-kbd">{shortcut}</kbd>
       </div>
 
       <div className="topbar-actions">
