@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,12 +45,14 @@ import com.mingdai.toTool.notification.NotificationExporter
 import com.mingdai.toTool.notification.NotificationHiderBridge
 import com.mingdai.toTool.notification.NotificationHiderItem
 import com.mingdai.toTool.notification.NotificationHiderService
+import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SectionLabel
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.WarnColor
+import com.mingdai.toTool.ui.components.copyText
 import java.text.SimpleDateFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
