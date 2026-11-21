@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -75,6 +80,26 @@ fun NotificationCenterTool(padding: PaddingValues) {
         refreshAccess()
     }
     val scope = rememberCoroutineScope()
+    var selectedNotification by remember { mutableStateOf<NotificationHiderItem?>(null) }
+    val exportMediaLauncher = rememberLauncherForActivityResult(CreateDocument("application/zip")) { uri ->
+        val item = selectedNotification
+        if (uri != null && item != null) {
+            scope.launch {
+                val saved = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { stream ->
+                            NotificationExporter.exportMedia(listOf(item), stream)
+                        } ?: 0
+                    }.getOrDefault(0)
+                }
+                Toast.makeText(
+                    context,
+                    if (saved > 0) "已导出 $saved 个媒体文件" else "没有可导出的媒体",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
     val exportLauncher = rememberLauncherForActivityResult(CreateDocument("application/zip")) { uri ->
         if (uri != null) {
             val items = NotificationHiderBridge.notifications.value
@@ -235,6 +260,7 @@ fun NotificationCenterTool(padding: PaddingValues) {
                             item = item,
                             action = "隐藏",
                             actionColor = colors.primary,
+                            onOpen = { selectedNotification = item },
                             onAction = {
                                 if (NotificationHiderBridge.hide(item.key)) {
                                     Toast.makeText(context, "已隐藏通知", Toast.LENGTH_SHORT).show()
@@ -287,6 +313,7 @@ fun NotificationCenterTool(padding: PaddingValues) {
                             item = item,
                             action = "恢复",
                             actionColor = colors.primary,
+                            onOpen = { selectedNotification = item },
                             onAction = {
                                 if (NotificationHiderBridge.unhide(item.key)) {
                                     Toast.makeText(context, "已取消隐藏", Toast.LENGTH_SHORT).show()
@@ -309,11 +336,15 @@ private fun NotificationRow(
     item: NotificationHiderItem,
     action: String,
     actionColor: androidx.compose.ui.graphics.Color,
+    onOpen: () -> Unit,
     onAction: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -385,6 +416,123 @@ private fun NotificationRow(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(onClick = onAction)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun NotificationDetailDialog(
+    item: NotificationHiderItem,
+    onClose: () -> Unit,
+    onExportMedia: () -> Unit,
+) {
+    val context = LocalContext.current
+    AppDialog(
+        show = true,
+        title = "通知详情",
+        confirmText = "关闭",
+        dismissText = null,
+        onDismiss = onClose,
+        onConfirm = onClose,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            NotificationDetailField("应用", "${item.appName} · ${item.packageName}", context)
+            NotificationDetailField("标题", item.title, context)
+            if (item.text.isNotBlank()) NotificationDetailField("正文", item.text, context)
+            if (item.subText.isNotBlank()) NotificationDetailField("副文本", item.subText, context)
+            if (item.bigText.isNotBlank()) NotificationDetailField("大文本", item.bigText, context)
+            if (item.infoText.isNotBlank()) NotificationDetailField("信息文本", item.infoText, context)
+            if (item.textLines.isNotEmpty()) {
+                NotificationDetailField("文本行", item.textLines.joinToString("\n"), context)
+            }
+            item.progress?.let { progress ->
+                NotificationDetailField(
+                    "进度",
+                    if (progress.indeterminate) "不确定进度" else "${progress.value} / ${progress.max}",
+                    context,
+                )
+            }
+            if (item.actions.isNotEmpty()) {
+                NotificationDetailField("控件", item.actions.joinToString("\n"), context)
+            }
+            NotificationDetailField(
+                "属性",
+                buildString {
+                    append(if (item.ongoing) "常驻" else "普通")
+                    append(" · ").append(if (item.clearable) "可滑动清除" else "不可清除")
+                    if (item.category.isNotBlank()) append(" · 分类 ").append(item.category)
+                    if (item.channelId.isNotBlank()) append(" · 渠道 ").append(item.channelId)
+                },
+                context,
+            )
+            NotificationDetailField(
+                "时间",
+                formatNotificationTime(if (item.isHidden) item.hiddenAt else item.postTime),
+                context,
+            )
+            if (item.media.isNotEmpty()) {
+                Text(
+                    "媒体",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                item.media.forEachIndexed { index, bitmap ->
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "通知媒体 ${index + 1}",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 180.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                    )
+                }
+                SecondaryButton(onClick = onExportMedia, modifier = Modifier.fillMaxWidth()) {
+                    Text("导出媒体（${item.media.size} 项）")
+                }
+            } else {
+                Text(
+                    "这条通知没有可导出的媒体",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationDetailField(label: String, value: String, context: android.content.Context) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Text(
+                value.ifBlank { "—" },
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+        }
+        Text(
+            "复制",
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { copyText(context, value, label) }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
 }

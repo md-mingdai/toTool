@@ -58,4 +58,22 @@ internal object NotificationExporter {
         }
         return items.size
     }
+
+    /** 只导出通知里的媒体图片。 */
+    fun exportMedia(items: List<NotificationHiderItem>, output: OutputStream): Int {
+        var count = 0
+        ZipOutputStream(BufferedOutputStream(output)).use { zip ->
+            items.forEachIndexed { index, item ->
+                item.media.forEachIndexed { mediaIndex, bitmap ->
+                    runCatching {
+                        zip.putNextEntry(ZipEntry("notification-${index + 1}-${mediaIndex + 1}.png"))
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, zip)
+                        zip.closeEntry()
+                        count += 1
+                    }
+                }
+            }
+        }
+        return count
+    }
 }
