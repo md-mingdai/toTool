@@ -85,8 +85,15 @@ private val unitGroups: List<UnitGroup> = listOf(
         linear("米/秒", "m/s", 1.0), linear("千米/时", "km/h", 0.2777778), linear("英里/时", "mph", 0.44704), linear("节", "kn", 0.5144444),
     )),
     UnitGroup("数据", listOf(
-        linear("字节 B", "B", 1.0), linear("KB", "KB", 1024.0), linear("MB", "MB", 1048576.0),
-        linear("GB", "GB", 1073741824.0), linear("TB", "TB", 1099511627776.0),
+        linear("字节 B", "B", 1.0),
+        linear("千字节 KB（1000 B）", "KB", 1_000.0),
+        linear("KiB（1024 B）", "KiB", 1_024.0),
+        linear("兆字节 MB（1000² B）", "MB", 1_000_000.0),
+        linear("MiB（1024² B）", "MiB", 1_048_576.0),
+        linear("吉字节 GB（1000³ B）", "GB", 1_000_000_000.0),
+        linear("GiB（1024³ B）", "GiB", 1_073_741_824.0),
+        linear("太字节 TB（1000⁴ B）", "TB", 1_000_000_000_000.0),
+        linear("TiB（1024⁴ B）", "TiB", 1_099_511_627_776.0),
     )),
 )
 
@@ -205,6 +212,13 @@ fun UnitConverterTool(padding: PaddingValues) {
             modifier = Modifier.fillMaxWidth(),
         )
         ResultBox(result, label = "结果")
+        if (groupIndex == unitGroups.indexOfFirst { it.name == "数据" }) {
+            Text(
+                "KB / MB / GB / TB 使用 1000 进制；KiB / MiB / GiB / TiB 使用 1024 进制。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
     }
 }
 
