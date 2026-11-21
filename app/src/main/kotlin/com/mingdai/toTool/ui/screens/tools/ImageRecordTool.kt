@@ -138,7 +138,7 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         scope.launch {
             try {
                 val outcome = withContext(Dispatchers.IO) {
-                    val bytes = readLimitedBytes(context, uri, AudioRecordCodec.MAX_AUDIO_BYTES)
+                    val bytes = readLimitedBytes(context, uri, AudioRecordCodec.MAX_AUDIO_BYTES, canceled)
                     val mime = mimeOf(context, uri, name)
                     val maxPixels = minOf(
                         AudioRecordCodec.MAX_RECORD_PIXELS,
@@ -194,11 +194,13 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
                     context.contentResolver.openInputStream(uri)?.use {
                         BitmapFactory.decodeStream(it, null, bounds)
                     }
+                    val pixelCount = bounds.outWidth.toLong() * bounds.outHeight
                     if (bounds.outWidth > AudioRecordCodec.MAX_DIMENSION ||
                         bounds.outHeight > AudioRecordCodec.MAX_DIMENSION ||
-                        bounds.outWidth.toLong() * bounds.outHeight > AudioRecordCodec.MAX_RECORD_PIXELS
+                        pixelCount > AudioRecordCodec.MAX_RECORD_PIXELS ||
+                        pixelCount > MemoryBudget.maxPixels(context, 8.0)
                     ) {
-                        throw ConvertException("图片尺寸过大，拒绝解码")
+                        throw ConvertException("图片尺寸过大或超出当前内存预算，拒绝解码")
                     }
                     val source = ImageDecoder.createSource(context.contentResolver, uri)
                     val bitmap = ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
@@ -375,7 +377,12 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     }
 }
 
-private fun readLimitedBytes(context: Context, uri: Uri, limit: Int): ByteArray {
+private fun readLimitedBytes(
+    context: Context,
+    uri: Uri,
+    limit: Int,
+    canceled: AtomicBoolean,
+): ByteArray {
     val known = queryFileSize(context, uri)
     if (known > limit) throw ConvertException("音频太大（最大 ${limit / (1024 * 1024)} MB）")
     val output = ByteArrayOutputStream()
@@ -383,6 +390,7 @@ private fun readLimitedBytes(context: Context, uri: Uri, limit: Int): ByteArray 
         val buffer = ByteArray(64 * 1024)
         var total = 0
         while (true) {
+            if (canceled.get()) throw ConvertCanceledException()
             val n = input.read(buffer)
             if (n < 0) break
             total += n

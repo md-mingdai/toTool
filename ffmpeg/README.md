@@ -136,14 +136,15 @@ NDK 的结果会略有出入；压缩后的数字是按 deflate 估的，约等�
 | 构建 | 原始 | 压缩后 |
 | --- | --- | --- |
 | 以前的预编译包（`--enable-small`，没有 LAME / Opus / Vorbis） | 15.5 MB | 8.1 MB |
-| 现在（`--enable-small`，带 LAME / Opus / Vorbis） | 17.2 MB | 8.3 MB |
-| 改成按速度优化（`FFMPEG_SMALL=0`，`-O2`） | 19.8 MB | 9.9 MB |
+| 仅 LAME / Opus / Vorbis（旧） | 17.2 MB | 8.3 MB |
+| 当前：再加 x264 / libvpx（n8.1.3、arm64 实测） | 19.5 MB | 9.6 MB |
 
-所以默认用 `--enable-small`（`versions.env` 里的 `FFMPEG_SMALL=1`），体积和以前基本一样，代价是转码速度略慢。
-想要更快就改成 0，或者本地 `FFMPEG_SMALL=0 ffmpeg/build.sh <abi>` 试一下。
+默认用 `--enable-small`（`versions.env` 里的 `FFMPEG_SMALL=1`）。加入 x264 / libvpx 后每个架构大约增加
+2～3 MB 原始体积、1～2 MB 压缩体积；单个 APK 约 27 MB。想更快就改成 0，或者本地
+`FFMPEG_SMALL=0 ffmpeg/build.sh <abi>` 试一下。
 
-每个架构的 APK 只带自己的那一份，所以单个 APK 和以前差不多大；如果把四个架构塞进同一个 APK，
-就会多出三份（三十多 MB），这也是 CI 里每个架构各打一个 APK 的原因。需要再瘦身时可以：
+每个架构的 APK 只带自己的那一份；如果把四个架构塞进同一个 APK，
+libffmpeg.so 会再多出三份（约三十 MB），这也是 CI 里每个架构各打一个 APK 的原因。需要再瘦身时可以：
 
 - 用 `--disable-encoder=…` / `--disable-decoder=…` 去掉用不到的编解码器（会让「执行原始 ffmpeg 命令」少一些能力）
 - 去掉不需要的架构：`build.yml` 的 `matrix.abi` 和 `build.sh` 的 `ALL_ABIS`（`x86` / `x86_64` 基本只在模拟器上用到）

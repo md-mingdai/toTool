@@ -125,6 +125,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var infoLoading by remember { mutableStateOf(false) }
 
     var target by remember { mutableStateOf<TargetOption?>(null) }
+    var targetManual by remember { mutableStateOf(false) }
     var targetDialog by remember { mutableStateOf(false) }
     var capabilities by remember { mutableStateOf<FfmpegCapabilities?>(null) }
     var capabilityState by remember { mutableStateOf(CapabilityState.LOADING) }
@@ -179,14 +180,16 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     LaunchedEffect(sourceKind, sourceExt, sourceUri, capabilities, capabilityState) {
         if (sourceUri == null) {
             target = null
+            targetManual = false
             return@LaunchedEffect
         }
         val stillValid = target?.let { selected ->
             groups.any { group -> group.options.any { it.id == selected.id && it.medium == selected.medium } } &&
                 !(selected.medium == sourceKind && isSameFormat(sourceExt, selected))
         } == true
-        if (!stillValid) {
+        if (!stillValid || !targetManual) {
             target = defaultTarget(sourceKind, sourceExt, capabilities, capabilityState == CapabilityState.READY)
+            if (!stillValid) targetManual = false
         }
     }
 
@@ -219,6 +222,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 stageText = ""
                 progress = 0f
                 val ext = normalizedExtension(name)
+                targetManual = false
                 target = defaultTarget(kind, ext, capabilities, capabilityState == CapabilityState.READY)
             }
         }
@@ -330,6 +334,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         framePreview = null
         customCoverUri = null
         customCoverName = null
+        targetManual = false
         target = defaultTarget(kind, "", capabilities, capabilityState == CapabilityState.READY)
         clearResult()
         stageText = ""
@@ -357,6 +362,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             frameIndex = frameIndex.takeIf { conversionBranch == ConversionBranch.VIDEO_IMAGE },
             visualMode = visualMode,
             resolution = resolution,
+            solidColor = solidColor,
             customImage = customCoverUri,
         )
         control.reset()
@@ -729,6 +735,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         selected = target,
         onSelect = {
             target = it
+            targetManual = true
             targetDialog = false
             clearResult()
         },

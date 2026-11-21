@@ -83,14 +83,12 @@ internal fun buildFfmpegAttempts(
 
         ConversionBranch.VIDEO_VIDEO,
         ConversionBranch.VIDEO_AUDIO,
-        ConversionBranch.AUDIO_AUDIO,
-        -> {
+        ConversionBranch.AUDIO_AUDIO -> {
             buildAttempts(plan.target.id, plan.source.extension, encoders)
                 .map { listOf("-i", inputPath) + it }
         }
 
         ConversionBranch.IMAGE_IMAGE,
-        ConversionBranch.VIDEO_IMAGE,
-        -> emptyList()
+        ConversionBranch.VIDEO_IMAGE -> emptyList()
     }
 }

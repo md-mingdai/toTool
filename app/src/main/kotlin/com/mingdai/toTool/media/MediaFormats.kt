@@ -69,6 +69,8 @@ internal fun encoderArgs(name: String): List<String> = when (name) {
     "libopus" -> listOf("-b:a", "128k")
     "mpeg4" -> listOf("-q:v", "3", "-pix_fmt", "yuv420p")
     "libx264" -> listOf("-crf", "23", "-preset", "veryfast", "-pix_fmt", "yuv420p")
+    "libvpx" -> listOf("-b:v", "2M", "-pix_fmt", "yuv420p")
+    "libvpx-vp9" -> listOf("-b:v", "2M", "-row-mt", "1", "-pix_fmt", "yuv420p")
     else -> emptyList()
 }
 

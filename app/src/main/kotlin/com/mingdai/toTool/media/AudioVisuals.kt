@@ -116,6 +116,7 @@ internal fun prepareArtwork(
     audioUri: Uri,
     mode: VisualMode,
     customImage: Uri?,
+    solidColor: Int,
     audioTitle: String,
     audioDurationMs: Long,
     width: Int,
@@ -132,7 +133,7 @@ internal fun prepareArtwork(
                 createGeneratedCover(audioTitle, durationLabel(audioDurationMs), width, height)
             }
         }
-        VisualMode.SOLID -> createSolidCover(width, height, Color.rgb(20, 28, 23))
+        VisualMode.SOLID -> createSolidCover(width, height, solidColor)
         VisualMode.CUSTOM -> {
             val uri = customImage ?: throw ConvertException("请选择自定义画面图片")
             val source = ImageOps.uriToBitmap(context, uri, max(width, height))

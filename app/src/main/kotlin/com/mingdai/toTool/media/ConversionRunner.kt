@@ -114,6 +114,7 @@ internal fun runConversion(
                         audioUri = plan.source.uri,
                         mode = plan.visualMode,
                         customImage = plan.customImage,
+                        solidColor = plan.solidColor,
                         audioTitle = audioInfo?.title?.ifBlank { null } ?: plan.baseName,
                         audioDurationMs = audioInfo?.durationMs ?: 0L,
                         width = plan.resolution.width,

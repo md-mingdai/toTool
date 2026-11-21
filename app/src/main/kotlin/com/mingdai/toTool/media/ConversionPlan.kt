@@ -43,6 +43,7 @@ internal data class ConversionPlan(
     val frameIndex: Int? = null,
     val visualMode: VisualMode = VisualMode.COVER,
     val resolution: ResolutionPreset = ResolutionPreset.P720,
+    val solidColor: Int = 0xFF162018.toInt(),
     val customImage: Uri? = null,
 ) {
     val baseName: String get() = baseNameOf(source.name)
@@ -79,8 +80,7 @@ internal fun branchFor(source: MediaKind, target: MediaKind): ConversionBranch? 
 
 internal fun ConversionBranch.needsFfmpeg(): Boolean = when (this) {
     ConversionBranch.IMAGE_IMAGE,
-    ConversionBranch.VIDEO_IMAGE,
-    -> false
+    ConversionBranch.VIDEO_IMAGE -> false
     else -> true
 }
 
