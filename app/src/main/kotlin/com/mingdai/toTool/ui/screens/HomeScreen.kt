@@ -84,10 +84,9 @@ import com.mingdai.toTool.ui.components.collapsingBar
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.mingdai.toTool.data.LocalBehaviorState
-import com.mingdai.toTool.ui.components.FavoriteStarColor
+import com.mingdai.toTool.ui.components.favoriteContainerColor
 import com.mingdai.toTool.ui.components.ToolActionMenu
 import com.mingdai.toTool.ui.components.rememberEdgeHaptics
 import com.mingdai.toTool.ui.components.rememberHaptics
@@ -446,7 +445,7 @@ private fun CategoryGroup(
 
 /**
  * Pill-shaped, content-sized button — never fixed width, so names show in full.
- * 长按弹出和卡片一样的菜单（收藏 / 添加到主屏幕）；已收藏的药丸末尾带一颗小星星。
+ * 长按弹出和卡片一样的菜单（收藏 / 添加到主屏幕）；已收藏的药丸使用暖黄底色。
  */
 @Composable
 private fun ToolPill(
@@ -458,11 +457,17 @@ private fun ToolPill(
     val isFavorite = LocalFavorites.current.isFavorite(tool.id)
     var menuOpen by remember { mutableStateOf(false) }
 
+    val pillColor = if (isFavorite) {
+        favoriteContainerColor()
+    } else {
+        MiuixTheme.colorScheme.secondaryContainer
+    }
+
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
-                .background(MiuixTheme.colorScheme.secondaryContainer)
+                .background(pillColor)
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
@@ -485,15 +490,6 @@ private fun ToolPill(
                 style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSurface,
             )
-            if (isFavorite) {
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.Filled.Star,
-                    contentDescription = null,
-                    tint = FavoriteStarColor,
-                    modifier = Modifier.size(12.dp),
-                )
-            }
         }
         ToolActionMenu(show = menuOpen, tool = tool, onDismiss = { menuOpen = false })
     }

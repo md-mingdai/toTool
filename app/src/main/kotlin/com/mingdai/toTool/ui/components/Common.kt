@@ -184,8 +184,8 @@ fun ToolBody(
  * A grid card for one tool.
  *
  * Long-press opens a context menu to favorite / un-favorite or pin the tool to
- * the home screen. In [compact] mode the card shows only the icon and name
- * (no favorite star, no description) for a denser layout.
+ * the home screen. Favorite cards use a warm yellow container; in [compact]
+ * mode the card shows only the icon and name for a denser layout.
  */
 @Composable
 fun ToolCard(
@@ -199,10 +199,19 @@ fun ToolCard(
     var menuOpen by remember { mutableStateOf(false) }
     val favoriteLabel = if (isFavorite) stringResource(R.string.action_unfavorite)
                         else stringResource(R.string.action_favorite)
+    val cardColor = if (isFavorite) {
+        favoriteContainerColor(MiuixTheme.colorScheme.surfaceContainer)
+    } else {
+        MiuixTheme.colorScheme.surfaceContainer
+    }
 
     Box(modifier = modifier) {
         Card(
             modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.defaultColors(
+                color = cardColor,
+                contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+            ),
             pressFeedbackType = PressFeedbackType.Sink,
             showIndication = true,
             onClick = onClick,
@@ -244,17 +253,19 @@ fun ToolCard(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        IconButton(
-                            onClick = { favorites.toggle(tool.id) },
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Icon(
-                                imageVector = if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
-                                contentDescription = favoriteLabel,
-                                tint = if (isFavorite) FavoriteStarColor
-                                       else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.size(20.dp),
-                            )
+                        // 已收藏的卡片用黄底标识；只在不曾收藏时保留“添加收藏”的星标入口。
+                        if (!isFavorite) {
+                            IconButton(
+                                onClick = { favorites.toggle(tool.id) },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.StarBorder,
+                                    contentDescription = favoriteLabel,
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(4.dp))

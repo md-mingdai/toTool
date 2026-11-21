@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +40,12 @@ import androidx.compose.ui.unit.TextUnit
 
 /** 收藏星标的高亮色（Miuix 配色里没有独立的 tertiary，这里固定用琥珀色）。 */
 val FavoriteStarColor = Color(0xFFFFB300)
+
+/** 收藏入口的暖黄底色：把琥珀色叠到当前 surface 上，亮色和暗色主题都保持可读。 */
+@Composable
+@ReadOnlyComposable
+fun favoriteContainerColor(background: Color = MiuixTheme.colorScheme.surface): Color =
+    FavoriteStarColor.copy(alpha = 0.22f).compositeOver(background)
 
 /** 提示 / 未对准等“警示”状态用的橙色。 */
 val WarnColor = Color(0xFFFF9800)
