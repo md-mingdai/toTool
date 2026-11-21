@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 从源码交叉编译 FFmpeg（纯 LGPL），产出要打进 APK 的 libffmpeg.so。
+# 从源码交叉编译 FFmpeg（启用 GPL 组件，GPLv3 构建），产出要打进 APK 的 libffmpeg.so。
 #
-# libffmpeg.so 其实是个可执行文件：FFmpeg 自己的全部库（libavcodec 等）和下面这几个
-# 外部库——LAME（MP3）、Opus、Vorbis、Ogg——都静态链接进去，只动态依赖 Android 系统自带的
-# libc / libm / libdl / libz / libandroid / libmediandk。它放在 jniLibs/<abi>/ 下，
-# 安装时被解压到 nativeLibraryDir，应用再用 ProcessBuilder 启动它
+# libffmpeg.so 其实是个可执行文件：FFmpeg 自己的全部库（libavcodec 等）和下面这些
+# 外部库——LAME（MP3）、Opus、Vorbis、Ogg、x264（H.264）、libvpx（VP8/VP9）——
+# 都静态链接进去，只动态依赖 Android 系统自带的 libc / libm / libdl / libz / libandroid / libmediandk。
+# 它放在 jniLibs/<abi>/ 下，安装时被解压到 nativeLibraryDir，应用再用 ProcessBuilder 启动它
 # （Android 10+ 只有这个目录里的文件允许被执行）。
 #
-# 许可证：configure 不带 --enable-gpl / --enable-nonfree / --enable-version3，
-# 所以整个 libffmpeg.so 是 LGPL-2.1+。不要往里加 libx264 / libx265 / libxvid / libfdk-aac 这类库。
+# 许可证：FFmpeg 使用 --enable-gpl --enable-version3；
+# 不启用 nonfree 组件。为控制 APK 体积，只加入 x264 和 libvpx，不加入 x265 / libaom / SVT-AV1
+# 这类体积很大的编码器。
 # 编完会自动检查（见 verify_binary），configuration 里出现不在白名单里的外部库就报错。
 #
 # 用法：
@@ -17,7 +18,7 @@
 #   ffmpeg/build.sh all            依次编这四个 ABI
 #   ffmpeg/build.sh host           用本机编译器编一份能在本机直接运行的版本，
 #                                  只用来快速验证配置和编码器，不会进 APK
-#   ffmpeg/build.sh verify <abi>   只校验已经编好的产物（ELF 格式、16 KB 对齐、LGPL）
+#   ffmpeg/build.sh verify <abi>   只校验已经编好的产物（ELF 格式、16 KB 对齐、许可证）
 #
 # 环境变量（都可选）：
 #   ANDROID_NDK_ROOT   NDK 目录（r23 或更新）。不设置时到 $ANDROID_HOME/ndk/ 下找
@@ -50,8 +51,8 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || echo 2)}"
 # libffmpeg.so 允许动态依赖的系统库（都是 NDK 稳定 API，所有 Android 设备上都有）。
 SYSTEM_LIBS="libc.so libm.so libdl.so libz.so liblog.so libandroid.so libmediandk.so"
 # configuration 里允许出现的外部库。出现别的 --enable-lib* 就判定失败，
-# 防止以后有人顺手加了个 GPL 库却没发现。
-ALLOWED_LIBS="libmp3lame libopus libvorbis"
+# 防止以后有人顺手加了不在白名单里的外部库。
+ALLOWED_LIBS="libmp3lame libopus libvorbis libx264 libvpx"
 # Android 15 起有 16 KB 页大小的设备，可执行文件的 LOAD 段必须按 16 KB 对齐。
 PAGE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
 
@@ -176,6 +177,8 @@ fetch_sources() {
     fetch_git opus "$OPUS_TAG" "$OPUS_COMMIT" "$OPUS_GIT_URLS";         OPUS_SRC="$FETCH_RESULT"
     fetch_git ogg "$OGG_TAG" "$OGG_COMMIT" "$OGG_GIT_URLS";             OGG_SRC="$FETCH_RESULT"
     fetch_git vorbis "$VORBIS_TAG" "$VORBIS_COMMIT" "$VORBIS_GIT_URLS"; VORBIS_SRC="$FETCH_RESULT"
+    fetch_git x264 "$X264_TAG" "$X264_COMMIT" "$X264_GIT_URLS";         X264_SRC="$FETCH_RESULT"
+    fetch_git vpx "$VPX_TAG" "$VPX_COMMIT" "$VPX_GIT_URLS";             VPX_SRC="$FETCH_RESULT"
     group_end
 }
 
@@ -329,6 +332,56 @@ build_opus() {
     stamp_set "opus-$OPUS_TAG"
 }
 
+build_x264() {
+    stamp_ok "x264-$X264_COMMIT" && { log "x264 已编译，跳过"; return 0; }
+    local bdir="$BUILD_DIR/x264" conf
+    rm -rf "$bdir"; mkdir -p "$bdir"
+    conf=(--prefix="$PREFIX" --enable-static --disable-cli --enable-pic
+          --disable-opencl --bit-depth=8)
+    [ -n "$TC_HOST" ] && conf+=(--host="$TC_HOST")
+    # 32 位 x86 的手写汇编会产生 Android 不允许的 text relocation。
+    [ "$ABI" = x86 ] && conf+=(--disable-asm)
+    run x264-configure in_dir "$bdir" env CC="$CC" AR="$AR" RANLIB="$RANLIB" STRIP="$STRIP" \
+        CFLAGS="$DEP_CFLAGS" "$X264_SRC/configure" "${conf[@]}"
+    run x264-build in_dir "$bdir" make -j"$JOBS"
+    run x264-install in_dir "$bdir" make install
+    stamp_set "x264-$X264_COMMIT"
+}
+
+build_vpx() {
+    stamp_ok "vpx-$VPX_COMMIT" && { log "libvpx 已编译，跳过"; return 0; }
+    local bdir="$BUILD_DIR/vpx" target conf envs=()
+    rm -rf "$bdir"; mkdir -p "$bdir"
+    case "$ABI" in
+        arm64-v8a) target=arm64-android-gcc ;;
+        armeabi-v7a) target=armv7-android-gcc ;;
+        x86_64) target=x86_64-android-gcc ;;
+        x86) target=x86-android-gcc ;;
+        host)
+            case "$(uname -m)" in
+                x86_64|amd64) target=x86_64-linux-gcc ;;
+                aarch64|arm64) target=arm64-linux-gcc ;;
+                i?86) target=x86-linux-gcc ;;
+                *) die "libvpx host 构建不支持这个架构：$(uname -m)" ;;
+            esac
+            ;;
+        *) die "libvpx 不支持的 ABI：$ABI" ;;
+    esac
+    conf=(--target="$target" --prefix="$PREFIX" --disable-shared --enable-static
+          --disable-examples --disable-tools --disable-docs --disable-webm-io
+          --enable-vp8 --enable-vp9 --enable-pic)
+    envs=(CC="$CC" CXX="$CXX" AR="$AR" LD="$CC" RANLIB="$RANLIB" STRIP="$STRIP" NM="$NM"
+          CFLAGS="$DEP_CFLAGS" LDFLAGS="-L$PREFIX/lib")
+    # ARM 的 .S 文件由 clang 汇编；x86 让 configure 自己找 nasm。
+    case "$ABI" in
+        arm64-v8a|armeabi-v7a) envs+=(AS="$CC -c") ;;
+    esac
+    run vpx-configure in_dir "$bdir" env "${envs[@]}" "$VPX_SRC/configure" "${conf[@]}"
+    run vpx-build in_dir "$bdir" make -j"$JOBS"
+    run vpx-install in_dir "$bdir" make install
+    stamp_set "vpx-$VPX_COMMIT"
+}
+
 # ---------------------------------- FFmpeg ------------------------------------
 
 build_ffmpeg() {
@@ -339,8 +392,8 @@ build_ffmpeg() {
     args=(
         "$FFMPEG_SRC/configure"
         --prefix="$PREFIX/ffmpeg"
-        # 许可证：纯 LGPL。这三项本来就是默认值，显式写出来是为了让 configuration 字符串里留下记录。
-        --disable-gpl --disable-nonfree --disable-version3
+        # 启用 GPL 组件并选择 GPLv3，仍明确禁用 nonfree。
+        --enable-gpl --enable-version3 --disable-nonfree
         # 只要 ffmpeg 命令行程序；所有库都静态链接进去
         --enable-static --disable-shared
         --enable-ffmpeg --disable-ffplay --disable-ffprobe
@@ -350,7 +403,7 @@ build_ffmpeg() {
         --disable-autodetect
         --enable-pic --enable-runtime-cpudetect
         --enable-zlib --enable-iconv
-        --enable-libmp3lame --enable-libopus --enable-libvorbis
+        --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libx264 --enable-libvpx
         --pkg-config-flags=--static
         "${opt[@]}"
         --extra-cflags="-I$PREFIX/include $FF_EXTRA_CFLAGS"
@@ -382,8 +435,10 @@ package_output() {
         echo "Opus:       $OPUS_TAG"
         echo "Ogg:        $OGG_TAG"
         echo "Vorbis:     $VORBIS_TAG"
+        echo "x264:       $X264_TAG ($X264_COMMIT)"
+        echo "libvpx:     $VPX_TAG ($VPX_COMMIT)"
         echo "NDK:        $ndk_rev (API $ANDROID_API)"
-        echo "License:    LGPL version 2.1 or later"
+        echo "License:    GPL version 3 or later"
         echo "Size:       $(wc -c <"$bin") bytes"
         echo "SHA-256:    $(sha256_of "$bin")"
         echo "configure:  $conf"
@@ -454,13 +509,15 @@ verify_binary() {
     fi
 
     # ---- 许可证 ----
-    if grep -Fq 'LGPL version 2.1 or later' "$strs"; then pass "许可证：LGPL version 2.1 or later"; else fail "二进制里找不到 \"LGPL version 2.1 or later\""; fi
-    if grep -Eq '(^|[^L])GPL version|LGPL version 3|nonfree and unredistributable' "$strs"; then
-        fail "二进制里出现了 GPL / LGPLv3 / nonfree 的许可证字样"
+    if grep -Fq 'GPL version 3 or later' "$strs"; then pass "许可证：GPL version 3 or later"; else fail "二进制里找不到 \"GPL version 3 or later\""; fi
+    if grep -Fq 'nonfree and unredistributable' "$strs"; then
+        fail "二进制里出现了 nonfree 许可证字样"
     else
-        pass "没有 GPL / nonfree 字样"
+        pass "没有 nonfree 字样"
     fi
-    if grep -Eq -- '--enable-(gpl|nonfree|version3)' "$strs"; then fail "configuration 里有 --enable-gpl / --enable-nonfree / --enable-version3"; else pass "configuration 没有 gpl / nonfree / version3"; fi
+    grep -Fq -- '--enable-gpl' "$strs" && pass "configuration 启用了 --enable-gpl" || fail "configuration 缺少 --enable-gpl"
+    grep -Fq -- '--enable-version3' "$strs" && pass "configuration 启用了 --enable-version3" || fail "configuration 缺少 --enable-version3"
+    if grep -Fq -- '--enable-nonfree' "$strs"; then fail "configuration 启用了 --enable-nonfree"; fi
     local libs l
     libs="$(grep -o -- '--enable-lib[a-z0-9_]*' "$strs" | sort -u | sed 's/^--enable-//' || true)"
     for l in $libs; do
@@ -483,7 +540,7 @@ selftest_host() {
     log "自测（host）"
     "$bin" -hide_banner -version | head -n 3
     enc="$("$bin" -hide_banner -encoders)"
-    for e in libmp3lame libopus libvorbis aac flac mpeg4; do
+    for e in libmp3lame libopus libvorbis aac flac mpeg4 libx264 libvpx-vp9; do
         grep -Eq "^ [VAS][.A-Z]{5} +$e " <<<"$enc" || die "缺少编码器：$e"
     done
     local sine=(-f lavfi -i "sine=frequency=440:duration=1")
@@ -494,7 +551,11 @@ selftest_host() {
     "$bin" -hide_banner -loglevel error "${sine[@]}" -c:a flac "$t/a.flac"
     "$bin" -hide_banner -loglevel error -f lavfi -i "testsrc=size=320x240:rate=15:duration=1" \
         -c:v mpeg4 -q:v 3 -pix_fmt yuv420p "$t/v.mp4"
-    for e in a.mp3 a.ogg a.opus a.m4a a.flac v.mp4; do
+    "$bin" -hide_banner -loglevel error -f lavfi -i "testsrc=size=320x240:rate=15:duration=1" \
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p "$t/v_h264.mp4"
+    "$bin" -hide_banner -loglevel error -f lavfi -i "testsrc=size=320x240:rate=15:duration=1" \
+        -c:v libvpx-vp9 -b:v 200k -pix_fmt yuv420p "$t/v_vp9.webm"
+    for e in a.mp3 a.ogg a.opus a.m4a a.flac v.mp4 v_h264.mp4 v_vp9.webm; do
         [ -s "$t/$e" ] || die "生成的文件是空的：$e"
         "$bin" -hide_banner -v error -i "$t/$e" -f null - || die "生成的文件无法解码：$e"
         echo "  ✔ $e（$(wc -c <"$t/$e") 字节）"
@@ -530,11 +591,13 @@ build_abi() {
     log "工作目录：$BUILD_ROOT"
     fetch_sources
 
-    group_start "外部库：LAME / Ogg / Vorbis / Opus"
+    group_start "外部库：LAME / Ogg / Vorbis / Opus / x264 / libvpx"
     build_lame
     build_ogg
     build_vorbis
     build_opus
+    build_x264
+    build_vpx
     group_end
 
     group_start "FFmpeg"

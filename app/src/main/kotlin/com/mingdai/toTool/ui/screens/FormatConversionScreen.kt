@@ -69,6 +69,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import android.graphics.PorterDuff
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import com.mingdai.toTool.ui.screens.format.FormatQuickConvertPane
 import com.mingdai.toTool.ui.screens.tools.MemoryBudget
 import java.io.BufferedOutputStream
 import java.io.FilterOutputStream
@@ -184,7 +185,7 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
         )
         val paneModifier = Modifier.weight(1f).fillMaxWidth()
         if (mode == 0) {
-            QuickConvertPane(modifier = paneModifier, onBusyChange = { busy = it })
+            FormatQuickConvertPane(modifier = paneModifier, onBusyChange = { busy = it })
         } else {
             FfmpegCommandPane(modifier = paneModifier, onBusyChange = { busy = it })
         }

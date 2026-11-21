@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Brightness5
 import androidx.compose.material.icons.filled.BlurOn
@@ -131,6 +132,7 @@ object ToolRegistry {
         Tool("img_watermark", "图片水印", "平铺文字水印，可指定斜率与透明度", ToolCategory.IMAGE, Icons.Filled.PhotoLibrary),
         Tool("img_blur", "毛玻璃图生成", "高斯模糊加白色蒙层", ToolCategory.IMAGE, Icons.Filled.BlurOn),
         Tool("img_roundrect", "圆角矩形生成", "图片四角圆角裁切", ToolCategory.IMAGE, Icons.Filled.RoundedCorner),
+        Tool("img_audio_record", "图片唱片", "把音频编码进 PNG 像素，或从图片唱片还原音频（娱乐，不是加密）", ToolCategory.IMAGE, Icons.Filled.AudioFile),
     )
 
     val byId: Map<String, Tool> = all.associateBy { it.id }

@@ -46,6 +46,7 @@ import com.mingdai.toTool.ui.screens.tools.ImageBlurTool
 import com.mingdai.toTool.ui.screens.tools.ImageCompressTool
 import com.mingdai.toTool.ui.screens.tools.ImageGrayscaleTool
 import com.mingdai.toTool.ui.screens.tools.ImagePixelateTool
+import com.mingdai.toTool.ui.screens.tools.ImageRecordTool
 import com.mingdai.toTool.ui.screens.tools.ImageRoundRectTool
 import com.mingdai.toTool.ui.screens.tools.ImageWatermarkTool
 import com.mingdai.toTool.ui.screens.tools.JsonTool
@@ -248,6 +249,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "img_watermark" -> ImageWatermarkTool(padding)
             "img_blur" -> ImageBlurTool(padding)
             "img_roundrect" -> ImageRoundRectTool(padding)
+            "img_audio_record" -> ImageRecordTool(padding)
             else -> Box(modifier = Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("该工具尚未实现")
             }
