@@ -244,11 +244,8 @@ class FlashDropServer private constructor(
                     found.status = "expired"
                     null
                 }
-                found.number != selectedNumber -> {
-                    // 数字不匹配就不能完成配对，同时结束这次请求，避免反复试错。
-                    found.status = "denied"
-                    null
-                }
+                // 数字不匹配时不结束请求，方便手机端重新选择。
+                found.number != selectedNumber -> null
                 else -> found
             }
         } ?: run {

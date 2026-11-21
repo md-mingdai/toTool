@@ -91,7 +91,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
       if (caught instanceof PairingBlockedError) {
         setError('手机已在本次隔空闪传会话中禁止此设备发起交互式配对。请使用配对码，或重启隔空闪传服务后再试。')
       } else if (caught instanceof PairingRequestDeniedError) {
-        setError('手机端拒绝了这次配对请求，或选择的数字与网页不一致。')
+        setError('手机端拒绝了这次配对请求。')
       } else if (caught instanceof PairingRequestExpiredError) {
         setError('配对请求已过期，请重新发起。')
       } else if (caught instanceof PairingRequestTimeoutError) {
@@ -336,7 +336,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
         {interactive && (
           <p className="pair-interactive-hint">
             {challenge !== null
-              ? '手机上选对数字后会自动完成配对。过期、拒绝或选错后可重新发起。'
+              ? '手机上选对数字后会自动完成配对。过期或拒绝后可重新发起。'
               : '正在向手机端发起配对请求…'}
           </p>
         )}

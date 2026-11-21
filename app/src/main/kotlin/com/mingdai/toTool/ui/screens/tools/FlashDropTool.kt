@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.text.format.Formatter
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -230,6 +229,12 @@ fun FlashDropTool(padding: PaddingValues) {
     }
 
     val pendingPairRequest = state.pairRequests.firstOrNull()
+    var selectedPairNumber by remember { mutableStateOf<Int?>(null) }
+    var pairNumberError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingPairRequest?.id) {
+        selectedPairNumber = null
+        pairNumberError = null
+    }
     AppDialog(
         show = pendingPairRequest != null,
         title = "确认配对数字",
@@ -262,7 +267,7 @@ fun FlashDropTool(padding: PaddingValues) {
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Text(
-                    "请在网页上查看本次配对数字，并在下面选择相同的一项。",
+                    "请在网页上查看本次配对数字，选择相同的一项后再点确认。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurface,
                 )
@@ -271,29 +276,58 @@ fun FlashDropTool(padding: PaddingValues) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     request.options.forEach { option ->
-                        SecondaryButton(
-                            onClick = {
-                                if (!controller.approvePairRequest(request.id, option)) {
-                                    Toast.makeText(
-                                        context,
-                                        "数字不一致，已拒绝本次配对",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
+                        val selected = selectedPairNumber == option
+                        val container = if (selected) {
+                            MiuixTheme.colorScheme.primary
+                        } else {
+                            MiuixTheme.colorScheme.secondaryContainer
+                        }
+                        val content = if (selected) {
+                            MiuixTheme.colorScheme.onPrimary
+                        } else {
+                            MiuixTheme.colorScheme.onSecondaryContainer
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(container)
+                                .clickable {
+                                    selectedPairNumber = option
+                                    pairNumberError = null
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
+                                .padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 option.toString(),
                                 style = MiuixTheme.textStyles.title4.copy(fontFamily = FontFamily.Monospace),
                                 fontWeight = FontWeight.Bold,
+                                color = content,
                                 maxLines = 1,
                             )
                         }
                     }
                 }
+                pairNumberError?.let { message ->
+                    Text(
+                        message,
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = WarnColor,
+                    )
+                }
+                PrimaryButton(
+                    onClick = {
+                        val choice = selectedPairNumber
+                        if (choice != null && !controller.approvePairRequest(request.id, choice)) {
+                            pairNumberError = "数字与网页不一致，请重新选择"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = selectedPairNumber != null,
+                ) { Text("确认配对") }
                 Text(
-                    "选错会拒绝本次请求；也可以直接拒绝或暂时拉黑。",
+                    "确认前可以随时改选；选错不会结束请求。也可以直接拒绝或暂时拉黑。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
