@@ -55,6 +55,7 @@ export function SearchOverlay({ query, onQueryChange, onClose, originRect }: Sea
     const origin = originRef.current
     if (!panel || !origin) return
     const target = targetBox()
+    inputRef.current?.focus({ preventScroll: true })
     panel.style.position = 'fixed'
     panel.style.margin = '0'
     panel.style.minHeight = '0'
@@ -100,7 +101,6 @@ export function SearchOverlay({ query, onQueryChange, onClose, originRect }: Sea
   }, [onClose])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 30)
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -109,7 +109,6 @@ export function SearchOverlay({ query, onQueryChange, onClose, originRect }: Sea
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
-      window.clearTimeout(timer)
       if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current)
       window.removeEventListener('keydown', onKeyDown)
     }

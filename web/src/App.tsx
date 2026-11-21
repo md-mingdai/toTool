@@ -802,6 +802,48 @@ export default function App() {
     syncUrl(category, folder?.path ?? '', next, appsScope, true)
   }, [appsScope, category, folder?.path, syncUrl])
 
+  // 页面没有输入焦点时，直接敲字就打开搜索，并把第一个字符带进去。
+  useEffect(() => {
+    if (
+      !paired ||
+      searchOpen ||
+      sidebarOpen ||
+      selected ||
+      mediaEntry ||
+      pendingDelete ||
+      uploadQueueOpen
+    ) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.isComposing || event.key === 'Process' || event.keyCode === 229) return
+      if (event.key.length !== 1 || event.key === ' ') return
+      const target = event.target
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName
+        if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          return
+        }
+      }
+      event.preventDefault()
+      handleQueryChange(event.key)
+      openSearch(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    handleQueryChange,
+    mediaEntry,
+    openSearch,
+    paired,
+    pendingDelete,
+    searchOpen,
+    selected,
+    sidebarOpen,
+    uploadQueueOpen,
+  ])
+
   const handleScopeChange = useCallback((next: AppScope | 'all') => {
     setAppsScope(next)
     setPage(1)
