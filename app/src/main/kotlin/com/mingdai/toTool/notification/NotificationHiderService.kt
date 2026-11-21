@@ -1,6 +1,7 @@
 package com.mingdai.toTool.notification
 
 import android.app.Notification
+import android.graphics.Bitmap
 import android.content.ComponentName
 import android.content.Context
 import android.content.SharedPreferences
@@ -8,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.graphics.drawable.toBitmap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -195,12 +197,45 @@ class NotificationHiderService : NotificationListenerService() {
         val title = (extras?.getCharSequence(Notification.EXTRA_TITLE)
             ?: notification.tickerText)?.toString().orEmpty()
         val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val progressValue = extras?.getInt(Notification.EXTRA_PROGRESS, -1) ?: -1
+        val progressMax = extras?.getInt(Notification.EXTRA_PROGRESS_MAX, 0) ?: 0
+        val indeterminate = extras?.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false) ?: false
+        val progress = if (progressValue >= 0 || indeterminate) {
+            NotificationProgress(progressValue.coerceAtLeast(0), progressMax.coerceAtLeast(0), indeterminate)
+        } else {
+            null
+        }
+        val lines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }
+            ?.take(20)
+            .orEmpty()
+        val actions = notification.actions
+            ?.mapNotNull { it.title?.toString()?.takeIf(String::isNotBlank) }
+            ?.take(20)
+            .orEmpty()
+        val media = ArrayList<Bitmap>(4)
+        (extras?.get(Notification.EXTRA_PICTURE) as? Bitmap)?.let(media::add)
+        (extras?.get(Notification.EXTRA_LARGE_ICON_BIG) as? Bitmap)?.let(media::add)
+        (extras?.get(Notification.EXTRA_LARGE_ICON) as? Bitmap)?.let(media::add)
+        runCatching { notification.getLargeIcon()?.loadDrawable(this)?.toBitmap() }
+            .getOrNull()?.let(media::add)
         return NotificationHiderItem(
             key = sbn.key,
             packageName = sbn.packageName,
             appName = appName(sbn.packageName),
             title = title.ifBlank { appName(sbn.packageName) },
             text = text,
+            subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+            bigText = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+            infoText = extras?.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty(),
+            textLines = lines,
+            category = notification.category.orEmpty(),
+            channelId = notification.channelId.orEmpty(),
+            ongoing = sbn.isOngoing,
+            clearable = sbn.isClearable,
+            progress = progress,
+            actions = actions,
+            media = media.distinctBy { System.identityHashCode(it) }.take(4),
             postTime = sbn.postTime,
             isHidden = record != null,
             hiddenAt = record?.hiddenAt ?: 0L,

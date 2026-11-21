@@ -143,6 +143,8 @@ export interface EncryptionInfo {
   enabled: boolean
   salt?: string
   iterations?: number
+  /** 交互式配对直接下发随机 AES 密钥（base64）。 */
+  key?: string
 }
 
 export interface PairResult {

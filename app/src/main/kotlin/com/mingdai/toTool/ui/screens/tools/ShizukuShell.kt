@@ -202,7 +202,7 @@ internal fun cleanTerminalText(line: String): String {
 }
 
 /** 起一个线程读一个输出流，读到结束为止。 */
-private fun pumpStream(
+internal fun pumpStream(
     stream: InputStream,
     isError: Boolean,
     onLine: (isError: Boolean, line: String) -> Unit,

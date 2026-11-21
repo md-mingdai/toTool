@@ -1,7 +1,8 @@
 package com.mingdai.toTool.gacha
 
-import com.mingdai.toTool.ui.screens.tools.ShellRun
-import com.mingdai.toTool.ui.screens.tools.runShizukuShell
+import android.content.Context
+import com.mingdai.toTool.permission.HighPermissionManager
+import com.mingdai.toTool.permission.HighPermissionRun
 import java.io.IOException
 import java.util.Collections
 
@@ -10,10 +11,10 @@ internal object GachaRecentReader {
     private const val COMMAND =
         "logcat -d | grep -i gacha | grep -E 'https?://' | tail -n 50"
 
-    fun read(run: ShellRun): GachaLinkResult {
+    fun read(context: Context, run: HighPermissionRun): GachaLinkResult {
         val output = Collections.synchronizedList(mutableListOf<String>())
         val errors = Collections.synchronizedList(mutableListOf<String>())
-        val exitCode = runShizukuShell(COMMAND, run) { isError, line ->
+        val exitCode = HighPermissionManager.execute(context, COMMAND, run = run) { isError, line ->
             if (isError) errors.add(line) else output.add(line)
         }
         val link = output.asSequence()

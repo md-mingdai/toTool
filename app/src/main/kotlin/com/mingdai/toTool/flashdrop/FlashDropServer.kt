@@ -87,6 +87,13 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
+data class PairRequestInfo(
+    val id: String,
+    val remoteHost: String,
+    val userAgent: String,
+    val createdAt: Long,
+)
+
 data class ClipboardMessage(
     val id: String,
     val text: String,
@@ -115,6 +122,7 @@ class FlashDropServer private constructor(
     interface Listener {
         fun onCodeChanged(code: String)
         fun onClientsChanged(count: Int)
+        fun onPairRequestsChanged(requests: List<PairRequestInfo>) {}
         fun onError(message: String)
     }
 
@@ -128,6 +136,9 @@ class FlashDropServer private constructor(
     private val clipboardHistory = Collections.synchronizedList(mutableListOf<ClipboardMessage>())
     private val sockets = Collections.synchronizedSet(mutableSetOf<WebSocketSession>())
     private val categoryCache = ConcurrentHashMap<String, CategoryCacheEntry>()
+    private val pairRequests = ConcurrentHashMap<String, PendingPairRequest>()
+    private val blockedPairDevices = Collections.synchronizedSet(mutableSetOf<String>())
+    private val pairRequestTimes = ConcurrentHashMap<String, Long>()
 
     @Volatile
     private var lastClipboardText = ""
@@ -160,6 +171,16 @@ class FlashDropServer private constructor(
         val encryptionKey: SecretKey?,
     )
 
+    private data class PendingPairRequest(
+        val id: String,
+        val remoteHost: String,
+        val userAgent: String,
+        val deviceKey: String,
+        val createdAt: Long,
+        @Volatile var status: String = "pending",
+        @Volatile var response: JSONObject? = null,
+    )
+
     private data class CategoryCacheEntry(
         val cachedAt: Long,
         val files: List<File>,
@@ -183,6 +204,10 @@ class FlashDropServer private constructor(
 
     fun stop() {
         sessions.clear()
+        pairRequests.clear()
+        blockedPairDevices.clear()
+        pairRequestTimes.clear()
+        listener.onPairRequestsChanged(emptyList())
         listener.onClientsChanged(0)
         runCatching { engine?.stop(0, 0) }
         engine = null
@@ -202,6 +227,77 @@ class FlashDropServer private constructor(
         // 旧 session 的密钥和当前设置不一致，直接让它们重新配对
         sessions.clear()
         listener.onClientsChanged(0)
+    }
+
+    fun approvePairRequest(id: String): Boolean {
+        val now = System.currentTimeMillis()
+        val request = synchronized(pairRequests) {
+            val found = pairRequests[id] ?: return false
+            if (found.status != "pending") return false
+            if (now - found.createdAt > PAIR_REQUEST_TTL_MS) {
+                found.status = "expired"
+                null
+            } else {
+                found
+            }
+        } ?: run {
+            notifyPairRequests()
+            return false
+        }
+        val token = randomToken()
+        val keyBytes = if (encryptionEnabled) ByteArray(32).also(secureRandom::nextBytes) else null
+        val sessionKey = keyBytes?.let { SecretKeySpec(it, "AES") }
+        sessions[token] = Session(token, now + TOKEN_TTL_MS, sessionKey)
+        listener.onClientsChanged(sessions.size)
+        val response = JSONObject()
+            .put("token", token)
+            .put("port", port)
+            .put("device", deviceJson())
+            .put(
+                "encryption",
+                JSONObject().put("enabled", sessionKey != null).apply {
+                    keyBytes?.let { put("key", Base64.encodeToString(it, Base64.NO_WRAP)) }
+                },
+            )
+        synchronized(pairRequests) {
+            request.response = response
+            request.status = "approved"
+        }
+        notifyPairRequests()
+        return true
+    }
+
+    fun denyPairRequest(id: String): Boolean {
+        val changed = synchronized(pairRequests) {
+            val request = pairRequests[id] ?: return false
+            if (request.status != "pending") return false
+            request.status = "denied"
+            true
+        }
+        if (changed) notifyPairRequests()
+        return changed
+    }
+
+    fun blockPairRequest(id: String): Boolean {
+        val changed = synchronized(pairRequests) {
+            val request = pairRequests[id] ?: return false
+            if (request.status != "pending") return false
+            request.status = "blocked"
+            blockedPairDevices.add(request.deviceKey)
+            true
+        }
+        if (changed) notifyPairRequests()
+        return changed
+    }
+
+    private fun notifyPairRequests() {
+        val pending = synchronized(pairRequests) {
+            pairRequests.values
+                .filter { it.status == "pending" }
+                .sortedBy { it.createdAt }
+                .map { PairRequestInfo(it.id, it.remoteHost, it.userAgent, it.createdAt) }
+        }
+        listener.onPairRequestsChanged(pending)
     }
 
     private fun configureServer(application: Application) {
@@ -312,6 +408,73 @@ class FlashDropServer private constructor(
         respondJson(call, HttpStatusCode.OK, response)
     }
 
+    private suspend fun handlePairRequest(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Post) {
+            methodNotAllowed(call)
+            return
+        }
+        val remoteHost = runCatching { call.request.local.remoteHost }.getOrDefault("unknown")
+        val userAgent = header(call, "User-Agent").orEmpty().take(300)
+        val deviceKey = MessageDigest.getInstance("SHA-256")
+            .digest("$remoteHost\n$userAgent".toByteArray())
+            .let { Base64.encodeToString(it, Base64.NO_WRAP) }
+        if (deviceKey in blockedPairDevices) {
+            respondJson(call, HttpStatusCode.Forbidden, JSONObject().put("error", "pair-request-blocked"))
+            return
+        }
+        val now = System.currentTimeMillis()
+        val last = pairRequestTimes[deviceKey] ?: 0L
+        if (now - last < 1_500L) {
+            respondJson(call, HttpStatusCode.TooManyRequests, JSONObject().put("error", "rate-limited"))
+            return
+        }
+        pairRequestTimes[deviceKey] = now
+        if (pairRequests.values.count { it.status == "pending" } >= 20) {
+            respondJson(call, HttpStatusCode.TooManyRequests, JSONObject().put("error", "too-many-requests"))
+            return
+        }
+        val request = synchronized(pairRequests) {
+            pairRequests.values.firstOrNull { it.deviceKey == deviceKey && it.status == "pending" }
+                ?: run {
+                    val created = PendingPairRequest(
+                        id = randomToken(),
+                        remoteHost = remoteHost,
+                        userAgent = userAgent,
+                        deviceKey = deviceKey,
+                        createdAt = now,
+                    )
+                    pairRequests[created.id] = created
+                    created
+                }
+        }
+        notifyPairRequests()
+        respondJson(call, HttpStatusCode.OK, JSONObject().put("id", request.id).put("status", request.status))
+    }
+
+    private suspend fun handlePairRequestStatus(call: ApplicationCall) {
+        if (call.request.httpMethod != HttpMethod.Get) {
+            methodNotAllowed(call)
+            return
+        }
+        val id = call.request.queryParameters["id"].orEmpty()
+        val request = pairRequests[id]
+        if (request == null) {
+            respondJson(call, HttpStatusCode.NotFound, JSONObject().put("error", "pair-request-not-found"))
+            return
+        }
+        if (request.status == "pending" && System.currentTimeMillis() - request.createdAt > PAIR_REQUEST_TTL_MS) {
+            synchronized(pairRequests) { request.status = "expired" }
+            notifyPairRequests()
+        }
+        val body = JSONObject().put("status", request.status)
+        if (request.status == "approved") {
+            request.response?.let { response ->
+                response.keys().forEach { key -> body.put(key, response.get(key)) }
+            }
+        }
+        respondJson(call, HttpStatusCode.OK, body)
+    }
+
     private suspend fun handleSession(call: ApplicationCall) {
         if (call.request.httpMethod != HttpMethod.Get) {
             methodNotAllowed(call)
@@ -356,6 +519,8 @@ class FlashDropServer private constructor(
                 JSONObject().put("ok", true).put("service", "flashdrop"),
             )
             path == "/api/pair" -> handlePair(call)
+            path == "/api/pair/request" -> handlePairRequest(call)
+            path == "/api/pair/request/status" -> handlePairRequestStatus(call)
             path == "/api/session" -> handleSession(call)
             path == "/api/logout" -> handleLogout(call)
             path == "/api/apps" -> handleApps(call)
@@ -1703,6 +1868,7 @@ class FlashDropServer private constructor(
         const val PORT_START = 2233
         const val PORT_END = 2333
         private const val TOKEN_TTL_MS = 24L * 60 * 60 * 1000
+        private const val PAIR_REQUEST_TTL_MS = 5L * 60 * 1000
         private const val ATTEMPT_WINDOW_MS = 60_000L
         private const val MAX_ATTEMPTS = 5
         private const val PAGE_SIZE = 250

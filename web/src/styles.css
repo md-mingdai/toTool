@@ -2177,6 +2177,19 @@ input[type='checkbox'] {
   margin-top: 14px;
 }
 
+.pair-interactive {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.pair-interactive-hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
 .pair-foot {
   display: flex;
   align-items: center;

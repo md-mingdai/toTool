@@ -39,6 +39,10 @@ import com.mingdai.toTool.gacha.GachaLinkBridge
 import com.mingdai.toTool.gacha.GachaLinkResult
 import com.mingdai.toTool.gacha.GachaLinkService
 import com.mingdai.toTool.gacha.GachaRecentReader
+import com.mingdai.toTool.permission.HighPermissionManager
+import com.mingdai.toTool.permission.HighPermissionRun
+import com.mingdai.toTool.permission.HighPermissionStatus
+import com.mingdai.toTool.permission.HighPermissionStrategy
 import com.mingdai.toTool.shizuku.ShizukuAccess
 import com.mingdai.toTool.shizuku.ShizukuState
 import com.mingdai.toTool.ui.components.HintText
@@ -69,6 +73,7 @@ fun GachaLinkTool(padding: PaddingValues) {
     val watch by GachaLinkBridge.state.collectAsState()
 
     var state by remember { mutableStateOf(ShizukuAccess.state(context)) }
+    var highStatus by remember { mutableStateOf(HighPermissionManager.status(context)) }
     var identity by remember { mutableStateOf<String?>(null) }
     var settled by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf(false) }
@@ -76,11 +81,12 @@ fun GachaLinkTool(padding: PaddingValues) {
     var quickBusy by remember { mutableStateOf(false) }
     var quickResult by remember { mutableStateOf<GachaLinkResult?>(null) }
     var quickError by remember { mutableStateOf<String?>(null) }
-    var quickRun by remember { mutableStateOf<ShellRun?>(null) }
+    var quickRun by remember { mutableStateOf<HighPermissionRun?>(null) }
 
     fun refreshShizuku() {
         val now = ShizukuAccess.state(context)
         state = now
+        highStatus = HighPermissionManager.status(context)
         identity = if (now == ShizukuState.READY) ShizukuAccess.identity() else null
     }
 
@@ -120,15 +126,15 @@ fun GachaLinkTool(padding: PaddingValues) {
     }
 
     fun fetchRecent() {
-        if (quickBusy || watch.running || state != ShizukuState.READY) return
+        if (quickBusy || watch.running || !highStatus.ready) return
         quickBusy = true
         quickError = null
         quickResult = null
-        val run = ShellRun()
+        val run = HighPermissionRun()
         quickRun = run
         scope.launch {
             try {
-                quickResult = withContext(Dispatchers.IO) { GachaRecentReader.read(run) }
+                quickResult = withContext(Dispatchers.IO) { GachaRecentReader.read(context, run) }
             } catch (caught: CancellationException) {
                 throw caught
             } catch (caught: Throwable) {
@@ -141,7 +147,7 @@ fun GachaLinkTool(padding: PaddingValues) {
     }
 
     fun requestStart() {
-        if (watch.running || quickBusy || state != ShizukuState.READY) return
+        if (watch.running || quickBusy || !highStatus.ready) return
         quickResult = null
         quickError = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -175,65 +181,69 @@ fun GachaLinkTool(padding: PaddingValues) {
             }
         }
 
-        SectionLabel("Shizuku")
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        when {
-                            !settled && state == ShizukuState.NOT_RUNNING -> "正在检测 Shizuku…"
-                            state == ShizukuState.READY -> "已就绪"
-                            state == ShizukuState.NEEDS_PERMISSION -> "等待授权"
-                            state == ShizukuState.NOT_INSTALLED -> "没有安装 Shizuku"
-                            state == ShizukuState.NOT_RUNNING -> "Shizuku 未运行"
-                            state == ShizukuState.DENIED -> "授权被拒绝"
-                            else -> "Shizuku 不可用"
-                        },
-                        style = MiuixTheme.textStyles.body1,
-                    )
-                    if (identity != null) {
+        SectionLabel(if (highStatus.strategy == HighPermissionStrategy.SHIZUKU) "Shizuku" else "高级权限")
+        if (highStatus.strategy == HighPermissionStrategy.SHIZUKU) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            identity ?: "",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(start = 8.dp),
+                            when {
+                                !settled && state == ShizukuState.NOT_RUNNING -> "正在检测 Shizuku…"
+                                state == ShizukuState.READY -> "已就绪"
+                                state == ShizukuState.NEEDS_PERMISSION -> "等待授权"
+                                state == ShizukuState.NOT_INSTALLED -> "没有安装 Shizuku"
+                                state == ShizukuState.NOT_RUNNING -> "Shizuku 未运行"
+                                state == ShizukuState.DENIED -> "授权被拒绝"
+                                else -> "Shizuku 不可用"
+                            },
+                            style = MiuixTheme.textStyles.body1,
                         )
+                        if (identity != null) {
+                            Text(
+                                identity ?: "",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+                    when (state) {
+                        ShizukuState.READY -> Unit
+                        ShizukuState.NEEDS_PERMISSION -> PrimaryButton(
+                            onClick = {
+                                HighPermissionManager.requestPermission()?.let {
+                                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("请求 Shizuku 授权") }
+                        ShizukuState.NOT_INSTALLED -> PrimaryButton(
+                            onClick = {
+                                if (!ShizukuAccess.openDownload(context)) {
+                                    Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("下载 Shizuku") }
+                        else -> PrimaryButton(
+                            onClick = {
+                                if (!ShizukuAccess.openShizuku(context)) {
+                                    Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("打开 Shizuku") }
+                    }
+                    SecondaryButton(onClick = { refreshShizuku() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("重新检测")
                     }
                 }
-                when (state) {
-                    ShizukuState.READY -> Unit
-                    ShizukuState.NEEDS_PERMISSION -> PrimaryButton(
-                        onClick = {
-                            ShizukuAccess.requestPermission()?.let {
-                                Toast.makeText(context, it, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("请求 Shizuku 授权") }
-                    ShizukuState.NOT_INSTALLED -> PrimaryButton(
-                        onClick = {
-                            if (!ShizukuAccess.openDownload(context)) {
-                                Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("下载 Shizuku") }
-                    else -> PrimaryButton(
-                        onClick = {
-                            if (!ShizukuAccess.openShizuku(context)) {
-                                Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("打开 Shizuku") }
-                }
-                SecondaryButton(onClick = { refreshShizuku() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("重新检测")
-                }
             }
+        } else {
+            HighPermissionRootCard(status = highStatus, onRecheck = { refreshShizuku() })
         }
 
         if (watch.running) {
@@ -246,7 +256,7 @@ fun GachaLinkTool(padding: PaddingValues) {
         } else {
             PrimaryButton(
                 onClick = { requestStart() },
-                enabled = state == ShizukuState.READY && !quickBusy,
+                enabled = highStatus.ready && !quickBusy,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("开始后台等待（推荐）")
@@ -255,7 +265,7 @@ fun GachaLinkTool(padding: PaddingValues) {
 
         SecondaryButton(
             onClick = { fetchRecent() },
-            enabled = state == ShizukuState.READY && !quickBusy && !watch.running,
+            enabled = highStatus.ready && !quickBusy && !watch.running,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(if (quickBusy) "正在读取最近日志…" else "立即读取最近日志")
@@ -334,6 +344,26 @@ fun GachaLinkTool(padding: PaddingValues) {
         }
 
         HintText("后台监听会保留通知直到你手动停止。最近日志可能包含上一次打开的记录链接；如果结果不是本次记录，请重新在游戏里打开抽卡页后再试。")
+    }
+}
+
+@Composable
+private fun HighPermissionRootCard(status: HighPermissionStatus, onRecheck: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("高级权限：Root", style = MiuixTheme.textStyles.headline2)
+            Text(
+                status.detail,
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (status.ready) MiuixTheme.colorScheme.primary else WarnColor,
+            )
+            SecondaryButton(onClick = onRecheck, modifier = Modifier.fillMaxWidth()) {
+                Text("重新检测")
+            }
+        }
     }
 }
 

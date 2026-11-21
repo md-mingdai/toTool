@@ -13,10 +13,8 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
-import com.mingdai.toTool.shizuku.ShizukuAccess
-import com.mingdai.toTool.shizuku.ShizukuState
-import com.mingdai.toTool.ui.screens.tools.ShellRun
-import com.mingdai.toTool.ui.screens.tools.runShizukuShell
+import com.mingdai.toTool.permission.HighPermissionManager
+import com.mingdai.toTool.permission.HighPermissionRun
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -46,7 +44,7 @@ class GachaLinkService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var worker: Thread? = null
-    private var shellRun: ShellRun? = null
+    private var shellRun: HighPermissionRun? = null
 
     @Volatile
     private var running = false
@@ -74,20 +72,21 @@ class GachaLinkService : Service() {
         stopping = false
         GachaLinkBridge.state.value = GachaWatchState(running = true, waiting = true)
         startForeground(WAITING_NOTIFICATION_ID, waitingNotification())
-        if (ShizukuAccess.state(this) != ShizukuState.READY) {
-            fail("Shizuku 还没有授权，请先在米游记录获取页面授权")
+        val permission = HighPermissionManager.status(this)
+        if (!permission.ready) {
+            fail("高级权限未就绪：${permission.detail}")
             return
         }
         val found = AtomicReference<GachaLinkResult?>(null)
-        val run = ShellRun()
+        val run = HighPermissionRun()
         shellRun = run
         worker = thread(name = "gacha-logcat", isDaemon = true) {
             // logcat 不带 -d 会先输出最近缓冲区，再持续跟随新日志：
             // 既能把刚刚打开记录页产生的链接读出来，也能在用户切到游戏后继续等待。
             try {
-                runShizukuShell("logcat -v brief", run) { isError, line ->
-                    if (isError) return@runShizukuShell
-                    val link = GachaLinkParser.parse(line) ?: return@runShizukuShell
+                HighPermissionManager.execute(this, "logcat -v brief", run = run) { isError, line ->
+                    if (isError) return@execute
+                    val link = GachaLinkParser.parse(line) ?: return@execute
                     if (found.compareAndSet(null, link)) {
                         run.stop()
                     }

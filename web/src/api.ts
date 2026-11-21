@@ -56,6 +56,34 @@ export class PairingRejectedError extends Error {
   }
 }
 
+export class PairingBlockedError extends Error {
+  constructor() {
+    super('pair-request-blocked')
+    this.name = 'PairingBlockedError'
+  }
+}
+
+export class PairingRequestDeniedError extends Error {
+  constructor() {
+    super('pair-request-denied')
+    this.name = 'PairingRequestDeniedError'
+  }
+}
+
+export class PairingRequestExpiredError extends Error {
+  constructor() {
+    super('pair-request-expired')
+    this.name = 'PairingRequestExpiredError'
+  }
+}
+
+export class PairingRequestTimeoutError extends Error {
+  constructor() {
+    super('pair-request-timeout')
+    this.name = 'PairingRequestTimeoutError'
+  }
+}
+
 export class PairingRateLimitedError extends Error {
   constructor() {
     super('rate-limited')
@@ -176,6 +204,70 @@ export async function pair(code: string): Promise<PairResult> {
     clearEncryptionKey()
   }
   return data
+}
+
+export async function requestInteractivePairing(): Promise<string> {
+  let response: Response
+  try {
+    response = await fetch('/api/pair/request', { method: 'POST', cache: 'no-store' })
+  } catch {
+    throw new PairingUnavailableError('network')
+  }
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) throw new PairingUnavailableError('no-backend')
+  const data = (await response.json().catch(() => ({}))) as { id?: string; error?: string }
+  if (response.status === 403 && data.error === 'pair-request-blocked') {
+    throw new PairingBlockedError()
+  }
+  if (response.status === 429) throw new PairingRateLimitedError()
+  if (!response.ok || !data.id) {
+    throw new PairingUnavailableError(data.error ?? `http-${response.status}`)
+  }
+  return data.id
+}
+
+/** 轮询手机端是否已允许交互式配对；批准后直接把随机密钥写入本地 session。 */
+export async function waitForInteractivePairing(id: string): Promise<PairResult> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    let response: Response
+    try {
+      response = await fetch(`/api/pair/request/status?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+    } catch {
+      throw new PairingUnavailableError('network')
+    }
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.includes('application/json')) throw new PairingUnavailableError('no-backend')
+    const data = (await response.json().catch(() => ({}))) as PairResult & {
+      status?: string
+      error?: string
+    }
+    if (response.status === 404) throw new PairingRequestExpiredError()
+    if (!response.ok) throw new PairingUnavailableError(data.error ?? `http-${response.status}`)
+    switch (data.status) {
+      case 'approved': {
+        if (!data.token) throw new PairingUnavailableError('bad-payload')
+        token = data.token
+        writeStorage(TOKEN_KEY, token)
+        if (data.encryption?.enabled) {
+          if (!data.encryption.key) throw new PairingUnavailableError('missing-key')
+          encryptionKey = base64ToBytes(data.encryption.key)
+          writeStorage(KEY_KEY, data.encryption.key)
+        } else {
+          clearEncryptionKey()
+        }
+        return data
+      }
+      case 'denied':
+        throw new PairingRequestDeniedError()
+      case 'blocked':
+        throw new PairingBlockedError()
+      case 'expired':
+        throw new PairingRequestExpiredError()
+      default:
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 1500))
+    }
+  }
+  throw new PairingRequestTimeoutError()
 }
 
 /**

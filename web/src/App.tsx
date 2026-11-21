@@ -20,6 +20,7 @@ import type {
   Entry,
   FileEntry,
   FolderEntry,
+  PairResult,
   ServerInfo,
   Theme,
   TransferRecord,
@@ -720,8 +721,7 @@ export default function App() {
     scrollTop()
   }, [closeSidebar, scrollTop, syncUrl])
 
-  const handlePair = useCallback(async (code: string) => {
-    const result = await api.pair(code)
+  const completePair = useCallback((result: PairResult) => {
     setInfo({
       port: result.port,
       device: result.device,
@@ -744,6 +744,15 @@ export default function App() {
     syncUrl('storage', '', '', 'all', true)
     setNotice(`已连接 ${result.device.name}`)
   }, [syncUrl])
+
+  const handlePair = useCallback(async (code: string) => {
+    completePair(await api.pair(code))
+  }, [completePair])
+
+  const handleInteractivePair = useCallback(async () => {
+    const requestId = await api.requestInteractivePairing()
+    completePair(await api.waitForInteractivePairing(requestId))
+  }, [completePair])
 
   const handleOpenFolder = useCallback((next: FolderEntry) => {
     setFolder(next)
@@ -830,7 +839,10 @@ export default function App() {
       phase: api.isEncryptionActive() ? 'encrypt' : 'upload',
       local: true,
     }))
-    setToastRecords(records)
+    setToastRecords((previous) => [
+      ...records,
+      ...previous.filter((task) => !records.some((record) => record.id === task.id)),
+    ])
     setToastOpen(true)
     setTransfers((previous) => [
       ...records,
@@ -931,7 +943,10 @@ export default function App() {
       phase: 'download',
       local: true,
     }
-    setToastRecords([record])
+    setToastRecords((previous) => [
+      record,
+      ...previous.filter((task) => task.id !== record.id),
+    ])
     setToastOpen(true)
     setTransfers((previous) => [record, ...previous])
     const controller = new AbortController()
@@ -1206,6 +1221,7 @@ export default function App() {
         device={info?.device ?? null}
         port={port}
         onSubmit={handlePair}
+        onInteractive={handleInteractivePair}
       />
 
       <DetailsDialog

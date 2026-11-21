@@ -29,6 +29,7 @@ data class FlashDropState(
     val customCode: String = "",
     val encryptionEnabled: Boolean = false,
     val pairedClients: Int = 0,
+    val pairRequests: List<PairRequestInfo> = emptyList(),
     val storageGranted: Boolean = false,
     val error: String? = null,
 )
@@ -75,6 +76,12 @@ class FlashDropController(
             }
         }
 
+        override fun onPairRequestsChanged(requests: List<PairRequestInfo>) {
+            mainHandler.post {
+                if (wantRunning) state = state.copy(pairRequests = requests)
+            }
+        }
+
         override fun onError(message: String) {
             mainHandler.post {
                 if (wantRunning) state = state.copy(error = message)
@@ -110,6 +117,7 @@ class FlashDropController(
                         code = next.code,
                         addresses = localAddresses(),
                         pairedClients = next.pairedCount,
+                        pairRequests = emptyList(),
                         encryptionEnabled = next.encryptionActive,
                         storageGranted = hasStorageAccess(),
                         error = null,
@@ -140,7 +148,20 @@ class FlashDropController(
             code = "",
             addresses = emptyList(),
             pairedClients = 0,
+            pairRequests = emptyList(),
         )
+    }
+
+    fun approvePairRequest(id: String) {
+        server?.approvePairRequest(id)
+    }
+
+    fun denyPairRequest(id: String) {
+        server?.denyPairRequest(id)
+    }
+
+    fun blockPairRequest(id: String) {
+        server?.blockPairRequest(id)
     }
 
     fun restart() {

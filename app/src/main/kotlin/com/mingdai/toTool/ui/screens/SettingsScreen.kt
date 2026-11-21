@@ -52,9 +52,12 @@ import com.mingdai.toTool.data.SHORTCUT_RADIUS_MAX
 import com.mingdai.toTool.data.ToolCategory
 import com.mingdai.toTool.data.ToolRegistry
 import com.mingdai.toTool.ui.components.AppDialog
+import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ColorWheelPicker
 import com.mingdai.toTool.ui.components.toolShortcutBitmap
 import com.mingdai.toTool.ui.theme.ThemeMode
+import com.mingdai.toTool.permission.HighPermissionManager
+import com.mingdai.toTool.permission.HighPermissionStrategy
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -116,6 +119,7 @@ fun SettingsScreen(navController: NavHostController) {
     var showLicenses by remember { mutableStateOf(false) }
     var showFontLicense by remember { mutableStateOf(false) }
     var showFfmpegLicense by remember { mutableStateOf(false) }
+    var permissionStrategy by remember { mutableStateOf(HighPermissionManager.strategy(context)) }
 
     val themeOptions = listOf(
         ThemeMode.SYSTEM to R.string.theme_system,
@@ -227,6 +231,46 @@ fun SettingsScreen(navController: NavHostController) {
                     title = "使用工具时保持常亮",
                     summary = "打开任意工具期间屏幕不自动熄灭（时钟、坏点检测等工具始终常亮）",
                 )
+            }
+
+            // ── 高级权限 ─────────────────────────────────────────
+            SmallTitle(text = "高级权限")
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "执行 Shell、米游记录获取等高级工具时使用的权限来源。",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SelectChip(
+                            selected = permissionStrategy == HighPermissionStrategy.SHIZUKU,
+                            onClick = {
+                                HighPermissionManager.setStrategy(context, HighPermissionStrategy.SHIZUKU)
+                                permissionStrategy = HighPermissionStrategy.SHIZUKU
+                            },
+                            label = "Shizuku",
+                        )
+                        SelectChip(
+                            selected = permissionStrategy == HighPermissionStrategy.ROOT,
+                            onClick = {
+                                HighPermissionManager.setStrategy(context, HighPermissionStrategy.ROOT)
+                                permissionStrategy = HighPermissionStrategy.ROOT
+                            },
+                            label = "Root",
+                        )
+                    }
+                    val permissionStatus = HighPermissionManager.status(context)
+                    Text(
+                        permissionStatus.detail,
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = if (permissionStatus.ready) MiuixTheme.colorScheme.primary
+                        else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
             }
 
             // ── 桌面快捷方式 ─────────────────────────────────────

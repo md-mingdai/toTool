@@ -65,6 +65,10 @@ import com.mingdai.toTool.ui.components.WarnColor
 import com.mingdai.toTool.ui.components.copyText
 import com.mingdai.toTool.shizuku.ShizukuAccess
 import com.mingdai.toTool.shizuku.ShizukuState
+import com.mingdai.toTool.permission.HighPermissionManager
+import com.mingdai.toTool.permission.HighPermissionRun
+import com.mingdai.toTool.permission.HighPermissionStatus
+import com.mingdai.toTool.permission.HighPermissionStrategy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,13 +120,15 @@ fun ShellTool(padding: PaddingValues) {
 
     var state by remember { mutableStateOf(ShizukuAccess.state(context)) }
     var identity by remember { mutableStateOf<String?>(null) }
+    var highStatus by remember { mutableStateOf(HighPermissionManager.status(context)) }
     // 刚进页面时 Binder 可能还在路上：先显示“正在连接”，过一会儿还没来才当作“没有运行”
     var settled by remember { mutableStateOf(false) }
 
     fun refresh() {
-        val now = ShizukuAccess.state(context)
-        state = now
-        identity = if (now == ShizukuState.READY) ShizukuAccess.identity() else null
+        val now = HighPermissionManager.status(context)
+        highStatus = now
+        state = ShizukuAccess.state(context)
+        identity = if (state == ShizukuState.READY) ShizukuAccess.identity() else null
     }
 
     LaunchedEffect(Unit) {
@@ -164,7 +170,7 @@ fun ShellTool(padding: PaddingValues) {
     var fixedStdin by rememberSaveable { mutableStateOf(false) }
     var stdinText by rememberSaveable { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var currentRun by remember { mutableStateOf<ShellRun?>(null) }
+    var currentRun by remember { mutableStateOf<HighPermissionRun?>(null) }
 
     val log = remember { ShellLog() }
     var lines by remember { mutableStateOf<List<ShellLine>>(emptyList()) }
@@ -213,12 +219,12 @@ fun ShellTool(padding: PaddingValues) {
         stdinValue: String? = null,
     ) {
         if (running) return
-        if (state != ShizukuState.READY) {
-            Toast.makeText(context, "Shizuku 还没有授权，不能执行", Toast.LENGTH_SHORT).show()
+        if (!highStatus.ready) {
+            Toast.makeText(context, "高级权限未就绪：${highStatus.detail}", Toast.LENGTH_SHORT).show()
             return
         }
         focusManager.clearFocus()
-        val run = ShellRun()
+        val run = HighPermissionRun()
         currentRun = run
         running = true
         log.add(ShellLineKind.INFO, "[${clockNow()}] $ $shown")
@@ -233,7 +239,7 @@ fun ShellTool(padding: PaddingValues) {
             var failure: String? = null
             try {
                 exitCode = withContext(Dispatchers.IO) {
-                    runShizukuShell(text, run, arguments, stdinValue) { isError, line ->
+                    HighPermissionManager.execute(context, text, arguments, stdinValue, run) { isError, line ->
                         log.add(if (isError) ShellLineKind.ERR else ShellLineKind.OUT, line)
                     }
                 }
@@ -295,30 +301,34 @@ fun ShellTool(padding: PaddingValues) {
 
     /* ───────── 界面 ───────── */
 
-    val canRun = state == ShizukuState.READY && !running
+    val canRun = highStatus.ready && !running
 
     ToolBody(padding, scrollState = pageScroll) {
-        ShizukuStatusCard(
-            state = state,
-            connecting = !settled && state == ShizukuState.NOT_RUNNING,
-            identity = identity,
-            onRequest = {
-                ShizukuAccess.requestPermission()?.let {
-                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
-                }
-            },
-            onOpenShizuku = {
-                if (!ShizukuAccess.openShizuku(context)) {
-                    Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onDownload = {
-                if (!ShizukuAccess.openDownload(context)) {
-                    Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onRecheck = { refresh() },
-        )
+        if (highStatus.strategy == HighPermissionStrategy.SHIZUKU) {
+            ShizukuStatusCard(
+                state = state,
+                connecting = !settled && state == ShizukuState.NOT_RUNNING,
+                identity = identity,
+                onRequest = {
+                    ShizukuAccess.requestPermission()?.let {
+                        Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                    }
+                },
+                onOpenShizuku = {
+                    if (!ShizukuAccess.openShizuku(context)) {
+                        Toast.makeText(context, "没有找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDownload = {
+                    if (!ShizukuAccess.openDownload(context)) {
+                        Toast.makeText(context, "没有可以打开网页的应用", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRecheck = { refresh() },
+            )
+        } else {
+            HighPermissionRootCard(status = highStatus, onRecheck = { refresh() })
+        }
 
         SectionLabel("执行单条命令")
         TextField(
@@ -439,7 +449,31 @@ fun ShellTool(padding: PaddingValues) {
         }
         LogPane(lines = lines, dropped = dropped, listState = logState)
 
-        HintText("命令以 Shizuku 的身份（shell 或 root）执行，能改系统设置、卸载应用、删除文件，确认后再运行。「停止」只结束 Shell 进程，它留下的后台子进程不一定会退出。")
+        HintText("命令以设置页选择的高级权限来源（Shizuku 或 Root）执行，能改系统设置、卸载应用、删除文件，确认后再运行。「停止」只结束 Shell 进程，它留下的后台子进程不一定会退出。")
+    }
+}
+
+@Composable
+private fun HighPermissionRootCard(
+    status: HighPermissionStatus,
+    onRecheck: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("高级权限：Root", style = MiuixTheme.textStyles.headline2)
+            Text(
+                status.detail,
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (status.ready) colors.primary else WarnColor,
+            )
+            SecondaryButton(onClick = onRecheck, modifier = Modifier.fillMaxWidth()) {
+                Text("重新检测")
+            }
+        }
     }
 }
 

@@ -2,6 +2,7 @@ package com.mingdai.toTool.ui.screens.tools
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +24,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mingdai.toTool.notification.NotificationExporter
 import com.mingdai.toTool.notification.NotificationHiderBridge
 import com.mingdai.toTool.notification.NotificationHiderItem
 import com.mingdai.toTool.notification.NotificationHiderService
@@ -43,6 +46,9 @@ import com.mingdai.toTool.ui.components.SectionLabel
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.WarnColor
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Date
 import java.util.Locale
 import top.yukonga.miuix.kmp.basic.Card
@@ -50,7 +56,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun NotificationHiderTool(padding: PaddingValues) {
+fun NotificationCenterTool(padding: PaddingValues) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val notifications by NotificationHiderBridge.notifications.collectAsState()
@@ -68,6 +74,26 @@ fun NotificationHiderTool(padding: PaddingValues) {
     val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshAccess()
     }
+    val scope = rememberCoroutineScope()
+    val exportLauncher = rememberLauncherForActivityResult(CreateDocument("application/zip")) { uri ->
+        if (uri != null) {
+            val items = NotificationHiderBridge.notifications.value
+            scope.launch {
+                val saved = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { stream ->
+                            NotificationExporter.export(items, stream)
+                        } ?: 0
+                    }.getOrDefault(0)
+                }
+                Toast.makeText(
+                    context,
+                    if (saved > 0) "已导出 $saved 条通知" else "导出失败",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) { refreshAccess() }
     DisposableEffect(lifecycleOwner) {
@@ -83,13 +109,13 @@ fun NotificationHiderTool(padding: PaddingValues) {
     val colors = MiuixTheme.colorScheme
 
     ToolBody(padding) {
-        SectionLabel("隐藏系统通知")
+        SectionLabel("通知管理")
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("只隐藏本机通知", style = MiuixTheme.textStyles.body1)
+                Text("本机通知管理", style = MiuixTheme.textStyles.body1)
                 Text(
                     "通过 Android 通知使用权把选中的通知打盹数年，并在应用重新推送时继续隐藏。隐藏状态只保存在本机。",
                     style = MiuixTheme.textStyles.footnote1,
@@ -157,6 +183,17 @@ fun NotificationHiderTool(padding: PaddingValues) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(modifier = Modifier.weight(1f)) { SectionLabel("当前通知 · ${active.size}") }
+            Text(
+                "导出",
+                color = colors.primary,
+                style = MiuixTheme.textStyles.footnote1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = active.isNotEmpty()) {
+                        exportLauncher.launch("totool-notifications.zip")
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
             Text(
                 "刷新",
                 color = colors.primary,
@@ -310,6 +347,32 @@ private fun NotificationRow(
                     color = colors.onSurfaceVariantSummary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            item.progress?.let { progress ->
+                Text(
+                    if (progress.indeterminate) "进度：不确定" else "进度：${progress.value}/${progress.max}",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (item.actions.isNotEmpty()) {
+                Text(
+                    "控件：${item.actions.joinToString(" / ")}",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (item.media.isNotEmpty()) {
+                Text(
+                    "媒体：${item.media.size} 项",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = colors.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }

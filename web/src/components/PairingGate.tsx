@@ -8,7 +8,15 @@ import {
   ShieldCheck,
   WifiHigh,
 } from '@phosphor-icons/react'
-import { PairingRateLimitedError, PairingRejectedError, PairingUnavailableError } from '../api'
+import {
+  PairingBlockedError,
+  PairingRateLimitedError,
+  PairingRejectedError,
+  PairingRequestDeniedError,
+  PairingRequestExpiredError,
+  PairingRequestTimeoutError,
+  PairingUnavailableError,
+} from '../api'
 import type { DeviceInfo } from '../types'
 import { BrandMark } from './Brand'
 
@@ -17,15 +25,17 @@ interface PairingGateProps {
   device: DeviceInfo | null
   port: number | null
   onSubmit: (code: string) => Promise<void>
+  onInteractive: () => Promise<void>
 }
 
 const CODE_LENGTH = 6
 
-export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) {
+export function PairingGate({ open, device, port, onSubmit, onInteractive }: PairingGateProps) {
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(''))
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [shake, setShake] = useState(0)
+  const [interactive, setInteractive] = useState(false)
   const [lit, setLit] = useState(false)
   const lightRef = useRef<HTMLSpanElement>(null)
   const inputRefs = useRef<Array<HTMLInputElement | null>>([])
@@ -35,6 +45,7 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
     setDigits(Array(CODE_LENGTH).fill(''))
     setError('')
     setSubmitting(false)
+    setInteractive(false)
     setLit(false)
     const timer = window.setTimeout(() => inputRefs.current[0]?.focus(), 60)
     return () => window.clearTimeout(timer)
@@ -65,8 +76,36 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
     setError('')
   }
 
+  async function startInteractive() {
+    if (interactive || submitting) return
+    setInteractive(true)
+    setError('')
+    try {
+      await onInteractive()
+    } catch (caught) {
+      setShake((value) => value + 1)
+      if (caught instanceof PairingBlockedError) {
+        setError('手机已在本次隔空闪传会话中禁止此设备发起交互式配对。请使用配对码，或重启隔空闪传服务后再试。')
+      } else if (caught instanceof PairingRequestDeniedError) {
+        setError('手机端拒绝了这次配对请求。')
+      } else if (caught instanceof PairingRequestExpiredError) {
+        setError('配对请求已过期，请重新发起。')
+      } else if (caught instanceof PairingRequestTimeoutError) {
+        setError('等待手机端确认超时，请重新发起。')
+      } else if (caught instanceof PairingRateLimitedError) {
+        setError('请求过于频繁，请稍后再试。')
+      } else if (caught instanceof PairingUnavailableError) {
+        setError('无法连接手机端，请确认隔空闪传服务仍在运行。')
+      } else {
+        setError('交互式配对失败，请重试或改用配对码。')
+      }
+    } finally {
+      setInteractive(false)
+    }
+  }
+
   async function submit() {
-    if (submitting) return
+    if (submitting || interactive) return
     const code = digits.join('')
     if (code.length !== CODE_LENGTH) {
       setError('请输入手机端显示的 6 位配对码。')
@@ -248,7 +287,7 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
           </p>
         )}
 
-        <button type="button" className="btn btn-primary pair-submit" onClick={() => void submit()} disabled={submitting}>
+        <button type="button" className="btn btn-primary pair-submit" onClick={() => void submit()} disabled={submitting || interactive}>
           {submitting ? (
             <>
               <CircleNotch className="spin" size={17} weight="regular" />
@@ -261,6 +300,28 @@ export function PairingGate({ open, device, port, onSubmit }: PairingGateProps) 
             </>
           )}
         </button>
+
+        <button
+          type="button"
+          className="btn btn-ghost pair-interactive"
+          onClick={() => void startInteractive()}
+          disabled={interactive || submitting}
+        >
+          {interactive ? (
+            <>
+              <CircleNotch className="spin" size={17} weight="regular" />
+              等待手机端确认
+            </>
+          ) : (
+            <>
+              <ShieldCheck size={17} weight="regular" />
+              请求手机端授权，跳过配对码
+            </>
+          )}
+        </button>
+        {interactive && (
+          <p className="pair-interactive-hint">请在手机上点击「允许本次配对」。过期或拒绝后可重新发起。</p>
+        )}
 
         <div className="pair-foot">
           <span className="pair-device">
