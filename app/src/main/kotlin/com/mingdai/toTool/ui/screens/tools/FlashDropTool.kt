@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.text.format.Formatter
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -231,7 +232,7 @@ fun FlashDropTool(padding: PaddingValues) {
     val pendingPairRequest = state.pairRequests.firstOrNull()
     AppDialog(
         show = pendingPairRequest != null,
-        title = "交互式配对请求",
+        title = "确认配对数字",
         summary = null,
         confirmText = null,
         dismissText = null,
@@ -260,10 +261,42 @@ fun FlashDropTool(padding: PaddingValues) {
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
-                PrimaryButton(
-                    onClick = { controller.approvePairRequest(request.id) },
+                Text(
+                    "请在网页上查看本次配对数字，并在下面选择相同的一项。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("允许本次配对") }
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    request.options.forEach { option ->
+                        SecondaryButton(
+                            onClick = {
+                                if (!controller.approvePairRequest(request.id, option)) {
+                                    Toast.makeText(
+                                        context,
+                                        "数字不一致，已拒绝本次配对",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                option.toString(),
+                                style = MiuixTheme.textStyles.title4.copy(fontFamily = FontFamily.Monospace),
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "选错会拒绝本次请求；也可以直接拒绝或暂时拉黑。",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SecondaryButton(
                         onClick = { controller.denyPairRequest(request.id) },

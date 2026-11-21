@@ -92,6 +92,9 @@ data class PairRequestInfo(
     val remoteHost: String,
     val userAgent: String,
     val createdAt: Long,
+    /** 网页端展示的两位数；手机端要从 [options] 中选出它。 */
+    val number: Int,
+    val options: List<Int>,
 )
 
 data class ClipboardMessage(
@@ -177,6 +180,8 @@ class FlashDropServer private constructor(
         val userAgent: String,
         val deviceKey: String,
         val createdAt: Long,
+        val number: Int,
+        val options: List<Int>,
         @Volatile var status: String = "pending",
         @Volatile var response: JSONObject? = null,
     )
@@ -229,16 +234,22 @@ class FlashDropServer private constructor(
         listener.onClientsChanged(0)
     }
 
-    fun approvePairRequest(id: String): Boolean {
+    fun approvePairRequest(id: String, selectedNumber: Int): Boolean {
         val now = System.currentTimeMillis()
         val request = synchronized(pairRequests) {
             val found = pairRequests[id] ?: return false
             if (found.status != "pending") return false
-            if (now - found.createdAt > PAIR_REQUEST_TTL_MS) {
-                found.status = "expired"
-                null
-            } else {
-                found
+            when {
+                now - found.createdAt > PAIR_REQUEST_TTL_MS -> {
+                    found.status = "expired"
+                    null
+                }
+                found.number != selectedNumber -> {
+                    // 数字不匹配就不能完成配对，同时结束这次请求，避免反复试错。
+                    found.status = "denied"
+                    null
+                }
+                else -> found
             }
         } ?: run {
             notifyPairRequests()
@@ -294,7 +305,7 @@ class FlashDropServer private constructor(
         pairRequests.values
             .filter { it.status == "pending" }
             .sortedBy { it.createdAt }
-            .map { PairRequestInfo(it.id, it.remoteHost, it.userAgent, it.createdAt) }
+            .map { PairRequestInfo(it.id, it.remoteHost, it.userAgent, it.createdAt, it.number, it.options) }
     }
 
     private fun notifyPairRequests() {
@@ -437,19 +448,29 @@ class FlashDropServer private constructor(
         val request = synchronized(pairRequests) {
             pairRequests.values.firstOrNull { it.deviceKey == deviceKey && it.status == "pending" }
                 ?: run {
+                    val (number, options) = generatePairChallenge()
                     val created = PendingPairRequest(
                         id = randomToken(),
                         remoteHost = remoteHost,
                         userAgent = userAgent,
                         deviceKey = deviceKey,
                         createdAt = now,
+                        number = number,
+                        options = options,
                     )
                     pairRequests[created.id] = created
                     created
                 }
         }
         notifyPairRequests()
-        respondJson(call, HttpStatusCode.OK, JSONObject().put("id", request.id).put("status", request.status))
+        respondJson(
+            call,
+            HttpStatusCode.OK,
+            JSONObject()
+                .put("id", request.id)
+                .put("status", request.status)
+                .put("number", request.number),
+        )
     }
 
     private suspend fun handlePairRequestStatus(call: ApplicationCall) {
@@ -1812,6 +1833,14 @@ class FlashDropServer private constructor(
     }
 
     private fun generateCode(): String = (100000 + secureRandom.nextInt(900000)).toString()
+
+    /** 生成网页端展示的两位数，以及手机端包含正确项的三个候选数字。 */
+    private fun generatePairChallenge(): Pair<Int, List<Int>> {
+        val number = 10 + secureRandom.nextInt(90)
+        val options = linkedSetOf(number)
+        while (options.size < 3) options.add(10 + secureRandom.nextInt(90))
+        return number to options.shuffled()
+    }
 
     private fun deriveKey(code: String, salt: ByteArray): SecretKey {
         val spec = PBEKeySpec(code.toCharArray(), salt, PBKDF2_ITERATIONS, 256)

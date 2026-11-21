@@ -2190,6 +2190,43 @@ input[type='checkbox'] {
   text-align: center;
 }
 
+.pair-challenge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent-line);
+  border-radius: 14px;
+  background: var(--accent-soft);
+}
+
+.pair-challenge-label {
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.pair-challenge strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  line-height: 1.1;
+}
+
+.pair-challenge-hint {
+  max-width: 32em;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+}
+
 .pair-foot {
   display: flex;
   align-items: center;
