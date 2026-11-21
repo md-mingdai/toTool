@@ -25,7 +25,8 @@ interface PairingGateProps {
   device: DeviceInfo | null
   port: number | null
   onSubmit: (code: string) => Promise<void>
-  onInteractive: () => Promise<void>
+  /** 发起请求后通过回调把网页端要显示的两位数交给界面。 */
+  onInteractive: (onChallenge: (number: number) => void) => Promise<void>
 }
 
 const CODE_LENGTH = 6
@@ -36,6 +37,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
   const [submitting, setSubmitting] = useState(false)
   const [shake, setShake] = useState(0)
   const [interactive, setInteractive] = useState(false)
+  const [challenge, setChallenge] = useState<number | null>(null)
   const [lit, setLit] = useState(false)
   const lightRef = useRef<HTMLSpanElement>(null)
   const inputRefs = useRef<Array<HTMLInputElement | null>>([])
@@ -46,6 +48,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
     setError('')
     setSubmitting(false)
     setInteractive(false)
+    setChallenge(null)
     setLit(false)
     const timer = window.setTimeout(() => inputRefs.current[0]?.focus(), 60)
     return () => window.clearTimeout(timer)
@@ -79,19 +82,20 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
   async function startInteractive() {
     if (interactive || submitting) return
     setInteractive(true)
+    setChallenge(null)
     setError('')
     try {
-      await onInteractive()
+      await onInteractive((number) => setChallenge(number))
     } catch (caught) {
       setShake((value) => value + 1)
       if (caught instanceof PairingBlockedError) {
         setError('手机已在本次隔空闪传会话中禁止此设备发起交互式配对。请使用配对码，或重启隔空闪传服务后再试。')
       } else if (caught instanceof PairingRequestDeniedError) {
-        setError('手机端拒绝了这次配对请求。')
+        setError('手机端拒绝了这次配对请求，或选择的数字与网页不一致。')
       } else if (caught instanceof PairingRequestExpiredError) {
         setError('配对请求已过期，请重新发起。')
       } else if (caught instanceof PairingRequestTimeoutError) {
-        setError('等待手机端确认超时，请重新发起。')
+        setError('等待手机端选择超时，请重新发起。')
       } else if (caught instanceof PairingRateLimitedError) {
         setError('请求过于频繁，请稍后再试。')
       } else if (caught instanceof PairingUnavailableError) {
@@ -101,6 +105,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
       }
     } finally {
       setInteractive(false)
+      setChallenge(null)
     }
   }
 
@@ -310,7 +315,7 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
           {interactive ? (
             <>
               <CircleNotch className="spin" size={17} weight="regular" />
-              等待手机端确认
+              等待手机端选择
             </>
           ) : (
             <>
@@ -319,8 +324,21 @@ export function PairingGate({ open, device, port, onSubmit, onInteractive }: Pai
             </>
           )}
         </button>
+        {interactive && challenge !== null && (
+          <div className="pair-challenge" role="status" aria-live="polite">
+            <span className="pair-challenge-label">本次配对数字</span>
+            <strong>{String(challenge).padStart(2, '0')}</strong>
+            <span className="pair-challenge-hint">
+              请让手机持有者在 toTool 弹窗的三个两位数中选择与这里相同的一项。
+            </span>
+          </div>
+        )}
         {interactive && (
-          <p className="pair-interactive-hint">请在手机上点击「允许本次配对」。过期或拒绝后可重新发起。</p>
+          <p className="pair-interactive-hint">
+            {challenge !== null
+              ? '手机上选对数字后会自动完成配对。过期、拒绝或选错后可重新发起。'
+              : '正在向手机端发起配对请求…'}
+          </p>
         )}
 
         <div className="pair-foot">

@@ -206,7 +206,13 @@ export async function pair(code: string): Promise<PairResult> {
   return data
 }
 
-export async function requestInteractivePairing(): Promise<string> {
+export interface InteractivePairingRequest {
+  id: string
+  /** 网页端展示、手机端需要选中的两位数。 */
+  number: number
+}
+
+export async function requestInteractivePairing(): Promise<InteractivePairingRequest> {
   let response: Response
   try {
     response = await fetch('/api/pair/request', { method: 'POST', cache: 'no-store' })
@@ -215,15 +221,19 @@ export async function requestInteractivePairing(): Promise<string> {
   }
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.includes('application/json')) throw new PairingUnavailableError('no-backend')
-  const data = (await response.json().catch(() => ({}))) as { id?: string; error?: string }
+  const data = (await response.json().catch(() => ({}))) as {
+    id?: string
+    number?: number
+    error?: string
+  }
   if (response.status === 403 && data.error === 'pair-request-blocked') {
     throw new PairingBlockedError()
   }
   if (response.status === 429) throw new PairingRateLimitedError()
-  if (!response.ok || !data.id) {
+  if (!response.ok || !data.id || typeof data.number !== 'number') {
     throw new PairingUnavailableError(data.error ?? `http-${response.status}`)
   }
-  return data.id
+  return { id: data.id, number: data.number }
 }
 
 /** 轮询手机端是否已允许交互式配对；批准后直接把随机密钥写入本地 session。 */

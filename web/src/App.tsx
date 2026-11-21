@@ -749,9 +749,10 @@ export default function App() {
     completePair(await api.pair(code))
   }, [completePair])
 
-  const handleInteractivePair = useCallback(async () => {
-    const requestId = await api.requestInteractivePairing()
-    completePair(await api.waitForInteractivePairing(requestId))
+  const handleInteractivePair = useCallback(async (onChallenge: (number: number) => void) => {
+    const request = await api.requestInteractivePairing()
+    onChallenge(request.number)
+    completePair(await api.waitForInteractivePairing(request.id))
   }, [completePair])
 
   const handleOpenFolder = useCallback((next: FolderEntry) => {

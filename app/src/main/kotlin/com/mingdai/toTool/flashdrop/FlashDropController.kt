@@ -153,9 +153,8 @@ class FlashDropController(
         )
     }
 
-    fun approvePairRequest(id: String) {
-        server?.approvePairRequest(id)
-    }
+    fun approvePairRequest(id: String, number: Int): Boolean =
+        server?.approvePairRequest(id, number) == true
 
     fun denyPairRequest(id: String) {
         server?.denyPairRequest(id)
