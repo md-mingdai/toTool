@@ -54,7 +54,7 @@
 
 ## 大致实现
 
-- 单 APK，Jetpack Compose + Miuix，统一管理页面转场、方向锁和沉浸式系统栏。
+- 单 APK，Jetpack Compose + Miuix，统一管理页面转场、方向锁和沉浸式系统栏；高级权限可由设置页在 Shizuku 与 Root 间切换。
 - 条码使用 ZXing、CameraX 和项目内的汉信码 / Code 49 编解码器；实时扫描分为快慢路径并跟踪多个码框。
 - 方程求解使用任意精度有理数、多项式和根式运算；无法精确求解时转为数值扫描。
 - FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译。
