@@ -850,7 +850,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         )
                         Text(
                             if (gifFramesValid) {
-                                "总帧数超过单轮长度会循环，不足会截断。输出 10 fps、480×480，空白处自动留黑。"
+                                "总帧数超过单轮长度会循环，不足会截断。连续相同画面会合并成一个 GIF 帧并延长延迟；输出 10 fps、480×480，空白处自动留黑。"
                             } else {
                                 "请输入 1–10000 之间的总帧数。"
                             },

@@ -89,7 +89,7 @@ internal fun runConversion(
                 output.inputStream().use { it.copyTo(sink) }
             }
             onProgress(1f)
-            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}，${plan.gifTotalFrames} 帧）")
+            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}，${plan.gifTotalFrames} 帧时间线）")
         } finally {
             output.delete()
         }

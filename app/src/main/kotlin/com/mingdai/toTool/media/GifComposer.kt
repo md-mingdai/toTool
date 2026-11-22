@@ -19,7 +19,6 @@ internal fun composeGif(
     val totalFrames = plan.gifTotalFrames.coerceIn(1, 10000)
     val root = File(workDir, "gif_${System.nanoTime()}")
     val sourceDir = File(root, "src").apply { mkdirs() }
-    val frameDir = File(root, "frames").apply { mkdirs() }
     val baseFrames = mutableListOf<File>()
     try {
         plan.gifItems.forEachIndexed { index, item ->
@@ -68,27 +67,48 @@ internal fun composeGif(
 
         onStage("正在编排 $totalFrames 帧…")
         onProgress(0.18f)
+        val timeline = ArrayList<File>(totalFrames)
         for (index in 0 until totalFrames) {
             if (control.canceled) throw ConvertCanceledException()
-            val source = baseFrames[index % baseFrames.size]
-            val target = File(frameDir, String.format(Locale.US, "frame_%05d.png", index + 1))
-            source.copyTo(target, overwrite = true)
-            if ((index + 1) % 20 == 0 || index + 1 == totalFrames) {
-                onProgress(0.18f + (index + 1).toFloat() / totalFrames * 0.32f)
+            timeline.add(baseFrames[index % baseFrames.size])
+        }
+        // 连续的同一张图合并成一个 GIF 帧 + 更长的延迟，保证“停留帧数”真正生效。
+        val runs = ArrayList<Pair<File, Int>>()
+        timeline.forEach { frame ->
+            val last = runs.lastOrNull()
+            if (last != null && last.first == frame) {
+                runs[runs.lastIndex] = last.first to (last.second + 1)
+            } else {
+                runs.add(frame to 1)
             }
         }
+        onProgress(0.35f)
 
         onStage("正在合成 GIF…")
         onProgress(0.52f)
+        val concatFile = File(root, "concat.txt")
+        concatFile.bufferedWriter().use { writer ->
+            runs.forEach { (file, frames) ->
+                writer.write("file '${file.absolutePath}'\n")
+                writer.write("duration ${String.format(Locale.US, "%.3f", frames / 10.0)}\n")
+            }
+            // concat demuxer 会忽略最后一行的 duration；再写一次末图，让最后一帧也有完整停留时间。
+            runs.lastOrNull()?.let { (file, _) ->
+                writer.write("file '${file.absolutePath}'\n")
+            }
+        }
+
         val output = File(root, plan.outputName)
         val command = listOf(
             ffmpeg.absolutePath,
             "-hide_banner", "-nostdin",
-            "-framerate", "10",
-            "-i", File(frameDir, "frame_%05d.png").absolutePath,
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concatFile.absolutePath,
             "-vf", "scale=480:480:force_original_aspect_ratio=decrease," +
                 "pad=480:480:(ow-iw)/2:(oh-ih)/2:color=black," +
                 "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse=dither=sierra2_4a",
+            "-vsync", "vfr",
             "-loop", "0",
             "-max_muxing_queue_size", "4096",
             "-y", output.absolutePath,
@@ -103,6 +123,5 @@ internal fun composeGif(
         return output
     } finally {
         sourceDir.deleteRecursively()
-        frameDir.deleteRecursively()
     }
 }
