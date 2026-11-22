@@ -190,7 +190,7 @@ internal fun detectMediaSignature(
             header.startsWith(0xFF, 0xD8, 0xFF) ->
                 return MediaSignature(MediaKind.IMAGE, "jpg", false)
             header.startsWith(0x47, 0x49, 0x46, 0x38) ->
-                return MediaSignature(MediaKind.IMAGE, "gif", countPairs(header, 0x21, 0xF9) >= 2)
+                return MediaSignature(MediaKind.IMAGE, "gif", gifImageCount(header) >= 2)
             header.startsWith(0x42, 0x4D) ->
                 return MediaSignature(MediaKind.IMAGE, "bmp", false)
             header.startsWith(0x52, 0x49, 0x46, 0x46) -> {
@@ -307,10 +307,47 @@ private fun ByteArray.containsAscii(value: String): Boolean {
     return false
 }
 
-private fun countPairs(bytes: ByteArray, first: Int, second: Int): Int {
-    var count = 0
-    for (index in 0 until bytes.size - 1) {
-        if ((bytes[index].toInt() and 0xFF) == first && (bytes[index + 1].toInt() and 0xFF) == second) count++
+/** 简单解析 GIF 块，返回图像描述符数量（至少 2 个就是动图）。 */
+private fun gifImageCount(bytes: ByteArray): Int {
+    if (bytes.size < 13) return 1
+    var pos = 13
+    val packed = bytes[10].toInt() and 0xFF
+    if (packed and 0x80 != 0) {
+        pos += 3 * (1 shl ((packed and 0x07) + 1))
     }
-    return count
+    var count = 0
+    while (pos < bytes.size) {
+        when (bytes[pos].toInt() and 0xFF) {
+            0x3B -> break
+            0x21 -> {
+                pos += 2
+                pos = skipGifSubBlocks(bytes, pos)
+            }
+            0x2C -> {
+                count++
+                if (pos + 10 > bytes.size) break
+                val imagePacked = bytes[pos + 9].toInt() and 0xFF
+                pos += 10
+                if (imagePacked and 0x80 != 0) {
+                    pos += 3 * (1 shl ((imagePacked and 0x07) + 1))
+                }
+                if (pos >= bytes.size) break
+                pos += 1 // LZW minimum code size
+                pos = skipGifSubBlocks(bytes, pos)
+            }
+            else -> break
+        }
+    }
+    return count.coerceAtLeast(if (count == 0) 1 else count)
+}
+
+private fun skipGifSubBlocks(bytes: ByteArray, start: Int): Int {
+    var pos = start
+    while (pos < bytes.size) {
+        val size = bytes[pos].toInt() and 0xFF
+        pos += 1
+        if (size == 0) break
+        pos += size
+    }
+    return pos
 }

@@ -763,6 +763,13 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                             style = MiuixTheme.textStyles.footnote2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        if (gifItems.size == 1 && !gifItems[0].animated) {
+                            Text(
+                                "当前只有 1 张静态图片，生成的 GIF 会保持静止；要看到动画，请再添加图片或 GIF。",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                        }
                         gifItems.forEachIndexed { index, item ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
