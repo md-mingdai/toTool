@@ -157,7 +157,7 @@ internal fun targetGroupsFor(
                 val images = IMAGE_FORMATS.mapNotNull(::targetOption).toMutableList()
                 val gifSupported = ffmpegAvailable &&
                     (capabilities?.encoders == null || "gif" in capabilities.encoders)
-                if (gifSupported && (source == MediaKind.VIDEO || (source == MediaKind.IMAGE && sourceAnimated))) {
+                if (gifSupported && (source == MediaKind.VIDEO || source == MediaKind.IMAGE)) {
                     targetOption("GIF")?.let(images::add)
                 }
                 images

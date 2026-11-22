@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -32,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.media.AudioProbeInfo
 import com.mingdai.toTool.media.ConversionBranch
@@ -50,6 +53,7 @@ import com.mingdai.toTool.media.ConversionControl
 import com.mingdai.toTool.media.ConversionPlan
 import com.mingdai.toTool.media.ConvertCanceledException
 import com.mingdai.toTool.media.FfmpegCapabilities
+import com.mingdai.toTool.media.GifComposeItem
 import com.mingdai.toTool.media.ImageProbeInfo
 import com.mingdai.toTool.media.MediaKind
 import com.mingdai.toTool.media.ResolutionPreset
@@ -141,6 +145,9 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var customCoverName by remember { mutableStateOf<String?>(null) }
     var musicUri by remember { mutableStateOf<Uri?>(null) }
     var musicName by remember { mutableStateOf<String?>(null) }
+    val gifItems = remember { mutableStateListOf<GifComposeItem>() }
+    var gifTotalFramesText by rememberSaveable { mutableStateOf("30") }
+    var gifAdding by remember { mutableStateOf(false) }
 
     var framePreview by remember { mutableStateOf<Bitmap?>(null) }
     var frameLoading by remember { mutableStateOf(false) }
@@ -224,6 +231,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             frameError = null
             target = null
             targetManual = false
+            gifItems.clear()
+            gifAdding = false
             errorText = null
             clearResult()
             scope.launch {
@@ -256,6 +265,14 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                     stageText = ""
                     progress = 0f
                     targetManual = false
+                    if (signature.kind == MediaKind.IMAGE) {
+                        gifItems.add(
+                            GifComposeItem(uri, name, holdFrames = 5, animated = signature.animated, original = true),
+                        )
+                        gifTotalFramesText = "30"
+                    } else {
+                        gifItems.clear()
+                    }
                     target = defaultTarget(
                         signature.kind, signature.extension, capabilities,
                         capabilityState == CapabilityState.READY, signature.animated,
@@ -270,6 +287,33 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             musicUri = uri
             musicName = queryFileName(context, uri)
             clearResult()
+        }
+    }
+
+    val gifPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        gifAdding = true
+        clearResult()
+        scope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                uris.mapNotNull { uri ->
+                    val name = queryFileName(context, uri)
+                    val mime = context.contentResolver.getType(uri)
+                    val signature = detectMediaSignature(context, uri, name, mime)
+                    if (signature.kind == MediaKind.IMAGE) {
+                        GifComposeItem(uri, name, holdFrames = 5, animated = signature.animated)
+                    } else {
+                        null
+                    }
+                }
+            }
+            gifAdding = false
+            if (loaded.isEmpty()) {
+                errorText = "没有可加入的图片文件。"
+            } else {
+                gifItems.addAll(loaded)
+                clearResult()
+            }
         }
     }
 
@@ -344,6 +388,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     val frameValid = videoInfo != null && frameIndex != null && frameIndex in 1..maxFrame
     val waveformAvailable = capabilities?.filters?.contains("showwaves") != false
     val videoHasAudio = branch != ConversionBranch.VIDEO_AUDIO || videoInfo?.hasAudio != false
+    val gifTotalFrames = gifTotalFramesText.toIntOrNull()
+    val gifFramesValid = gifTotalFrames != null && gifTotalFrames in 1..10000
 
     val selectedTarget = target
     val selectedBranch = branch
@@ -358,6 +404,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         (selectedBranch.needsFfmpeg().not() || capabilityState == CapabilityState.READY) &&
         (selectedBranch != ConversionBranch.IMAGE_VIDEO || sourceAnimated || durationValid) &&
         (selectedBranch != ConversionBranch.VIDEO_IMAGE || frameValid) &&
+        (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && gifFramesValid && !gifAdding)) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.CUSTOM || customCoverUri != null) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.WAVEFORM || waveformAvailable) &&
         videoHasAudio
@@ -389,6 +436,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             solidColor = solidColor,
             customImage = customCoverUri,
             music = musicUri.takeIf { conversionBranch == ConversionBranch.IMAGE_VIDEO },
+            gifItems = gifItems.toList().takeIf { conversionBranch == ConversionBranch.IMAGE_GIF }.orEmpty(),
+            gifTotalFrames = gifTotalFramesText.toIntOrNull() ?: 0,
         )
         control.reset()
         isRunning = true
@@ -694,13 +743,119 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 }
             }
 
-            ConversionBranch.VIDEO_GIF,
-            ConversionBranch.IMAGE_GIF -> {
+            ConversionBranch.VIDEO_GIF -> {
                 Text(
-                    "会重新编码为 12 fps、最长边 480 的动图 GIF；原视频/动图的时长和画面顺序保持不变。",
+                    "视频会重新编码为 12 fps、最长边 480 的动图 GIF，画面顺序保持不变。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
+            }
+
+            ConversionBranch.IMAGE_GIF -> {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("GIF 合成", style = MiuixTheme.textStyles.body2)
+                        Text(
+                            "原图固定在列表顶端。静态图片按各自停留帧数展开；追加的 GIF / APNG 会按自身帧展开，停留帧数不适用。",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        gifItems.forEachIndexed { index, item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Image,
+                                    contentDescription = null,
+                                    tint = if (item.animated) MiuixTheme.colorScheme.primary
+                                    else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        item.name,
+                                        style = MiuixTheme.textStyles.body2,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        buildString {
+                                            if (item.original) append("原图 · ")
+                                            if (item.animated) append("GIF 自带帧") else append("停留 ${item.holdFrames} 帧")
+                                        },
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
+                                if (!item.animated) {
+                                    TextField(
+                                        value = item.holdFrames.toString(),
+                                        onValueChange = { value ->
+                                            val frames = value.filter(Char::isDigit).toIntOrNull() ?: 1
+                                            gifItems[index] = item.copy(holdFrames = frames.coerceIn(1, 1000))
+                                            clearResult()
+                                        },
+                                        label = "帧",
+                                        singleLine = true,
+                                        enabled = !isRunning,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.width(88.dp),
+                                    )
+                                }
+                                if (!item.original) {
+                                    Text(
+                                        "移除",
+                                        style = MiuixTheme.textStyles.footnote1,
+                                        color = MiuixTheme.colorScheme.error,
+                                        modifier = Modifier
+                                            .clickable(enabled = !isRunning) {
+                                                gifItems.removeAt(index)
+                                                clearResult()
+                                            }
+                                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                                    )
+                                }
+                            }
+                        }
+                        SecondaryButton(
+                            onClick = { gifPicker.launch("image/*") },
+                            enabled = !isRunning && !gifAdding,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (gifAdding) "正在识别图片…" else "添加图片 / GIF")
+                        }
+                        TextField(
+                            value = gifTotalFramesText,
+                            onValueChange = { value ->
+                                gifTotalFramesText = value.filter(Char::isDigit).take(5)
+                                clearResult()
+                            },
+                            label = "GIF 总帧数（1–10000）",
+                            singleLine = true,
+                            enabled = !isRunning,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            if (gifFramesValid) {
+                                "总帧数超过单轮长度会循环，不足会截断。输出 10 fps、480×480，空白处自动留黑。"
+                            } else {
+                                "请输入 1–10000 之间的总帧数。"
+                            },
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = if (gifFramesValid) {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            } else {
+                                MiuixTheme.colorScheme.error
+                            },
+                        )
+                    }
+                }
             }
 
             ConversionBranch.VIDEO_AUDIO -> {

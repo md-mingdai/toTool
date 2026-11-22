@@ -28,6 +28,14 @@ internal enum class ConversionBranch {
     IMAGE_GIF,
 }
 
+internal data class GifComposeItem(
+    val uri: Uri,
+    val name: String,
+    val holdFrames: Int = 5,
+    val animated: Boolean = false,
+    val original: Boolean = false,
+)
+
 internal data class SourceMedia(
     val uri: Uri,
     val name: String,
@@ -49,6 +57,8 @@ internal data class ConversionPlan(
     val solidColor: Int = 0xFF162018.toInt(),
     val customImage: Uri? = null,
     val music: Uri? = null,
+    val gifItems: List<GifComposeItem> = emptyList(),
+    val gifTotalFrames: Int = 0,
 ) {
     val baseName: String get() = baseNameOf(source.name)
 

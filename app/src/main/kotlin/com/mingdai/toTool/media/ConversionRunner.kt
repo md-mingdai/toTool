@@ -73,6 +73,28 @@ internal fun runConversion(
         else -> Unit
     }
 
+    if (plan.branch == ConversionBranch.IMAGE_GIF) {
+        val itemBytes = plan.gifItems.sumOf { queryFileSize(context, it.uri).coerceAtLeast(0L) }
+        val need = itemBytes + plan.gifTotalFrames.toLong().coerceAtLeast(1L) * 128L * 1024L +
+            MIN_FREE_HEADROOM_BYTES
+        val workDir = pickWorkDir(context, need)
+        cleanupStaleFiles(context)
+        onStage("准备 GIF 合成…")
+        onProgress(0f)
+        val output = composeGif(context, plan, workDir, control, onStage, onProgress)
+        try {
+            onStage("正在保存动图到相册…")
+            onProgress(0.96f)
+            val (where, bytes) = saveImageToGallery(context, plan.outputName, "image/gif") { sink ->
+                output.inputStream().use { it.copyTo(sink) }
+            }
+            onProgress(1f)
+            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}）")
+        } finally {
+            output.delete()
+        }
+    }
+
     val caps = capabilities ?: throw ConvertException(ffmpegUnavailableMessage(context))
     val ffmpeg = ffmpegBinary(context) ?: throw ConvertException(ffmpegUnavailableMessage(context))
     val sourceDurationMs = expectedSourceDurationMs(videoInfo, audioInfo)
