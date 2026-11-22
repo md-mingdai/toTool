@@ -861,6 +861,20 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                                 MiuixTheme.colorScheme.error
                             },
                         )
+                        val firstHold = gifItems.firstOrNull()?.takeIf { !it.animated }?.holdFrames ?: 0
+                        if (gifTotalFrames == 1) {
+                            Text(
+                                "总帧数为 1，生成的 GIF 只有一帧，不会动。",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                        } else if (gifItems.size > 1 && firstHold > 0 && gifTotalFrames != null && gifTotalFrames < firstHold) {
+                            Text(
+                                "总帧数小于第一张图片的停留帧数，GIF 可能只显示第一张图片。",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
