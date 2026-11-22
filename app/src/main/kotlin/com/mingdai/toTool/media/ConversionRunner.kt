@@ -81,7 +81,8 @@ internal fun runConversion(
         cleanupStaleFiles(context)
         onStage("准备 GIF 合成…")
         onProgress(0f)
-        val output = composeGif(context, plan, workDir, control, onStage, onProgress)
+        val composition = composeGif(context, plan, workDir, control, onStage, onProgress)
+        val output = composition.file
         try {
             onStage("正在保存动图到相册…")
             onProgress(0.96f)
@@ -89,7 +90,7 @@ internal fun runConversion(
                 output.inputStream().use { it.copyTo(sink) }
             }
             onProgress(1f)
-            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}，${plan.gifTotalFrames} 帧时间线）")
+            return ConversionOutcome("已保存到：$where（${humanSize(bytes)}，${composition.frames} 帧时间线）")
         } finally {
             output.delete()
         }

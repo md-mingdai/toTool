@@ -1,9 +1,17 @@
 package com.mingdai.toTool.media
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.net.Uri
+import com.mingdai.toTool.ui.screens.tools.ImageOps
 import java.io.File
 import java.util.Locale
+import kotlin.math.min
+
+internal class GifComposition(val file: File, val frames: Int)
 
 /** 把图片列表合成为 GIF。静态图片按停留帧重复；GIF / APNG 按自身帧展开。 */
 internal fun composeGif(
@@ -13,7 +21,7 @@ internal fun composeGif(
     control: ConversionControl,
     onStage: (String) -> Unit,
     onProgress: (Float?) -> Unit,
-): File {
+): GifComposition {
     if (plan.gifItems.isEmpty()) throw ConvertException("GIF 图片列表是空的")
     val ffmpeg = ffmpegBinary(context) ?: throw ConvertException(ffmpegUnavailableMessage(context))
     val totalFrames = plan.gifTotalFrames.coerceIn(1, 10000)
@@ -40,6 +48,8 @@ internal fun composeGif(
                     ffmpeg.absolutePath,
                     "-hide_banner", "-nostdin",
                     "-i", animInput.absolutePath,
+                    "-vf", "scale=720:720:force_original_aspect_ratio=decrease," +
+                        "pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black",
                     "-vsync", "0",
                     "-y", pattern,
                 )
@@ -57,17 +67,21 @@ internal fun composeGif(
             } else {
                 onStage("正在准备 ${item.name}…")
                 onProgress(0.05f + index.toFloat() / plan.gifItems.size * 0.1f)
-                val prepared = prepareLoopImage(context, item.uri, sourceDir, 1920, control.flag)
-                // 再按列表序号复制一份，避免极快连续调用时临时文件名碰撞导致列表项互相覆盖。
-                val png = File(sourceDir, "item_${index}_${prepared.name}")
-                prepared.copyTo(png, overwrite = true)
-                prepared.delete()
+                val png = prepareGifFrame(context, item.uri, sourceDir, index, control.flag)
                 repeat(item.holdFrames.coerceIn(1, 1000)) {
                     baseFrames.add(png)
                 }
             }
         }
         if (baseFrames.isEmpty()) throw ConvertException("GIF 没有可用的画面")
+        val roundFrames = baseFrames.size
+        val requestedFrames = plan.gifTotalFrames.coerceIn(1, 10000)
+        // 超过一轮时只保留完整轮次，避免出现 1,2,3,4,1,2 这种半轮结尾。
+        val totalFrames = if (requestedFrames >= roundFrames) {
+            (requestedFrames / roundFrames) * roundFrames
+        } else {
+            requestedFrames
+        }
 
         onStage("正在编排 $totalFrames 帧…")
         onProgress(0.18f)
@@ -126,8 +140,56 @@ internal fun composeGif(
         if (result is ConvertResult.Failure) throw ConvertException("GIF 合成失败：${result.message}")
         if (!output.exists() || output.length() == 0L) throw ConvertException("GIF 合成后没有生成文件")
         onProgress(1f)
-        return output
+        return GifComposition(output, totalFrames)
     } finally {
         sourceDir.deleteRecursively()
+    }
+}
+
+
+/** 把任意分辨率的图片统一画到 720×720 黑底画布，保证 concat 的所有输入帧尺寸一致。 */
+private fun prepareGifFrame(
+    context: Context,
+    uri: Uri,
+    dir: File,
+    index: Int,
+    canceled: java.util.concurrent.atomic.AtomicBoolean,
+): File {
+    if (canceled.get()) throw ConvertCanceledException()
+    val source = ImageOps.uriToBitmap(context, uri, 720)
+        ?: throw ConvertException("无法解码 GIF 列表里的图片")
+    val size = 720
+    val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val outFile = File(dir, "item_${index}.png")
+    try {
+        val canvas = Canvas(output)
+        canvas.drawColor(Color.BLACK)
+        val scale = min(size.toFloat() / source.width, size.toFloat() / source.height)
+        val drawWidth = (source.width * scale).toInt().coerceAtLeast(1)
+        val drawHeight = (source.height * scale).toInt().coerceAtLeast(1)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(
+            source,
+            null,
+            android.graphics.RectF(
+                (size - drawWidth) / 2f,
+                (size - drawHeight) / 2f,
+                (size + drawWidth) / 2f,
+                (size + drawHeight) / 2f,
+            ),
+            paint,
+        )
+        outFile.outputStream().use { stream ->
+            if (!output.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                throw ConvertException("GIF 列表图片编码失败")
+            }
+        }
+        return outFile
+    } catch (e: Exception) {
+        outFile.delete()
+        throw e
+    } finally {
+        source.recycle()
+        output.recycle()
     }
 }
