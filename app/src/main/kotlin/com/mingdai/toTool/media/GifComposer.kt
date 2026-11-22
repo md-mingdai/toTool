@@ -57,7 +57,11 @@ internal fun composeGif(
             } else {
                 onStage("正在准备 ${item.name}…")
                 onProgress(0.05f + index.toFloat() / plan.gifItems.size * 0.1f)
-                val png = prepareLoopImage(context, item.uri, sourceDir, 1920, control.flag)
+                val prepared = prepareLoopImage(context, item.uri, sourceDir, 1920, control.flag)
+                // 再按列表序号复制一份，避免极快连续调用时临时文件名碰撞导致列表项互相覆盖。
+                val png = File(sourceDir, "item_${index}_${prepared.name}")
+                prepared.copyTo(png, overwrite = true)
+                prepared.delete()
                 repeat(item.holdFrames.coerceIn(1, 1000)) {
                     baseFrames.add(png)
                 }
