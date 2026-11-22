@@ -11,6 +11,7 @@ import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -94,6 +95,8 @@ class OrientationOverlayService : Service() {
     private var overlay: View? = null
     private var params: WindowManager.LayoutParams? = null
     private var orientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
+    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
