@@ -25,8 +25,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.mingdai.toTool.media.ConvertCanceledException
 import com.mingdai.toTool.media.ConvertException
 import com.mingdai.toTool.media.ConvertResult
+import com.mingdai.toTool.media.FfmpegCapabilities
 import com.mingdai.toTool.media.humanSize
 import com.mingdai.toTool.media.baseNameOf
+import com.mingdai.toTool.media.firstAvailable
+import com.mingdai.toTool.media.normalizedExtension
 import com.mingdai.toTool.media.probeVideo
 import com.mingdai.toTool.media.runFfmpeg
 import com.mingdai.toTool.ui.components.HintText
@@ -39,6 +42,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.io.File
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -79,9 +83,82 @@ private fun MediaSourceCard(
     )
 }
 
-private enum class AudioReverseTarget(val label: String, val ext: String, val mime: String) {
-    M4A("M4A（AAC）", "m4a", "audio/mp4"),
-    MP3("MP3", "mp3", "audio/mpeg"),
+private enum class AudioReverseTarget(val label: String) {
+    ORIGINAL("跟随原格式"),
+    M4A("M4A（AAC）"),
+    MP3("MP3"),
+}
+
+private data class AudioReverseOutput(
+    val ext: String,
+    val mime: String,
+    val codec: String,
+    val codecArgs: List<String> = emptyList(),
+    val containerArgs: List<String> = emptyList(),
+    val formatArgs: List<String> = emptyList(),
+)
+
+private fun m4aOutput(): AudioReverseOutput = AudioReverseOutput(
+    ext = "m4a",
+    mime = "audio/mp4",
+    codec = "aac",
+    codecArgs = listOf("-b:a", "192k"),
+    containerArgs = listOf("-movflags", "+faststart"),
+)
+
+private fun mp3Output(): AudioReverseOutput = AudioReverseOutput(
+    ext = "mp3",
+    mime = "audio/mpeg",
+    codec = "libmp3lame",
+    codecArgs = listOf("-q:a", "2"),
+)
+
+private fun AudioReverseOutput.availableOr(fallback: AudioReverseOutput, encoders: Set<String>?): AudioReverseOutput =
+    if (encoders == null || codec in encoders) this else fallback
+
+private fun resolveAudioReverseOutput(
+    target: AudioReverseTarget,
+    sourceExt: String,
+    capabilities: FfmpegCapabilities?,
+): AudioReverseOutput {
+    if (target == AudioReverseTarget.M4A) return m4aOutput()
+    if (target == AudioReverseTarget.MP3) return mp3Output()
+    val encoders = capabilities?.encoders
+    val fallback = m4aOutput()
+    return when (sourceExt.lowercase(Locale.ROOT)) {
+        "mp3" -> mp3Output().availableOr(fallback, encoders)
+        "wav", "wave" -> AudioReverseOutput("wav", "audio/x-wav", "pcm_s16le")
+            .availableOr(fallback, encoders)
+        "flac" -> AudioReverseOutput("flac", "audio/flac", "flac")
+            .availableOr(fallback, encoders)
+        "aac" -> AudioReverseOutput(
+            "aac", "audio/aac", "aac",
+            formatArgs = listOf("-f", "adts"),
+        ).availableOr(fallback, encoders)
+        "m4a", "m4b" -> m4aOutput()
+        "ogg", "oga" -> {
+            val codec = firstAvailable(listOf("libvorbis", "libopus", "vorbis"), encoders)
+            when (codec) {
+                null -> fallback
+                "libvorbis" -> AudioReverseOutput("ogg", "audio/ogg", codec, listOf("-q:a", "5"))
+                "libopus" -> AudioReverseOutput("ogg", "audio/ogg", codec, listOf("-b:a", "128k"))
+                else -> AudioReverseOutput(
+                    "ogg", "audio/ogg", codec,
+                    listOf("-strict", "-2", "-q:a", "5"),
+                )
+            }
+        }
+        "opus" -> AudioReverseOutput(
+            "opus", "audio/opus", "libopus",
+            codecArgs = listOf("-b:a", "128k"),
+            formatArgs = listOf("-f", "opus"),
+        ).availableOr(fallback, encoders)
+        "aif", "aiff" -> AudioReverseOutput("aiff", "audio/aiff", "pcm_s16be")
+            .availableOr(fallback, encoders)
+        "wma" -> AudioReverseOutput("wma", "audio/x-ms-wma", "wmav2", listOf("-b:a", "192k"))
+            .availableOr(fallback, encoders)
+        else -> fallback
+    }
 }
 
 @Composable
@@ -149,8 +226,11 @@ private fun AudioReverseTool(padding: PaddingValues) {
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
-    var target by remember { mutableStateOf(AudioReverseTarget.M4A) }
+    var target by remember { mutableStateOf(AudioReverseTarget.ORIGINAL) }
     val info = rememberAudioProbe(uri)
+    val capabilities = rememberFfmpegCapabilities()
+    val sourceExt = normalizedExtension(name)
+    val output = resolveAudioReverseOutput(target, sourceExt, capabilities)
     val picker = rememberMediaPicker("audio/*") { picked, pickedName, pickedSize ->
         uri = picked; name = pickedName; size = pickedSize; state.resetMessages()
     }
@@ -177,31 +257,42 @@ private fun AudioReverseTool(padding: PaddingValues) {
                 SelectChip(
                     selected = target == option,
                     onClick = { target = option; state.resetMessages() },
-                    label = option.label,
+                    label = if (option == AudioReverseTarget.ORIGINAL) {
+                        "跟随原格式（${output.ext.uppercase(Locale.ROOT)}）"
+                    } else {
+                        option.label
+                    },
                     enabled = !state.running,
                 )
             }
         }
+        HintText(
+            "输出格式：${output.ext.uppercase(Locale.ROOT)} · ${output.codec}" +
+                if (target == AudioReverseTarget.ORIGINAL) "。不支持的源格式会自动回退到 M4A。" else "。",
+        )
         PrimaryButton(
             onClick = {
                 val selected = uri ?: return@PrimaryButton
                 state.launch(scope) {
                     runMediaJob(
                         context, state, listOf(selected),
-                        "${baseNameOf(name ?: "audio")}_reverse.${target.ext}", target.mime,
+                        "${baseNameOf(name ?: "audio")}_reverse.${output.ext}", output.mime,
                         info?.durationMs?.takeIf { it > 0 }?.div(1000.0),
-                    ) { files, output, _, ffmpeg, caps ->
-                        val codec = if (target == AudioReverseTarget.MP3) {
-                            if (caps.encoders?.contains("libmp3lame") == false) {
-                                throw ConvertException("内置 FFmpeg 没有 MP3 编码器，请改选 M4A")
-                            }
-                            listOf("-c:a", "libmp3lame", "-q:a", "2")
-                        } else {
-                            listOf("-c:a", "aac", "-b:a", "192k")
+                    ) { files, jobOutput, _, ffmpeg, caps ->
+                        if (caps.encoders?.contains(output.codec) == false) {
+                            throw ConvertException("内置 FFmpeg 没有 ${output.codec} 编码器，请改选其它格式")
                         }
-                        listOf(ffmpeg.absolutePath, "-hide_banner", "-nostdin", "-i", files[0].absolutePath) +
-                            listOf("-vn", "-af", "areverse") + codec +
-                            listOf("-max_muxing_queue_size", "4096", "-y", output.absolutePath)
+                        buildList {
+                            add(ffmpeg.absolutePath)
+                            addAll(listOf(
+                                "-hide_banner", "-nostdin", "-i", files[0].absolutePath,
+                                "-vn", "-af", "areverse", "-c:a", output.codec,
+                            ))
+                            addAll(output.codecArgs)
+                            addAll(output.containerArgs)
+                            addAll(output.formatArgs)
+                            addAll(listOf("-max_muxing_queue_size", "4096", "-y", jobOutput.absolutePath))
+                        }
                     }
                 }
             },

@@ -37,14 +37,17 @@ internal fun probeCapabilities(ffmpeg: File): FfmpegCapabilities {
         Regex("""^\s*[VAS][A-Z.]{5}\s+(\S+)""", RegexOption.MULTILINE)
             .findAll(out)
             .map { it.groupValues[1] }
+            .filter { it != "=" }
             .toSet()
             .ifEmpty { null }
     }.getOrNull()
     val filters = runCatching {
         val out = runProbe(ffmpeg, listOf("-hide_banner", "-filters")) ?: return@runCatching null
-        Regex("""^\s*[TSC.]{3}\s+(\S+)""", RegexOption.MULTILINE)
+        // FFmpeg 8 的 -filters 首列是 2 位标志（旧版是 3 位），这里同时兼容。
+        Regex("""^\s*[TSC.]{2,3}\s+(\S+)""", RegexOption.MULTILINE)
             .findAll(out)
             .map { it.groupValues[1] }
+            .filter { it != "=" }
             .toSet()
             .ifEmpty { null }
     }.getOrNull()

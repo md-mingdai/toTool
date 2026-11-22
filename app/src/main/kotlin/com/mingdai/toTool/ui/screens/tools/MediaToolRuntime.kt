@@ -148,6 +148,19 @@ internal fun rememberMediaPicker(
     return { launcher.launch(mime) }
 }
 
+/** 读取一次 FFmpeg 能力；用于媒体工具的格式/编码器回退判断。 */
+@Composable
+internal fun rememberFfmpegCapabilities(): FfmpegCapabilities? {
+    val context = LocalContext.current
+    var caps by remember { mutableStateOf<FfmpegCapabilities?>(null) }
+    LaunchedEffect(Unit) {
+        caps = withContext(Dispatchers.IO) {
+            ffmpegBinary(context)?.let { runCatching { probeCapabilities(it) }.getOrNull() }
+        }
+    }
+    return caps
+}
+
 @Composable
 internal fun rememberVideoProbe(uri: Uri?): VideoFrameInfo? {
     val context = LocalContext.current
