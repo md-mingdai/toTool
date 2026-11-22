@@ -46,6 +46,7 @@ private fun shortcutColorOf(category: ToolCategory): Int = when (category) {
     ToolCategory.CALC -> 0xFF34C759.toInt()
     ToolCategory.DEVICE -> 0xFF7C5CFC.toInt()
     ToolCategory.IMAGE -> 0xFFFF2D55.toInt()
+    ToolCategory.MEDIA -> 0xFF00A6A6.toInt()
 }
 
 /**

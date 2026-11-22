@@ -51,6 +51,7 @@ import com.mingdai.toTool.ui.screens.tools.ImageRoundRectTool
 import com.mingdai.toTool.ui.screens.tools.ImageWatermarkTool
 import com.mingdai.toTool.ui.screens.tools.JsonTool
 import com.mingdai.toTool.ui.screens.tools.LoanTool
+import com.mingdai.toTool.ui.screens.tools.MediaToolScreen
 import com.mingdai.toTool.ui.screens.tools.MetalDetectorTool
 import com.mingdai.toTool.ui.screens.tools.NetworkTool
 import com.mingdai.toTool.ui.screens.tools.NotificationCenterTool
@@ -250,6 +251,10 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "img_blur" -> ImageBlurTool(padding)
             "img_roundrect" -> ImageRoundRectTool(padding)
             "img_audio_record" -> ImageRecordTool(padding)
+            // --- 媒体工具 ---
+            "media_video_reverse", "media_audio_reverse", "media_pip", "media_subtitle",
+            "media_trim", "media_watermark", "media_compress", "media_rotate", "media_speed" ->
+                MediaToolScreen(tool.id, padding)
             else -> Box(modifier = Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("该工具尚未实现")
             }

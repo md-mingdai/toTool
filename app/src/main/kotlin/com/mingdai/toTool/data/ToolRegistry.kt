@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.DataArray
 import androidx.compose.material.icons.filled.DataObject
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Functions
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Highlight
@@ -33,12 +35,15 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Percent
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.RoundedCorner
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.ShowChart
@@ -46,6 +51,7 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timer
@@ -63,6 +69,7 @@ enum class ToolCategory(val title: String, val subtitle: String, val icon: Image
     CALC("计算工具", "Calc Tools", Icons.Filled.Calculate),
     DEVICE("设备工具", "System Tools", Icons.Filled.Devices),
     IMAGE("图片工具", "Image Tools", Icons.Filled.Photo),
+    MEDIA("媒体工具", "Media Tools", Icons.Filled.VideoLibrary),
 }
 
 /** A single tool entry. */
@@ -133,6 +140,16 @@ object ToolRegistry {
         Tool("img_blur", "毛玻璃图生成", "高斯模糊加白色蒙层", ToolCategory.IMAGE, Icons.Filled.BlurOn),
         Tool("img_roundrect", "圆角矩形生成", "图片四角圆角裁切", ToolCategory.IMAGE, Icons.Filled.RoundedCorner),
         Tool("img_audio_record", "图片唱片", "把音频编码进 PNG 像素，或从图片唱片还原音频（娱乐，不是加密）", ToolCategory.IMAGE, Icons.Filled.AudioFile),
+        // --- 媒体工具 ---
+        Tool("media_video_reverse", "视频倒放", "视频画面与音轨同时倒放", ToolCategory.MEDIA, Icons.Filled.Replay),
+        Tool("media_audio_reverse", "音频倒放", "音频倒放并输出 M4A 或 MP3", ToolCategory.MEDIA, Icons.Filled.GraphicEq),
+        Tool("media_pip", "画中画", "把一段视频叠加到另一段视频的四个角", ToolCategory.MEDIA, Icons.Filled.PictureInPictureAlt),
+        Tool("media_subtitle", "字幕烧录", "烧录 SRT / ASS 字幕，或读取视频内嵌字幕轨", ToolCategory.MEDIA, Icons.Filled.Subtitles),
+        Tool("media_trim", "视频裁剪", "交互式选择起始与结束位置，只裁剪长度", ToolCategory.MEDIA, Icons.Filled.ContentCut),
+        Tool("media_watermark", "视频添加水印", "叠加文字或图片水印，可调位置与透明度", ToolCategory.MEDIA, Icons.Filled.PhotoLibrary),
+        Tool("media_compress", "视频压缩", "按 480p / 540p / 720p / 1080p 压缩，可调 CRF 与编码预设", ToolCategory.MEDIA, Icons.Filled.Compress),
+        Tool("media_rotate", "视频旋转", "顺时针旋转 90° / 180° / 270°", ToolCategory.MEDIA, Icons.Filled.RotateRight),
+        Tool("media_speed", "视频变速", "0.5×–2× 调整视频与音轨速度", ToolCategory.MEDIA, Icons.Filled.Speed),
     )
 
     val byId: Map<String, Tool> = all.associateBy { it.id }

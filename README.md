@@ -4,7 +4,7 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：51 个日常、文本、计算、设备与图片工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：60 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.2.1-blue)](https://github.com/md-mingdai/toTool/actions)
 
@@ -45,6 +45,17 @@
 - 原始 FFmpeg 命令模式，支持输入占位符、实时日志和进度。
 - 输出保存到「下载/toTool」，文件较多时自动打包；图片保存到「相册/toTool」。
 
+### 媒体工具
+
+- 视频倒放、音频倒放：同时反转画面与音轨；音频可输出 M4A 或 MP3。
+- 画中画：把一段视频缩放到另一段视频的左上 / 右上 / 左下 / 右下角，使用主视频音轨。
+- 字幕烧录：解析 SRT / ASS，或从 MKV 等容器读取第一条内嵌字幕轨，逐条渲染后叠加到画面并输出 MP4。
+- 视频裁剪：拖动起始与结束位置，只裁长度，保留原画面。
+- 视频添加水印：支持文字或图片水印，可选四角位置和透明度。
+- 视频压缩：480p / 540p / 720p / 1080p 四种高度预设，可调 CRF 与 ultrafast / fast / medium / slow 编码预设。
+- 视频旋转与变速：顺时针 90° / 180° / 270°，以及 0.5×–2× 同步变速。
+- 全部使用内置 FFmpeg；字幕和水印由 Android Canvas 渲染成透明覆盖层，不依赖 libass / drawtext。
+
 ### 内置工具
 
 | 分类 | 工具 |
@@ -54,6 +65,7 @@
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
 | 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、通知管理、米游记录获取、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片 |
+| 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。
 - 亮色 / 暗色 / 跟随系统 / 动态取色 / 自定义种子色。
@@ -63,7 +75,7 @@
 - 单 APK，Jetpack Compose + Miuix，统一管理页面转场、方向锁和沉浸式系统栏；高级权限可由设置页在 Shizuku 与 Root 间切换。
 - 条码使用 ZXing、CameraX 和项目内的汉信码 / Code 49 编解码器；实时扫描分为快慢路径并跟踪多个码框。
 - 方程求解使用任意精度有理数、多项式和根式运算；无法精确求解时转为数值扫描。
-- FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译；启用 GPL 构建，带 x264（H.264）与 libvpx（VP8/VP9），并保留 mpeg4 兜底。
+- FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译；启用 GPL 构建，带 x264（H.264）与 libvpx（VP8/VP9），并保留 mpeg4 兜底。媒体工具的字幕、水印先由 Canvas 渲染成透明 PNG，再交给 FFmpeg overlay，避免依赖 libass / drawtext。
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 放进 APK。
 - 手机端内嵌 Ktor 服务器，提供静态页面和同源 API；文件通过「所有文件访问权限」读写，上传默认保存到 `Download/toTool/FlashDrop/`。
 - 弱网助手通过 VPN 把所选应用导向本地 HTTP 代理，按 KB/s 和附加延迟限速，并支持目标主机过滤与悬浮窗监控。
@@ -80,7 +92,7 @@
 | `INTERNET` / `ACCESS_NETWORK_STATE` | 网络信息工具；隔空闪传局域网服务 |
 | `QUERY_ALL_PACKAGES` | 提取 APK、展示已安装应用 |
 | `REQUEST_INSTALL_PACKAGES` | 安装 APKS / XAPK / APKM |
-| 媒体读取权限 | 格式转换读取用户选择的媒体 |
+| 媒体读取权限 | 格式转换与媒体工具读取用户选择的媒体 |
 | `MANAGE_EXTERNAL_STORAGE` | 读取真实壁纸；隔空闪传浏览 / 上传 / 下载手机文件 |
 | `SYSTEM_ALERT_WINDOW` | 弱网助手悬浮窗 |
 | `POST_NOTIFICATIONS` / 前台服务 | 弱网助手运行状态通知 |
