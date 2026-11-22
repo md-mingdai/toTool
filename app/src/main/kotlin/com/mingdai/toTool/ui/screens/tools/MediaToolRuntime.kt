@@ -15,6 +15,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.mingdai.toTool.background.BackgroundTask
+import com.mingdai.toTool.background.BackgroundTaskRegistry
 import com.mingdai.toTool.media.AudioProbeInfo
 import com.mingdai.toTool.media.ConversionControl
 import com.mingdai.toTool.media.ConvertCanceledException
@@ -42,14 +44,19 @@ import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** 媒体工具共用的运行状态。 */
-internal class MediaToolRunState {
+/** 媒体工具共用的运行状态；按工具 id 常驻，离开页面后任务继续运行。 */
+internal class MediaToolRunState(
+    val context: Context,
+    val toolId: String,
+    val title: String,
+) {
     var running by mutableStateOf(false)
     var stage by mutableStateOf("")
     var progress by mutableStateOf<Float?>(0f)
@@ -65,12 +72,17 @@ internal class MediaToolRunState {
     }
 }
 
+private object MediaToolStateStore {
+    private val states = mutableMapOf<String, MediaToolRunState>()
+
+    fun get(key: String, context: Context, title: String): MediaToolRunState =
+        states.getOrPut(key) { MediaToolRunState(context, key, title) }
+}
+
 @Composable
-internal fun rememberMediaToolState(): MediaToolRunState {
-    val state = remember { MediaToolRunState() }
-    DisposableEffect(Unit) {
-        onDispose { state.control.cancel() }
-    }
+internal fun rememberMediaToolState(key: String, title: String): MediaToolRunState {
+    val context = LocalContext.current.applicationContext
+    val state = remember(key) { MediaToolStateStore.get(key, context, title) }
     KeepScreenOn(state.running)
     return state
 }
@@ -85,7 +97,25 @@ internal fun MediaToolRunState.launch(
     stage = "准备中…"
     progress = 0f
     resetMessages()
-    scope.launch {
+    val taskId = BackgroundTaskRegistry.newId("media_$toolId")
+    BackgroundTaskRegistry.add(
+        context,
+        BackgroundTask(
+            id = taskId,
+            toolId = toolId,
+            title = title,
+            detail = "准备中...",
+            progress = 0f,
+            cancel = { control.cancel() },
+        ),
+    )
+    val syncJob = BackgroundTaskRegistry.scope.launch {
+        while (running) {
+            BackgroundTaskRegistry.update(taskId, stage.ifBlank { title }, progress)
+            delay(400)
+        }
+    }
+    BackgroundTaskRegistry.scope.launch {
         try {
             result = withContext(Dispatchers.IO) { block() }
         } catch (e: ConvertCanceledException) {
@@ -95,6 +125,8 @@ internal fun MediaToolRunState.launch(
         } finally {
             stage = ""
             running = false
+            syncJob.cancel()
+            BackgroundTaskRegistry.remove(taskId)
         }
     }
 }

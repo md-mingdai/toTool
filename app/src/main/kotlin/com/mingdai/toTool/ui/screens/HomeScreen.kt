@@ -80,6 +80,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import com.mingdai.toTool.ui.components.CollapsingBarState
+import com.mingdai.toTool.ui.components.BackgroundTaskDrawer
 import com.mingdai.toTool.ui.components.collapsingBar
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
@@ -131,6 +132,7 @@ fun HomeScreen(navController: NavHostController) {
     // “格式转换”页里是表单，不需要这个效果。
     val edgeHaptics = rememberEdgeHaptics(enabled = tab != 2)
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -310,6 +312,8 @@ fun HomeScreen(navController: NavHostController) {
                 }
             }
         }
+        }
+        BackgroundTaskDrawer(Modifier.align(Alignment.CenterEnd))
     }
 }
 

@@ -84,6 +84,16 @@ private enum class FlashDropTab(val label: String) {
     CLIPBOARD("剪贴板"),
 }
 
+private object FlashDropRuntime {
+    @Volatile
+    private var shared: FlashDropController? = null
+
+    fun get(context: android.content.Context, prefs: com.mingdai.toTool.data.Prefs): FlashDropController =
+        shared ?: synchronized(this) {
+            shared ?: FlashDropController(context.applicationContext, prefs).also { shared = it }
+        }
+}
+
 /**
  * 隔空闪传：在手机上启动一个局域网网页服务，电脑浏览器访问后管理手机文件。
  *
@@ -94,7 +104,7 @@ private enum class FlashDropTab(val label: String) {
 fun FlashDropTool(padding: PaddingValues) {
     val context = LocalContext.current
     val prefs = LocalPrefs.current
-    val controller = remember { FlashDropController(context, prefs) }
+    val controller = remember { FlashDropRuntime.get(context, prefs) }
     val state = controller.state
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -108,9 +118,8 @@ fun FlashDropTool(padding: PaddingValues) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { controller.refresh() }
 
-    DisposableEffect(Unit) {
+    LaunchedEffect(Unit) {
         controller.start()
-        onDispose { controller.stop() }
     }
 
     DisposableEffect(lifecycleOwner) {

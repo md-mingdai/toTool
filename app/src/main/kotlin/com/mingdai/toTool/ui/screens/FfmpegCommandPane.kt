@@ -53,6 +53,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mingdai.toTool.R
+import com.mingdai.toTool.background.BackgroundTask
+import com.mingdai.toTool.background.BackgroundTaskRegistry
 import com.mingdai.toTool.data.FFMPEG_COMMAND_MAX_CHARS
 import com.mingdai.toTool.data.Prefs
 import com.mingdai.toTool.ui.components.HintText
@@ -120,6 +122,7 @@ internal fun FfmpegCommandPane(
     var stageProgress by remember { mutableStateOf<Float?>(0f) }
 
     var running by remember { mutableStateOf(false) }
+    var pageAttached by remember { mutableStateOf(true) }
     var currentRun by remember { mutableStateOf<FfmpegRun?>(null) }
     var stageText by remember { mutableStateOf("") }
     var progress by remember { mutableStateOf<Float?>(null) }
@@ -181,11 +184,12 @@ internal fun FfmpegCommandPane(
     // 离开页面：结束还在跑的 ffmpeg，删掉输入副本，保存输入框里的内容
     DisposableEffect(Unit) {
         onDispose {
-            canceled.set(true)
-            stageCanceled.set(true)
-            currentRun?.stop()
-            val staged = inputs.map { it.file }
-            thread(name = "ffmpeg-cleanup", isDaemon = true) { staged.forEach { it.delete() } }
+            pageAttached = false
+            if (!running) {
+                stageCanceled.set(true)
+                val staged = inputs.map { it.file }
+                thread(name = "ffmpeg-cleanup", isDaemon = true) { staged.forEach { it.delete() } }
+            }
             prefs.setFfmpegDraft(command.text)
             onBusyChange(false)
         }
@@ -243,6 +247,10 @@ internal fun FfmpegCommandPane(
 
     fun runCommand() {
         if (running || stagingName != null) return
+        if (BackgroundTaskRegistry.isToolRunning("ffmpeg_command")) {
+            errorMsg = "后台已经有一条 FFmpeg 命令在运行，请等它结束或在任务抽屉里停止。"
+            return
+        }
         val text = command.text
         if (text.isBlank()) return
         val ffmpeg = ffmpegBinary(context)
@@ -278,6 +286,28 @@ internal fun FfmpegCommandPane(
         startedAt = SystemClock.elapsedRealtime()
         elapsedSeconds = 0L
         running = true
+        val taskId = BackgroundTaskRegistry.newId("ffmpeg_command")
+        BackgroundTaskRegistry.add(
+            context,
+            BackgroundTask(
+                id = taskId,
+                toolId = "ffmpeg_command",
+                title = "FFmpeg 命令",
+                detail = "正在运行...",
+                progress = null,
+                cancel = { run.stop() },
+            ),
+        )
+        val syncJob = BackgroundTaskRegistry.scope.launch {
+            while (running) {
+                BackgroundTaskRegistry.update(
+                    taskId,
+                    stageText.ifBlank { liveText }.ifBlank { "正在运行..." }.take(120),
+                    progress,
+                )
+                delay(400)
+            }
+        }
         history = prefs.addFfmpegHistory(text)
         prefs.setFfmpegDraft(text)
         log.add(ShellLineKind.INFO, "[${clockNow()}] $ ffmpeg ${describeFfmpegCommand(text)}")
@@ -289,7 +319,7 @@ internal fun FfmpegCommandPane(
             delay(150)
             pageScroll.animateScrollTo(pageScroll.maxValue)
         }
-        scope.launch {
+        BackgroundTaskRegistry.scope.launch {
             val measurable = hasPredictableDuration(args)
             val tail = ArrayDeque<String>()
             var duration = 0.0
@@ -397,6 +427,13 @@ internal fun FfmpegCommandPane(
                 running = false
                 stageText = ""
                 liveText = ""
+                syncJob.cancel()
+                BackgroundTaskRegistry.remove(taskId)
+                if (!pageAttached) {
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        usedInputs.forEach { it.file.delete() }
+                    }
+                }
             }
         }
     }

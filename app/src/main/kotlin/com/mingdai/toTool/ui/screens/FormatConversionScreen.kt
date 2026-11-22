@@ -174,20 +174,19 @@ fun FormatConversionScreen(modifier: Modifier = Modifier) {
     var mode by rememberSaveable { mutableStateOf(0) }
     // 任意一个模式正在忙（转换 / 读取文件 / 运行命令）时锁住切换：
     // 切走会销毁那个模式的页面，也就等于把正在跑的任务终止了。
-    var busy by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
         TabRowWithContour(
             tabs = listOf("格式转换", "FFmpeg 命令"),
             selectedTabIndex = mode,
-            onTabSelected = { if (!busy) mode = it },
+            onTabSelected = { mode = it },
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
         )
         val paneModifier = Modifier.weight(1f).fillMaxWidth()
         if (mode == 0) {
-            FormatQuickConvertPane(modifier = paneModifier, onBusyChange = { busy = it })
+            FormatQuickConvertPane(modifier = paneModifier, onBusyChange = {})
         } else {
-            FfmpegCommandPane(modifier = paneModifier, onBusyChange = { busy = it })
+            FfmpegCommandPane(modifier = paneModifier, onBusyChange = {})
         }
     }
 }

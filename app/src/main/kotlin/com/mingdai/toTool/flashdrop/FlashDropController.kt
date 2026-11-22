@@ -13,6 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import com.mingdai.toTool.background.BackgroundTask
+import com.mingdai.toTool.background.BackgroundTaskRegistry
 import com.mingdai.toTool.data.Prefs
 import java.io.File
 import java.net.Inet4Address
@@ -110,6 +112,16 @@ class FlashDropController(
                         return@post
                     }
                     server = next
+                    BackgroundTaskRegistry.add(
+                        appContext,
+                        BackgroundTask(
+                            id = "flashdrop",
+                            toolId = "dev_flashdrop",
+                            title = "隔空闪传",
+                            detail = "端口 ${next.runningPort} · 等待浏览器连接",
+                            cancel = { stop() },
+                        ),
+                    )
                     state = state.copy(
                         running = true,
                         starting = false,
@@ -142,6 +154,7 @@ class FlashDropController(
         starting = false
         server?.stop()
         server = null
+        BackgroundTaskRegistry.remove("flashdrop")
         state = state.copy(
             running = false,
             starting = false,

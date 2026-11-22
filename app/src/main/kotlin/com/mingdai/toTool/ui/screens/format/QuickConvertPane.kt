@@ -48,6 +48,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.media.AudioProbeInfo
+import com.mingdai.toTool.background.BackgroundTask
+import com.mingdai.toTool.background.BackgroundTaskRegistry
 import com.mingdai.toTool.media.ConversionBranch
 import com.mingdai.toTool.media.ConversionControl
 import com.mingdai.toTool.media.ConversionPlan
@@ -201,7 +203,6 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     LaunchedEffect(isRunning) { onBusyChange(isRunning) }
     DisposableEffect(Unit) {
         onDispose {
-            control.cancel()
             onBusyChange(false)
         }
     }
@@ -431,6 +432,10 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
 
     fun startConversion() {
         if (!canConvert || isRunning) return
+        if (BackgroundTaskRegistry.isToolRunning("format_conversion")) {
+            errorText = "后台已经有一个格式转换任务在运行，请等它结束或在任务抽屉里停止。"
+            return
+        }
         val uri = sourceUri ?: return
         val name = sourceName ?: return
         val targetOption = target ?: return
@@ -468,7 +473,19 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         resultText = null
         noticeText = null
         errorText = null
-        scope.launch {
+        val taskId = BackgroundTaskRegistry.newId("conversion")
+        BackgroundTaskRegistry.add(
+            context,
+            BackgroundTask(
+                id = taskId,
+                toolId = "format_conversion",
+                title = "格式转换 · $name",
+                detail = "准备转换...",
+                progress = 0f,
+                cancel = { control.cancel() },
+            ),
+        )
+        BackgroundTaskRegistry.scope.launch {
             try {
                 val outcome = withContext(Dispatchers.IO) {
                     runConversion(
@@ -478,8 +495,14 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         videoInfo = videoInfo,
                         audioInfo = audioInfo,
                         control = control,
-                        onStage = { stageText = it },
-                        onProgress = { progress = it },
+                        onStage = {
+                            stageText = it
+                            BackgroundTaskRegistry.update(taskId, it, progress)
+                        },
+                        onProgress = {
+                            progress = it
+                            BackgroundTaskRegistry.update(taskId, stageText, it)
+                        },
                     )
                 }
                 resultText = outcome.result
@@ -491,6 +514,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             } finally {
                 stageText = ""
                 isRunning = false
+                BackgroundTaskRegistry.remove(taskId)
             }
         }
     }

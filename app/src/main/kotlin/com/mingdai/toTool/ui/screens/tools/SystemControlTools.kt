@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -335,11 +336,18 @@ fun DpiTool(padding: PaddingValues) {
 
 /* ─────────────────────────── 高级重启 ─────────────────────────── */
 
-private enum class RebootAction(val label: String, val script: String) {
-    REBOOT("重启系统", "svc power reboot || reboot"),
-    RECOVERY("重启到 Recovery", "reboot recovery"),
-    BOOTLOADER("重启到 Bootloader", "reboot bootloader"),
-    SHUTDOWN("关机", "svc power shutdown || reboot -p"),
+private enum class RebootAction(
+    val label: String,
+    val script: String,
+    val rootOnly: Boolean = false,
+) {
+    REBOOT("设备重启", "svc power reboot || reboot"),
+    SOFT_REBOOT("快速重启（软重启）", "setprop ctl.restart zygote", rootOnly = true),
+    RESTART_UI("重启用户界面", "pkill -f com.android.systemui || killall com.android.systemui"),
+    SHUTDOWN("设备关机", "svc power shutdown || reboot -p"),
+    RECOVERY("重启至 Recovery", "reboot recovery"),
+    FASTBOOT("重启至 fastboot / fastbootd", "reboot fastboot || reboot bootloader"),
+    SAFE_MODE("重启至安全模式", "setprop persist.sys.safemode 1; reboot", rootOnly = true),
 }
 
 @Composable
@@ -355,6 +363,7 @@ fun AdvancedRebootTool(padding: PaddingValues) {
 
     fun execute() {
         if (busy || !permission.ready) return
+        if (action.rootOnly && permission.strategy != HighPermissionStrategy.ROOT) return
         scope.launch {
             busy = true
             notice = null
@@ -375,6 +384,9 @@ fun AdvancedRebootTool(padding: PaddingValues) {
         }
     }
 
+    val rootReady = permission.strategy == HighPermissionStrategy.ROOT && permission.ready
+    val actionAllowed = permission.ready && (!action.rootOnly || rootReady)
+
     ToolBody(padding) {
         HighPermissionCard(context, permission)
         SectionLabel("重启方式")
@@ -391,10 +403,13 @@ fun AdvancedRebootTool(padding: PaddingValues) {
                 )
             }
         }
+        if (action.rootOnly && !rootReady) {
+            HintText("「${action.label}」只能在 Root 策略下执行。")
+        }
         HintText("命令通过高级权限执行，设备会立即重启或关机；请先保存其它应用中的工作。")
         PrimaryButton(
             onClick = { confirm = true },
-            enabled = permission.ready && !busy,
+            enabled = actionAllowed && !busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (busy) "正在执行…" else "执行${action.label}") }
         notice?.let {
@@ -425,7 +440,7 @@ fun GlobalOrientationTool(padding: PaddingValues) {
     val context = LocalContext.current
     val state by OrientationOverlayController.state.collectAsState()
     var overlayAllowed by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    var selected by rememberSaveable { mutableStateOf(OrientationOption.PORTRAIT) }
+    var selected by rememberSaveable { mutableStateOf(OrientationOption.FORCE_PORTRAIT) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -445,12 +460,16 @@ fun GlobalOrientationTool(padding: PaddingValues) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    if (state.running) "运行中" else "未运行",
+                    when {
+                        !state.running -> "未运行"
+                        state.active -> "已启用 · ${state.option?.label ?: "自定义方向"}"
+                        else -> "已暂停 · ${state.option?.label ?: "自定义方向"}"
+                    },
                     style = MiuixTheme.textStyles.title4,
-                    color = if (state.running) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                    color = if (state.active) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
                 )
                 Text(
-                    state.option?.label ?: "尚未锁定方向",
+                    "启动后只会在右下角显示一个圆形悬浮开关，点按可暂停或恢复方向锁定。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -477,22 +496,38 @@ fun GlobalOrientationTool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("授予悬浮窗权限") }
         }
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OrientationOption.entries.forEach { option ->
-                SelectChip(
-                    selected = selected == option,
-                    onClick = {
+        SectionLabel("方向")
+        OrientationOption.entries.forEach { option ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
                         selected = option
                         if (state.running) {
                             OrientationOverlayController.update(context, option)
                         }
                     },
-                    label = option.label,
-                    enabled = overlayAllowed,
-                )
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(option.label, style = MiuixTheme.textStyles.body1)
+                        Text(
+                            option.subtitle,
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    if (selected == option) {
+                        Text(
+                            "已选",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                    }
+                }
             }
         }
         if (state.running) {

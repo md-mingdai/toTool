@@ -165,7 +165,7 @@ private fun resolveAudioReverseOutput(
 private fun VideoReverseTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_video_reverse", "视频倒放")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
@@ -222,7 +222,7 @@ private fun VideoReverseTool(padding: PaddingValues) {
 private fun AudioReverseTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_audio_reverse", "音频倒放")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
@@ -309,7 +309,7 @@ private fun Long.toSecondsOrNull(): Double? = takeIf { it > 0L }?.div(1000.0)
 private fun PictureInPictureTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_pip", "画中画")
     var mainUri by remember { mutableStateOf<Uri?>(null) }
     var mainName by remember { mutableStateOf<String?>(null) }
     var mainSize by remember { mutableStateOf(-1L) }
@@ -407,7 +407,7 @@ private enum class RotateAngle(val degrees: Int) {
 private fun SubtitleBurnTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_subtitle", "字幕烧录")
     var videoUri by remember { mutableStateOf<Uri?>(null) }
     var videoName by remember { mutableStateOf<String?>(null) }
     var videoSize by remember { mutableStateOf(-1L) }
@@ -575,7 +575,7 @@ private fun SubtitleBurnTool(padding: PaddingValues) {
 private fun VideoTrimTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_trim", "视频裁剪")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
@@ -668,7 +668,7 @@ private fun VideoTrimTool(padding: PaddingValues) {
 private fun VideoWatermarkTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_watermark", "视频水印")
     var videoUri by remember { mutableStateOf<Uri?>(null) }
     var videoName by remember { mutableStateOf<String?>(null) }
     var videoSize by remember { mutableStateOf(-1L) }
@@ -808,7 +808,7 @@ private val x264Presets = listOf("ultrafast", "fast", "medium", "slow")
 private fun VideoCompressTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_compress", "视频压缩")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
@@ -889,7 +889,7 @@ private fun VideoCompressTool(padding: PaddingValues) {
 private fun VideoRotateTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_rotate", "视频旋转")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
@@ -965,7 +965,7 @@ private val speedPresets = listOf(
 private fun VideoSpeedTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = rememberMediaToolState()
+    val state = rememberMediaToolState("media_speed", "视频变速")
     var uri by remember { mutableStateOf<Uri?>(null) }
     var name by remember { mutableStateOf<String?>(null) }
     var size by remember { mutableStateOf(-1L) }
