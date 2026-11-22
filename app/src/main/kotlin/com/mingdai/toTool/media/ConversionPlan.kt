@@ -11,6 +11,13 @@ internal enum class VisualMode(val label: String) {
     CUSTOM("自定义"),
 }
 
+internal enum class WaveformMode(val ffmpeg: String, val label: String) {
+    CLINE("cline", "填充"),
+    LINE("line", "线条"),
+    POINT("point", "点"),
+    P2P("p2p", "峰对峰"),
+}
+
 internal enum class ResolutionPreset(val width: Int, val height: Int, val label: String) {
     P720(1280, 720, "720P"),
     P1080(1920, 1080, "1080P"),
@@ -53,6 +60,9 @@ internal data class ConversionPlan(
     val durationSeconds: Double? = null,
     val frameIndex: Int? = null,
     val visualMode: VisualMode = VisualMode.COVER,
+    val waveformMode: WaveformMode = WaveformMode.CLINE,
+    val waveformColor: Int = 0xFF8BC34A.toInt(),
+    val waveformBackground: Int = 0xFF000000.toInt(),
     val resolution: ResolutionPreset = ResolutionPreset.P720,
     val solidColor: Int = 0xFF162018.toInt(),
     val customImage: Uri? = null,

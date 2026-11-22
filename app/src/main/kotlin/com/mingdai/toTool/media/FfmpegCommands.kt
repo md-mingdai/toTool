@@ -1,5 +1,7 @@
 package com.mingdai.toTool.media
 
+import java.util.Locale
+
 /** 返回的是 ffmpeg 的参数（不含可执行文件、全局参数、输出路径）。 */
 internal fun buildFfmpegAttempts(
     plan: ConversionPlan,
@@ -61,7 +63,12 @@ internal fun buildFfmpegAttempts(
             if (plan.visualMode == VisualMode.WAVEFORM) {
                 val width = plan.resolution.width
                 val height = plan.resolution.height
-                val filter = "[0:a]showwaves=s=${width}x${height}:mode=cline:rate=25:colors=0x8BC34A,format=yuv420p[v]"
+                val background = String.format(Locale.US, "0x%06X", plan.waveformBackground and 0xFFFFFF)
+                val waveColor = String.format(Locale.US, "0x%06X", plan.waveformColor and 0xFFFFFF)
+                val filter = "color=c=$background:s=${width}x${height}:r=25[bg];" +
+                    "[0:a]showwaves=s=${width}x${height}:mode=${plan.waveformMode.ffmpeg}:" +
+                    "rate=25:colors=$waveColor,format=rgba[wave];" +
+                    "[bg][wave]overlay=0:0:format=auto,format=yuv420p[v]"
                 listOf(
                     mutableListOf(
                         "-i", inputPath,

@@ -61,6 +61,7 @@ import com.mingdai.toTool.media.SourceMedia
 import com.mingdai.toTool.media.TargetOption
 import com.mingdai.toTool.media.VideoFrameInfo
 import com.mingdai.toTool.media.VisualMode
+import com.mingdai.toTool.media.WaveformMode
 import com.mingdai.toTool.media.branchFor
 import com.mingdai.toTool.media.defaultTarget
 import com.mingdai.toTool.media.detectMediaSignature
@@ -111,6 +112,23 @@ private val SOLID_COLORS = listOf(
     0xFFE8E8E8.toInt(),
 )
 
+private val WAVEFORM_COLORS = listOf(
+    0xFF8BC34A.toInt(),
+    0xFF00E5FF.toInt(),
+    0xFFFFFFFF.toInt(),
+    0xFFFFB300.toInt(),
+    0xFFFF4081.toInt(),
+)
+
+private data class WaveformBackgroundOption(val label: String, val color: Int)
+
+private val WAVEFORM_BACKGROUNDS = listOf(
+    WaveformBackgroundOption("黑色", 0xFF000000.toInt()),
+    WaveformBackgroundOption("绿幕", 0xFF00FF00.toInt()),
+    WaveformBackgroundOption("白色", 0xFFFFFFFF.toInt()),
+    WaveformBackgroundOption("深蓝", 0xFF101828.toInt()),
+)
+
 @Composable
 fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) {
     val context = LocalContext.current
@@ -141,6 +159,9 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var visualMode by rememberSaveable { mutableStateOf(VisualMode.COVER) }
     var resolution by rememberSaveable { mutableStateOf(ResolutionPreset.P720) }
     var solidColor by rememberSaveable { mutableStateOf(SOLID_COLORS.first()) }
+    var waveformMode by rememberSaveable { mutableStateOf(WaveformMode.CLINE) }
+    var waveformColor by rememberSaveable { mutableStateOf(WAVEFORM_COLORS.first()) }
+    var waveformBackground by rememberSaveable { mutableStateOf(WAVEFORM_BACKGROUNDS.first().color) }
     var customCoverUri by remember { mutableStateOf<Uri?>(null) }
     var customCoverName by remember { mutableStateOf<String?>(null) }
     var musicUri by remember { mutableStateOf<Uri?>(null) }
@@ -431,6 +452,9 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             },
             frameIndex = frameIndex.takeIf { conversionBranch == ConversionBranch.VIDEO_IMAGE },
             visualMode = visualMode,
+            waveformMode = waveformMode,
+            waveformColor = waveformColor,
+            waveformBackground = waveformBackground,
             resolution = resolution,
             solidColor = solidColor,
             customImage = customCoverUri,
@@ -679,19 +703,86 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                                 style = MiuixTheme.textStyles.footnote2,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
-                            VisualMode.WAVEFORM -> Text(
+                            VisualMode.WAVEFORM -> {
+                                Text(
+                                    if (waveformAvailable) {
+                                        "波形叠加在纯色背景上；背景可选绿幕，方便后期抠像。"
+                                    } else {
+                                        "当前 FFmpeg 构建没有 showwaves 滤镜，请选择其它画面。"
+                                    },
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = if (waveformAvailable) {
+                                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                    } else {
+                                        MiuixTheme.colorScheme.error
+                                    },
+                                )
                                 if (waveformAvailable) {
-                                    "黑底动态波形；如果当前 FFmpeg 不支持 showwaves，这个选项会不可用。"
-                                } else {
-                                    "当前 FFmpeg 构建没有 showwaves 滤镜，请选择其它画面。"
-                                },
-                                style = MiuixTheme.textStyles.footnote2,
-                                color = if (waveformAvailable) {
-                                    MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                } else {
-                                    MiuixTheme.colorScheme.error
-                                },
-                            )
+                                    Text(
+                                        "波形样式",
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        WaveformMode.entries.forEach { mode ->
+                                            SelectChip(
+                                                selected = waveformMode == mode,
+                                                onClick = {
+                                                    waveformMode = mode
+                                                    clearResult()
+                                                },
+                                                label = mode.label,
+                                                enabled = !isRunning,
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "波形颜色",
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        WAVEFORM_COLORS.forEach { color ->
+                                            ColorDot(
+                                                color = color,
+                                                selected = waveformColor == color,
+                                                enabled = !isRunning,
+                                            ) {
+                                                waveformColor = color
+                                                clearResult()
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        "背景",
+                                        style = MiuixTheme.textStyles.footnote2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        WAVEFORM_BACKGROUNDS.forEach { option ->
+                                            SelectChip(
+                                                selected = waveformBackground == option.color,
+                                                onClick = {
+                                                    waveformBackground = option.color
+                                                    clearResult()
+                                                },
+                                                label = option.label,
+                                                enabled = !isRunning,
+                                            )
+                                        }
+                                    }
+                                    if (waveformBackground == 0xFF00FF00.toInt()) {
+                                        Text(
+                                            "绿幕背景建议搭配白色或青色波形。",
+                                            style = MiuixTheme.textStyles.footnote2,
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        )
+                                    }
+                                }
+                            }
                             VisualMode.SOLID -> {
                                 Text(
                                     "纯色背景",
@@ -996,4 +1087,26 @@ private fun sourceSupporting(
         MediaKind.UNKNOWN -> Unit
     }
     return parts.joinToString(" · ")
+}
+
+
+@Composable
+private fun ColorDot(
+    color: Int,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(Color(color))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.dividerLine,
+                shape = CircleShape,
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+    )
 }
