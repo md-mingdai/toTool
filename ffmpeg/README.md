@@ -4,7 +4,7 @@ toTool 的「格式转换」和「执行原始 ffmpeg 命令」都靠安装包�
 以前用的是别人编好的预编译包（只有 arm64-v8a），现在改成**构建时从源码编译**：
 
 - 覆盖 Android 的四种 CPU 架构：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`，**每个架构各打一个 APK**
-- **纯 LGPL**：不带任何 GPL / nonfree 组件
+- **GPLv3 构建**：启用 GPL 组件（x264）并选择 GPLv3，不启用 nonfree 组件
 - FFmpeg 的库和外部库全部**静态链接**进一个可执行文件，只依赖系统自带的库
 
 | 文件 | 作用 |
@@ -12,7 +12,7 @@ toTool 的「格式转换」和「执行原始 ffmpeg 命令」都靠安装包�
 | `build.sh` | 编译脚本：下载源码 → 编外部库 → 编 FFmpeg → 瘦身 → 校验 |
 | `versions.env` | FFmpeg、各个库、NDK 的版本，以及来源校验值（提交哈希 / SHA-256） |
 | `../.github/workflows/build.yml` | CI：四个架构并行，每个架构编 FFmpeg → 打这个架构的 APK |
-| `../app/src/main/assets/licenses/FFMPEG.txt` | App 里「设置 → FFmpeg」显示的许可说明（含 LGPL 全文） |
+| `../app/src/main/assets/licenses/FFMPEG.txt` | App 里「设置 → FFmpeg」显示的许可说明（含 GPL 与各外部库许可信息） |
 
 ## 它是怎么工作的
 
@@ -86,21 +86,20 @@ ffmpeg/build.sh all         # 四个架构依次编
 `--enable-jni --enable-mediacodec`（用 NDK 的 AMediaCodec 做硬件编解码，命令行里不需要 JavaVM）；
 `--disable-autodetect`（不随机器环境自动探测外部库，用到什么就显式启用，保证每次编出来的东西一样）。
 
-## 许可证：为什么说是纯 LGPL
+## 许可证
 
-- configure 带 `--disable-gpl --disable-nonfree --disable-version3`，整个 FFmpeg 是 **LGPL v2.1+**。
-- 外部库只有三个，都与 LGPL 兼容：**LAME**（MP3 编码，LGPL v2.0+）、**Opus**（BSD-3-Clause）、
-  **libvorbis / libogg**（BSD-3-Clause）。
-- **没有** libx264、libx265、libxvid、libfdk-aac 这类 GPL / nonfree 的库。所以视频编码只有 FFmpeg 自带的编码器
-  （`mpeg4` 等），没有 H.264 / H.265 软编；Android 的 MediaCodec 硬编码器（`h264_mediacodec` 等）可以用，
-  效果取决于具体设备。
+- configure 使用 `--enable-gpl --enable-version3 --disable-nonfree`；FFmpeg 二进制是 **GPL version 3 or later**。
+- 外部库：**LAME**（MP3 编码，LGPL v2.0+）、**Opus**（BSD-3-Clause）、**libvorbis / libogg**（BSD-3-Clause）、
+  **x264**（H.264 编码，GPL-2.0+）、**libvpx**（VP8/VP9 编解码，BSD-3-Clause）。
+- 没有启用 libx265、libaom、SVT-AV1、libfdk-aac 等体积很大或 nonfree 的组件；H.264/VP8/VP9 由 x264/libvpx 提供，
+  mpeg4 仍是兜底编码器。
 - `build.sh` 编完会自动检查（`verify_binary`，交叉编译出的二进制在这台机器上跑不了，所以检查的是文件本身）：
-  ELF 架构 / PIE / 16 KB 对齐 / 只依赖系统库；二进制里必须有 `LGPL version 2.1 or later`、不能有 GPL 或 nonfree 的字样；
-  configuration 里不能出现 `--enable-gpl` / `--enable-nonfree` / `--enable-version3`，
-  `--enable-lib*` 必须在白名单（`ALLOWED_LIBS`）里。往里加 GPL 库会直接让构建失败。
-- 满足 LGPL 的义务：App 里「设置 → FFmpeg」可以看到许可说明、LGPL 全文、源码地址和替换方法；
-  本目录的脚本 + `versions.env` 里固定的版本，就是可以重新编出同样二进制的“对应源码”。
-  升级版本之后，记得同步改一下 `app/src/main/assets/licenses/FFMPEG.txt` 里写的版本号。
+  ELF 架构 / PIE / 16 KB 对齐 / 只依赖系统库；二进制里必须有 `GPL version 3 or later`、不能有 nonfree 字样；
+  configuration 必须启用 `--enable-gpl` / `--enable-version3`，不能启用 `--enable-nonfree`；
+  `--enable-lib*` 必须在白名单（`ALLOWED_LIBS`）里。
+- App 里「设置 → FFmpeg」可以看到许可说明、源码地址和替换方法；本目录的脚本 + `versions.env`
+  固定的版本，就是可以重新编出同样二进制的“对应源码”。升级版本之后，记得同步改
+  `app/src/main/assets/licenses/FFMPEG.txt` 里的版本号与外部库列表。
 
 ## 升级 FFmpeg 或外部库
 
@@ -117,16 +116,17 @@ LAME 没有官方 git 仓库，用 tar 包 + SHA-256 固定（并列了几个镜
 
 ## 以后想加别的编码器
 
-比如 WebM 需要 libvpx（BSD，可以用）：
+编码器需要同时满足体积和许可证要求：
 
 1. `versions.env` 里加版本、来源和校验值
-2. `build.sh` 里仿照 `build_opus` 写一个 `build_vpx`，在 `build_abi` 里调用，
-   并在 `build_ffmpeg` 的 configure 参数里加 `--enable-libvpx`
-3. 把库名加进 `ALLOWED_LIBS`，把它的许可证文本加进 `FFMPEG.txt`
-4. 在 `FormatConversionScreen.kt` 的 `FORMAT_SPECS` 里，这个格式需要的编码器名字已经写好了
-   （进入格式转换页时会探测 ffmpeg 里有哪些编码器，有才显示对应格式）
+2. `build.sh` 里仿照 `build_x264` / `build_vpx` 写构建函数，在 `build_abi` 里调用，
+   并在 `build_ffmpeg` 的 configure 参数里加 `--enable-libxxx`
+3. 把库名加进 `ALLOWED_LIBS`，把许可证文本补进 `FFMPEG.txt`
+4. 在 `MediaFormats.kt` 的 `FORMAT_SPECS` 里，这个格式需要的编码器名字已经写好了
+   （格式转换页会探测 ffmpeg 里有哪些编码器，有才显示对应格式）
 
-不要加 GPL 的库（libx264 / libx265 / libxvid 等）——那样整个 libffmpeg.so 就变成 GPL 了。
+当前已经启用 x264（H.264）和 libvpx（VP8/VP9）。x265 / AV1 软编体积较大，默认不启用；
+如果确实需要，建议先测量每个 ABI 的 APK 增量再决定。
 
 ## 体积
 
@@ -136,14 +136,15 @@ NDK 的结果会略有出入；压缩后的数字是按 deflate 估的，约等�
 | 构建 | 原始 | 压缩后 |
 | --- | --- | --- |
 | 以前的预编译包（`--enable-small`，没有 LAME / Opus / Vorbis） | 15.5 MB | 8.1 MB |
-| 现在（`--enable-small`，带 LAME / Opus / Vorbis） | 17.2 MB | 8.3 MB |
-| 改成按速度优化（`FFMPEG_SMALL=0`，`-O2`） | 19.8 MB | 9.9 MB |
+| 仅 LAME / Opus / Vorbis（旧） | 17.2 MB | 8.3 MB |
+| 当前：再加 x264 / libvpx（n8.1.3、arm64 实测） | 19.5 MB | 9.6 MB |
 
-所以默认用 `--enable-small`（`versions.env` 里的 `FFMPEG_SMALL=1`），体积和以前基本一样，代价是转码速度略慢。
-想要更快就改成 0，或者本地 `FFMPEG_SMALL=0 ffmpeg/build.sh <abi>` 试一下。
+默认用 `--enable-small`（`versions.env` 里的 `FFMPEG_SMALL=1`）。加入 x264 / libvpx 后每个架构大约增加
+2～3 MB 原始体积、1～2 MB 压缩体积；单个 APK 约 27 MB。想更快就改成 0，或者本地
+`FFMPEG_SMALL=0 ffmpeg/build.sh <abi>` 试一下。
 
-每个架构的 APK 只带自己的那一份，所以单个 APK 和以前差不多大；如果把四个架构塞进同一个 APK，
-就会多出三份（三十多 MB），这也是 CI 里每个架构各打一个 APK 的原因。需要再瘦身时可以：
+每个架构的 APK 只带自己的那一份；如果把四个架构塞进同一个 APK，
+libffmpeg.so 会再多出三份（约三十 MB），这也是 CI 里每个架构各打一个 APK 的原因。需要再瘦身时可以：
 
 - 用 `--disable-encoder=…` / `--disable-decoder=…` 去掉用不到的编解码器（会让「执行原始 ffmpeg 命令」少一些能力）
 - 去掉不需要的架构：`build.yml` 的 `matrix.abi` 和 `build.sh` 的 `ALL_ABIS`（`x86` / `x86_64` 基本只在模拟器上用到）
