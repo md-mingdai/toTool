@@ -51,6 +51,7 @@
         android:theme="@style/Theme.ToolyBox"
         android:enableOnBackInvokedCallback="true"
         android:requestLegacyExternalStorage="true"
+        android:manageSpaceActivity=".storage.ManageSpaceActivity"
         tools:targetApi="36">
 
         <activity
@@ -164,6 +165,36 @@
                 <data android:mimeType="application/xapk-package-archive" />
             </intent-filter>
         </activity>
+
+        <!-- 隐藏的分享转储器:在系统分享面板中接收任意 MIME 的文本或文件。 -->
+        <activity
+            android:name=".share.ShareReceiverActivity"
+            android:exported="true"
+            android:label="@string/share_dump_title"
+            android:theme="@style/Theme.ToolyBox"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- 系统「应用信息 > 存储 > 管理空间」入口;展示应用各类目录占用并允许清理缓存。 -->
+        <activity
+            android:name=".storage.ManageSpaceActivity"
+            android:exported="false"
+            android:label="@string/manage_space_title"
+            android:theme="@style/Theme.ToolyBox"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
 
         <!-- Video wallpaper engine: the system binds to it when the user sets
              this app as the wallpaper in the system wallpaper picker. -->
