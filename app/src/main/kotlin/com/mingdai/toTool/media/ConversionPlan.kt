@@ -58,7 +58,6 @@ internal data class ConversionPlan(
     val customImage: Uri? = null,
     val music: Uri? = null,
     val gifItems: List<GifComposeItem> = emptyList(),
-    val gifTotalFrames: Int = 0,
 ) {
     val baseName: String get() = baseNameOf(source.name)
 

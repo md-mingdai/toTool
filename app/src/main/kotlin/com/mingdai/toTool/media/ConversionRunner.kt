@@ -75,8 +75,9 @@ internal fun runConversion(
 
     if (plan.branch == ConversionBranch.IMAGE_GIF) {
         val itemBytes = plan.gifItems.sumOf { queryFileSize(context, it.uri).coerceAtLeast(0L) }
-        val need = itemBytes + plan.gifTotalFrames.toLong().coerceAtLeast(1L) * 128L * 1024L +
-            MIN_FREE_HEADROOM_BYTES
+        val estimatedFrames = plan.gifItems.sumOf { it.holdFrames.toLong().coerceAtLeast(1L) } +
+            plan.gifItems.count { it.animated } * 30L
+        val need = itemBytes + estimatedFrames * 128L * 1024L + MIN_FREE_HEADROOM_BYTES
         val workDir = pickWorkDir(context, need)
         cleanupStaleFiles(context)
         onStage("准备 GIF 合成…")

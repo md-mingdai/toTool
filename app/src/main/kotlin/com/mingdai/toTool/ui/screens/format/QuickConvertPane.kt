@@ -146,7 +146,6 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     var musicUri by remember { mutableStateOf<Uri?>(null) }
     var musicName by remember { mutableStateOf<String?>(null) }
     val gifItems = remember { mutableStateListOf<GifComposeItem>() }
-    var gifTotalFramesText by rememberSaveable { mutableStateOf("30") }
     var gifAdding by remember { mutableStateOf(false) }
 
     var framePreview by remember { mutableStateOf<Bitmap?>(null) }
@@ -269,7 +268,6 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         gifItems.add(
                             GifComposeItem(uri, name, holdFrames = 5, animated = signature.animated, original = true),
                         )
-                        gifTotalFramesText = "30"
                     } else {
                         gifItems.clear()
                     }
@@ -388,8 +386,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     val frameValid = videoInfo != null && frameIndex != null && frameIndex in 1..maxFrame
     val waveformAvailable = capabilities?.filters?.contains("showwaves") != false
     val videoHasAudio = branch != ConversionBranch.VIDEO_AUDIO || videoInfo?.hasAudio != false
-    val gifTotalFrames = gifTotalFramesText.toIntOrNull()
-    val gifFramesValid = gifTotalFrames != null && gifTotalFrames in 1..10000
+    val gifStaticFrames = gifItems.filter { !it.animated }.sumOf { it.holdFrames }
+    val gifAnimatedCount = gifItems.count { it.animated }
 
     val selectedTarget = target
     val selectedBranch = branch
@@ -404,7 +402,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         (selectedBranch.needsFfmpeg().not() || capabilityState == CapabilityState.READY) &&
         (selectedBranch != ConversionBranch.IMAGE_VIDEO || sourceAnimated || durationValid) &&
         (selectedBranch != ConversionBranch.VIDEO_IMAGE || frameValid) &&
-        (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && gifFramesValid && !gifAdding)) &&
+        (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && !gifAdding)) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.CUSTOM || customCoverUri != null) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.WAVEFORM || waveformAvailable) &&
         videoHasAudio
@@ -437,7 +435,6 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             customImage = customCoverUri,
             music = musicUri.takeIf { conversionBranch == ConversionBranch.IMAGE_VIDEO },
             gifItems = gifItems.toList().takeIf { conversionBranch == ConversionBranch.IMAGE_GIF }.orEmpty(),
-            gifTotalFrames = gifTotalFramesText.toIntOrNull() ?: 0,
         )
         control.reset()
         isRunning = true
@@ -836,45 +833,20 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         ) {
                             Text(if (gifAdding) "正在识别图片…" else "添加图片 / GIF")
                         }
-                        TextField(
-                            value = gifTotalFramesText,
-                            onValueChange = { value ->
-                                gifTotalFramesText = value.filter(Char::isDigit).take(5)
-                                clearResult()
-                            },
-                            label = "GIF 总帧数（1–10000）",
-                            singleLine = true,
-                            enabled = !isRunning,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
                         Text(
-                            if (gifFramesValid) {
-                                "总帧数超过单轮长度时按完整轮次向下取整；不足一轮则截断。不同分辨率的图片会统一缩放到 720×720 黑底画布。"
-                            } else {
-                                "请输入 1–10000 之间的总帧数。"
+                            buildString {
+                                append("总帧数自动计算：静态图片合计 $gifStaticFrames 帧")
+                                if (gifAnimatedCount > 0) append("，另加 $gifAnimatedCount 个动图的自身帧")
+                                append("。")
                             },
                             style = MiuixTheme.textStyles.footnote2,
-                            color = if (gifFramesValid) {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            } else {
-                                MiuixTheme.colorScheme.error
-                            },
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
-                        val firstHold = gifItems.firstOrNull()?.takeIf { !it.animated }?.holdFrames ?: 0
-                        if (gifTotalFrames == 1) {
-                            Text(
-                                "总帧数为 1，生成的 GIF 只有一帧，不会动。",
-                                style = MiuixTheme.textStyles.footnote2,
-                                color = MiuixTheme.colorScheme.error,
-                            )
-                        } else if (gifItems.size > 1 && firstHold > 0 && gifTotalFrames != null && gifTotalFrames < firstHold) {
-                            Text(
-                                "总帧数小于第一张图片的停留帧数，GIF 可能只显示第一张图片。",
-                                style = MiuixTheme.textStyles.footnote2,
-                                color = MiuixTheme.colorScheme.error,
-                            )
-                        }
+                        Text(
+                            "所有图片会统一缩放到 720×720 黑底画布；GIF 本身会循环播放。",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
                     }
                 }
             }

@@ -24,7 +24,6 @@ internal fun composeGif(
 ): GifComposition {
     if (plan.gifItems.isEmpty()) throw ConvertException("GIF 图片列表是空的")
     val ffmpeg = ffmpegBinary(context) ?: throw ConvertException(ffmpegUnavailableMessage(context))
-    val totalFrames = plan.gifTotalFrames.coerceIn(1, 10000)
     val root = File(workDir, "gif_${System.nanoTime()}")
     val sourceDir = File(root, "src").apply { mkdirs() }
     val baseFrames = mutableListOf<File>()
@@ -74,25 +73,14 @@ internal fun composeGif(
             }
         }
         if (baseFrames.isEmpty()) throw ConvertException("GIF 没有可用的画面")
-        val roundFrames = baseFrames.size
-        val requestedFrames = plan.gifTotalFrames.coerceIn(1, 10000)
-        // 超过一轮时只保留完整轮次，避免出现 1,2,3,4,1,2 这种半轮结尾。
-        val totalFrames = if (requestedFrames >= roundFrames) {
-            (requestedFrames / roundFrames) * roundFrames
-        } else {
-            requestedFrames
-        }
+        val totalFrames = baseFrames.size
 
         onStage("正在编排 $totalFrames 帧…")
         onProgress(0.18f)
-        val timeline = ArrayList<File>(totalFrames)
-        for (index in 0 until totalFrames) {
-            if (control.canceled) throw ConvertCanceledException()
-            timeline.add(baseFrames[index % baseFrames.size])
-        }
         // 连续的同一张图合并成一个 GIF 帧 + 更长的延迟，保证“停留帧数”真正生效。
         val runs = ArrayList<Pair<File, Int>>()
-        timeline.forEach { frame ->
+        baseFrames.forEach { frame ->
+            if (control.canceled) throw ConvertCanceledException()
             val last = runs.lastOrNull()
             if (last != null && last.first == frame) {
                 runs[runs.lastIndex] = last.first to (last.second + 1)
