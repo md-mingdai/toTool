@@ -388,6 +388,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     val videoHasAudio = branch != ConversionBranch.VIDEO_AUDIO || videoInfo?.hasAudio != false
     val gifStaticFrames = gifItems.filter { !it.animated }.sumOf { it.holdFrames }
     val gifAnimatedCount = gifItems.count { it.animated }
+    val gifHoldFramesValid = gifItems.filter { !it.animated }.all { it.holdFrames in 1..1000 }
 
     val selectedTarget = target
     val selectedBranch = branch
@@ -402,7 +403,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         (selectedBranch.needsFfmpeg().not() || capabilityState == CapabilityState.READY) &&
         (selectedBranch != ConversionBranch.IMAGE_VIDEO || sourceAnimated || durationValid) &&
         (selectedBranch != ConversionBranch.VIDEO_IMAGE || frameValid) &&
-        (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && !gifAdding)) &&
+        (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && gifHoldFramesValid && !gifAdding)) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.CUSTOM || customCoverUri != null) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.WAVEFORM || waveformAvailable) &&
         videoHasAudio
@@ -798,10 +799,12 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                                 }
                                 if (!item.animated) {
                                     TextField(
-                                        value = item.holdFrames.toString(),
+                                        value = item.holdFrames.takeIf { it > 0 }?.toString().orEmpty(),
                                         onValueChange = { value ->
-                                            val frames = value.filter(Char::isDigit).toIntOrNull() ?: 1
-                                            gifItems[index] = item.copy(holdFrames = frames.coerceIn(1, 1000))
+                                            val digits = value.filter(Char::isDigit).take(4)
+                                            gifItems[index] = item.copy(
+                                                holdFrames = (digits.toIntOrNull() ?: 0).coerceAtMost(1000),
+                                            )
                                             clearResult()
                                         },
                                         label = "帧",
@@ -847,6 +850,13 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                             style = MiuixTheme.textStyles.footnote2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        if (!gifHoldFramesValid) {
+                            Text(
+                                "有静态图片的停留帧数为空，请填写 1–1000 之间的帧数后再开始转换。",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
