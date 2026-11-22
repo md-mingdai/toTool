@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Shader
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -14,6 +15,7 @@ import com.mingdai.toTool.ui.screens.tools.ImageOps
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 internal fun loadEmbeddedCover(context: Context, uri: Uri): Bitmap? {
     val retriever = MediaMetadataRetriever()
@@ -97,6 +99,38 @@ internal fun createSolidCover(width: Int, height: Int, color: Int): Bitmap {
     return bitmap
 }
 
+/** 内嵌封面不裁切：固定目标高度，宽度按封面比例计算；极端宽高比时才加黑边。 */
+internal fun adaptCoverToHeight(source: Bitmap, targetHeight: Int): Bitmap {
+    if (source.width <= 0 || source.height <= 0 || targetHeight <= 0) return source
+    val height = if (targetHeight % 2 == 0) targetHeight else targetHeight + 1
+    var width = (height.toDouble() * source.width / source.height)
+        .roundToInt().coerceAtLeast(2)
+    if (width % 2 != 0) width += 1
+    val maxWidth = 4096
+    if (width <= maxWidth) {
+        if (source.width == width && source.height == height) return source
+        val scaled = Bitmap.createScaledBitmap(source, width, height, true)
+        if (scaled !== source) source.recycle()
+        return scaled
+    }
+    val out = Bitmap.createBitmap(maxWidth, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    canvas.drawColor(Color.BLACK)
+    val scale = min(maxWidth.toFloat() / source.width, height.toFloat() / source.height)
+    val drawWidth = max(1, (source.width * scale).toInt())
+    val drawHeight = max(1, (source.height * scale).toInt())
+    val left = (maxWidth - drawWidth) / 2f
+    val top = (height - drawHeight) / 2f
+    canvas.drawBitmap(
+        source,
+        null,
+        RectF(left, top, left + drawWidth, top + drawHeight),
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+    )
+    source.recycle()
+    return out
+}
+
 internal fun centerCrop(source: Bitmap, width: Int, height: Int): Bitmap {
     if (source.width == width && source.height == height) return source
     val scale = max(width.toFloat() / source.width, height.toFloat() / source.height)
@@ -128,7 +162,7 @@ internal fun prepareArtwork(
         VisualMode.COVER -> {
             val embedded = loadEmbeddedCover(context, audioUri)
             if (embedded != null) {
-                centerCrop(embedded, width, height)
+                adaptCoverToHeight(embedded, height)
             } else {
                 createGeneratedCover(audioTitle, durationLabel(audioDurationMs), width, height)
             }

@@ -675,7 +675,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                         }
                         when (visualMode) {
                             VisualMode.COVER -> Text(
-                                "优先使用音频内嵌封面；没有封面时自动生成带文件名和装饰条的封面。",
+                                "优先使用音频内嵌封面，并按封面比例自适应视频宽高；没有封面时自动生成 16:9 封面。",
                                 style = MiuixTheme.textStyles.footnote2,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
@@ -733,7 +733,11 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                             )
                         }
                         Text(
-                            "视频长度跟随音频；画面按 ${resolution.width}×${resolution.height} 生成。",
+                            if (visualMode == VisualMode.COVER) {
+                                "视频长度跟随音频；有内嵌封面时按封面比例自适应宽高，没有封面时使用 ${resolution.width}×${resolution.height}。"
+                            } else {
+                                "视频长度跟随音频；画面按 ${resolution.width}×${resolution.height} 生成。"
+                            },
                             style = MiuixTheme.textStyles.footnote2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
