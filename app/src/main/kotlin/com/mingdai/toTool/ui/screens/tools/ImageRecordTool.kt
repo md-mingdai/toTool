@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -60,9 +61,11 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.max
@@ -74,6 +77,14 @@ private enum class RecordMode(val label: String) {
 }
 
 private enum class PendingRecordAction { ENCODE, DECODE }
+
+private enum class PlaybackState(val label: String) {
+    IDLE("未开始"),
+    PREPARING("准备中…"),
+    PLAYING("播放中"),
+    PAUSED("已暂停"),
+    COMPLETED("播放完毕"),
+}
 
 @Composable
 fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
@@ -92,7 +103,10 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     var decodedMeta by remember { mutableStateOf<AudioRecordCodec.RecordMeta?>(null) }
     var decodedFile by remember { mutableStateOf<File?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
+    var playbackState by remember { mutableStateOf(PlaybackState.IDLE) }
+    var playbackPositionMs by remember { mutableStateOf(0L) }
+    var playbackDurationMs by remember { mutableStateOf(0L) }
+    var seekPreviewMs by remember { mutableStateOf<Long?>(null) }
     val playerRef = remember { arrayOfNulls<MediaPlayer>(1) }
     var warningDialog by remember { mutableStateOf(false) }
     var warningMessage by remember { mutableStateOf("") }
@@ -104,7 +118,10 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
             runCatching { player.release() }
         }
         playerRef[0] = null
-        isPlaying = false
+        playbackState = PlaybackState.IDLE
+        playbackPositionMs = 0L
+        playbackDurationMs = 0L
+        seekPreviewMs = null
     }
 
     fun discardDecodedAudio() {
@@ -142,6 +159,18 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     }
     LaunchedEffect(isRunning) { canceled.set(false) }
     KeepScreenOn(isRunning)
+
+    LaunchedEffect(playbackState) {
+        if (playbackState != PlaybackState.PLAYING) return@LaunchedEffect
+        while (true) {
+            val player = playerRef[0] ?: break
+            val position = runCatching { player.currentPosition.toLong() }.getOrNull() ?: break
+            if (seekPreviewMs == null) playbackPositionMs = position
+            val duration = runCatching { player.duration.toLong() }.getOrNull() ?: 0L
+            if (duration > 0L) playbackDurationMs = duration
+            delay(250)
+        }
+    }
 
     fun switchMode(next: RecordMode) {
         if (isRunning || mode == next) return
@@ -256,39 +285,28 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
         }
     }
 
-    fun togglePlayback() {
-        val file = decodedFile ?: return
-        errorText = null
-        val current = playerRef[0]
-        if (current != null) {
-            if (runCatching { current.isPlaying }.getOrDefault(false)) {
-                runCatching { current.pause() }
-                isPlaying = false
-            } else {
-                runCatching { current.start() }
-                    .onSuccess { isPlaying = true }
-                    .onFailure {
-                        releasePlayer()
-                        errorText = "无法播放这段音频"
-                    }
-            }
-            return
-        }
+    fun createPlayer(file: File) {
+        releasePlayer()
         val player = MediaPlayer()
         playerRef[0] = player
+        playbackState = PlaybackState.PREPARING
         player.setOnPreparedListener { prepared ->
             if (playerRef[0] !== prepared) {
                 runCatching { prepared.release() }
                 return@setOnPreparedListener
             }
+            playbackDurationMs = runCatching { prepared.duration.toLong() }.getOrDefault(0L)
             runCatching { prepared.start() }
-                .onSuccess { isPlaying = true }
+                .onSuccess { playbackState = PlaybackState.PLAYING }
                 .onFailure {
                     releasePlayer()
                     errorText = "无法播放这段音频"
                 }
         }
-        player.setOnCompletionListener { isPlaying = false }
+        player.setOnCompletionListener {
+            playbackPositionMs = playbackDurationMs
+            playbackState = PlaybackState.COMPLETED
+        }
         player.setOnErrorListener { _, _, _ ->
             releasePlayer()
             errorText = "无法播放这段音频（格式可能不被系统支持）"
@@ -301,6 +319,43 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
             releasePlayer()
             errorText = "无法播放这段音频：${e.message ?: e.javaClass.simpleName}"
         }
+    }
+
+    fun togglePlayback() {
+        val file = decodedFile ?: return
+        errorText = null
+        when (playbackState) {
+            PlaybackState.PREPARING -> return
+            PlaybackState.PLAYING -> {
+                playerRef[0]?.let { player ->
+                    playbackPositionMs = runCatching { player.currentPosition.toLong() }.getOrDefault(playbackPositionMs)
+                    runCatching { player.pause() }
+                }
+                playbackState = PlaybackState.PAUSED
+            }
+            PlaybackState.PAUSED, PlaybackState.COMPLETED -> {
+                val player = playerRef[0]
+                if (player != null) {
+                    if (playbackState == PlaybackState.COMPLETED) {
+                        runCatching { player.seekTo(0) }
+                        playbackPositionMs = 0L
+                    }
+                    runCatching { player.start() }
+                        .onSuccess { playbackState = PlaybackState.PLAYING }
+                        .onFailure {
+                            releasePlayer()
+                            errorText = "无法播放这段音频"
+                        }
+                } else {
+                    createPlayer(file)
+                }
+            }
+            PlaybackState.IDLE -> createPlayer(file)
+        }
+    }
+
+    fun stopPlayback() {
+        releasePlayer()
     }
 
     fun exportDecodedAudio() {
@@ -490,20 +545,76 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
             )
         }
         if (!isEncode && decodedFile != null) {
+            Text(
+                "试听状态：${playbackState.label}",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            val shownPosition = (seekPreviewMs ?: playbackPositionMs)
+                .coerceIn(0L, playbackDurationMs.coerceAtLeast(0L))
+            val sliderMax = playbackDurationMs.coerceAtLeast(1L).toFloat()
+            Slider(
+                value = shownPosition.toFloat(),
+                onValueChange = { seekPreviewMs = it.toLong() },
+                onValueChangeFinished = {
+                    val target = (seekPreviewMs ?: playbackPositionMs).coerceIn(0L, playbackDurationMs.coerceAtLeast(0L))
+                    playerRef[0]?.let { player ->
+                        runCatching { player.seekTo(target.toInt()) }
+                        if (playbackState == PlaybackState.PLAYING) {
+                            playbackPositionMs = target
+                        } else {
+                            playbackState = PlaybackState.PAUSED
+                            playbackPositionMs = target
+                        }
+                    }
+                    seekPreviewMs = null
+                },
+                valueRange = 0f..sliderMax,
+                enabled = !isRunning && playbackDurationMs > 0L,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    formatPlaybackTime(shownPosition),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    formatPlaybackTime(playbackDurationMs),
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SecondaryButton(
                     onClick = { togglePlayback() },
-                    enabled = !isRunning,
+                    enabled = !isRunning && playbackState != PlaybackState.PREPARING,
                     modifier = Modifier.weight(1f),
-                ) { Text(if (isPlaying) "暂停试听" else "试听") }
+                ) {
+                    Text(
+                        when (playbackState) {
+                            PlaybackState.PLAYING -> "暂停"
+                            PlaybackState.PREPARING -> "准备中…"
+                            PlaybackState.COMPLETED -> "重新试听"
+                            else -> "试听"
+                        },
+                        maxLines = 1,
+                    )
+                }
+                SecondaryButton(
+                    onClick = { stopPlayback() },
+                    enabled = !isRunning && playbackState != PlaybackState.IDLE,
+                    modifier = Modifier.weight(1f),
+                ) { Text("停止", maxLines = 1) }
                 PrimaryButton(
                     onClick = { exportDecodedAudio() },
                     enabled = !isRunning,
                     modifier = Modifier.weight(1f),
-                ) { Text("导出音频") }
+                ) { Text("导出", maxLines = 1) }
             }
         }
 
@@ -565,6 +676,11 @@ fun ImageRecordTool(padding: androidx.compose.foundation.layout.PaddingValues) {
     ) {
         Text(warningMessage, style = MiuixTheme.textStyles.footnote1)
     }
+}
+
+private fun formatPlaybackTime(millis: Long): String {
+    val totalSeconds = (millis.coerceAtLeast(0L) / 1000L).toInt()
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
 private fun readAllBytes(
