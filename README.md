@@ -6,7 +6,7 @@
 
 一款面向 Android 的本地工具箱：60 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.2.1-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.0-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [许可证](#许可证)
 
@@ -54,6 +54,8 @@
 - 视频添加水印：支持文字或图片水印，可选四角位置和透明度。
 - 视频压缩：480p / 540p / 720p / 1080p 四种高度预设，可调 CRF 与 ultrafast / fast / medium / slow 编码预设。
 - 视频旋转与变速：顺时针 90° / 180° / 270°，以及 0.5×–2× 同步变速。
+- 所有视频工具都会显示选中视频的预览帧；裁剪按起始位置刷新，画中画/水印/旋转/字幕会直接合成效果预览。
+- 音频工具显示内嵌封面，并支持试听原音频。
 - 全部使用内置 FFmpeg；字幕和水印由 Android Canvas 渲染成透明覆盖层，不依赖 libass / drawtext。
 
 ### 内置工具

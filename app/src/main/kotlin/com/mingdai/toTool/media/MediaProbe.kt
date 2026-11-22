@@ -126,6 +126,42 @@ internal fun extractVideoFrame(
     }
 }
 
+/** 按时间点取一帧，用于视频预览；失败时回退到首帧。 */
+internal fun extractVideoFrameAt(
+    context: Context,
+    uri: Uri,
+    timeMs: Long,
+    maxSide: Int = 720,
+): Bitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(context, uri)
+        val timeUs = timeMs.coerceAtLeast(0L) * 1000L
+        val raw = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+            ?: retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        val scaled = scaleDown(raw, maxSide)
+        scaled?.let { rotateFrame(it, retriever.rotationDegrees()) }
+    } catch (e: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
+/** 读取音频内嵌封面，用于音频工具预览。 */
+internal fun extractAudioCover(context: Context, uri: Uri, maxSide: Int = 720): Bitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(context, uri)
+        val bytes = retriever.embeddedPicture ?: return null
+        scaleDown(BitmapFactory.decodeByteArray(bytes, 0, bytes.size), maxSide)
+    } catch (e: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
 private fun fallbackFrame(retriever: MediaMetadataRetriever, index: Int): Bitmap? {
     val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
         ?.toLongOrNull() ?: 0L

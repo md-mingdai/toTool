@@ -101,6 +101,13 @@ private fun VideoReverseTool(padding: PaddingValues) {
             "视频文件", name, mediaInfoLabel(name ?: "", size, info),
             Icons.Filled.VideoLibrary, picker, !state.running,
         )
+        if (uri != null) {
+            val previewTime = representativePreviewTime(info)
+            MediaPreviewCard(
+                rememberVideoFrame(uri, previewTime, 640),
+                caption = "倒放预览（静帧） · ${mediaTimeLabel(previewTime)}",
+            )
+        }
         HintText("倒放会同时反转视频和音轨。反转变换需要把整段视频读入内存，长视频可能很慢或占用大量内存。")
         if ((info?.durationMs ?: 0L) > 5 * 60 * 1000L) {
             HintText("当前视频超过 5 分钟，倒放可能因内存不足失败。")
@@ -156,6 +163,15 @@ private fun AudioReverseTool(padding: PaddingValues) {
             ).joinToString(" · ").ifBlank { "选择音频文件" },
             Icons.Filled.AudioFile, picker, !state.running,
         )
+        if (uri != null) {
+            MediaPreviewCard(
+                rememberAudioCover(uri),
+                caption = "试听原音频",
+                height = 140.dp,
+                emptyText = "音频没有内嵌封面",
+            )
+            AudioPreviewButton(uri, !state.running)
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AudioReverseTarget.entries.forEach { option ->
                 SelectChip(
@@ -221,6 +237,22 @@ private fun PictureInPictureTool(padding: PaddingValues) {
     ToolBody(padding) {
         MediaSourceCard("主视频", mainName, mediaInfoLabel(mainName ?: "", mainSize, mainInfo), Icons.Filled.VideoLibrary, mainPicker, !state.running)
         MediaSourceCard("画中画视频", insetName, mediaInfoLabel(insetName ?: "", insetSize, insetInfo), Icons.Filled.PictureInPictureAlt, insetPicker, !state.running)
+        if (mainUri != null || insetUri != null) {
+            val mainFrame = rememberVideoFrame(mainUri, representativePreviewTime(mainInfo), 640)
+            val insetFrame = rememberVideoFrame(insetUri, representativePreviewTime(insetInfo), 360)
+            MediaPreviewCard(
+                PreviewFrame(
+                    rememberPipPreview(mainFrame.bitmap, insetFrame.bitmap, corner),
+                    mainFrame.loading || insetFrame.loading,
+                ),
+                caption = if (mainUri == null || insetUri == null) {
+                    "选择两段视频后可预览画中画"
+                } else {
+                    "画中画预览 · ${corner.label}"
+                },
+                emptyText = "选择视频后可预览",
+            )
+        }
         Text("画中画位置", style = MiuixTheme.textStyles.body2)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OverlayCorner.entries.forEach { option ->
@@ -317,6 +349,24 @@ private fun SubtitleBurnTool(padding: PaddingValues) {
             HintText("从视频容器中读取第一条内嵌字幕轨（通常是 MKV）；如果没有字幕轨会提示失败。")
         }
         HintText("ASS 的复杂样式会简化为白色文字 + 黑色描边；最多烧录前 300 条字幕。输出为 MP4。")
+        val subtitlePreview = rememberSubtitleCues(if (source == SubtitleSource.FILE) subtitleUri else null)
+        if (videoUri != null) {
+            val firstCue = subtitlePreview.first
+            val previewTime = firstCue?.startMs ?: representativePreviewTime(info)
+            val frame = rememberVideoFrame(videoUri, previewTime, 640)
+            val previewBitmap = rememberSubtitlePreview(frame.bitmap, firstCue)
+            val caption = when {
+                source == SubtitleSource.EMBEDDED -> "内嵌字幕将在处理时读取 · 显示视频画面"
+                subtitleUri == null -> "选择字幕后可预览第一条字幕"
+                subtitlePreview.loading -> "正在解析字幕…"
+                firstCue == null -> "未解析到字幕 · 显示视频画面"
+                else -> "字幕预览 · 第 1 条 · ${mediaTimeLabel(firstCue.startMs)}"
+            }
+            MediaPreviewCard(
+                PreviewFrame(previewBitmap, frame.loading || subtitlePreview.loading),
+                caption = caption,
+            )
+        }
         PrimaryButton(
             onClick = {
                 val video = videoUri ?: return@PrimaryButton
@@ -453,6 +503,13 @@ private fun VideoTrimTool(padding: PaddingValues) {
     }
     ToolBody(padding) {
         MediaSourceCard("视频文件", name, mediaInfoLabel(name ?: "", size, info), Icons.Filled.VideoLibrary, picker, !state.running)
+        if (uri != null) {
+            val previewMs = (startSec * 1000).toLong()
+            MediaPreviewCard(
+                rememberVideoFrame(uri, previewMs, 640, debounceMs = 150),
+                caption = "起始位置预览 · ${mediaTimeLabel(previewMs)}",
+            )
+        }
         if (duration > 0f) {
             Text("起始位置：${mediaTimeLabel((startSec * 1000).toLong())}", style = MiuixTheme.textStyles.body2)
             Slider(
@@ -561,6 +618,23 @@ private fun VideoWatermarkTool(padding: PaddingValues) {
         } else {
             MediaSourceCard("水印图片", imageName, imageName?.let { "支持 PNG / JPG" } ?: "选择 PNG / JPG", Icons.Filled.Image, imagePicker, !state.running)
         }
+        if (videoUri != null) {
+            val baseFrame = rememberVideoFrame(videoUri, representativePreviewTime(info), 640)
+            val watermarkPreview = rememberWatermarkPreview(
+                base = baseFrame.bitmap,
+                baseLoading = baseFrame.loading,
+                text = if (mode == WatermarkMode.TEXT) text else null,
+                imageUri = if (mode == WatermarkMode.IMAGE) imageUri else null,
+                corner = corner,
+                opacity = opacity,
+            )
+            val caption = when {
+                mode == WatermarkMode.TEXT && text.isBlank() -> "输入水印文字后预览"
+                mode == WatermarkMode.IMAGE && imageUri == null -> "选择水印图片后预览"
+                else -> "水印预览 · ${corner.label} · ${(opacity * 100).roundToInt()}%"
+            }
+            MediaPreviewCard(watermarkPreview, caption = caption)
+        }
         Text("水印位置", style = MiuixTheme.textStyles.body2)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OverlayCorner.entries.forEach { option ->
@@ -656,6 +730,12 @@ private fun VideoCompressTool(padding: PaddingValues) {
     }
     ToolBody(padding) {
         MediaSourceCard("视频文件", name, mediaInfoLabel(name ?: "", size, info), Icons.Filled.VideoLibrary, picker, !state.running)
+        if (uri != null) {
+            MediaPreviewCard(
+                rememberVideoFrame(uri, representativePreviewTime(info), 640),
+                caption = "压缩预览 · ${preset.label} · CRF ${crf.roundToInt()} · $x264Preset",
+            )
+        }
         Text("分辨率", style = MiuixTheme.textStyles.body2)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             compressPresets.forEach { option ->
@@ -729,6 +809,13 @@ private fun VideoRotateTool(padding: PaddingValues) {
     }
     ToolBody(padding) {
         MediaSourceCard("视频文件", name, mediaInfoLabel(name ?: "", size, info), Icons.Filled.VideoLibrary, picker, !state.running)
+        if (uri != null) {
+            val baseFrame = rememberVideoFrame(uri, representativePreviewTime(info), 640)
+            MediaPreviewCard(
+                PreviewFrame(rememberRotatedPreview(baseFrame.bitmap, angle.degrees), baseFrame.loading),
+                caption = "旋转预览 · 顺时针 ${angle.degrees}°",
+            )
+        }
         Text("旋转方向", style = MiuixTheme.textStyles.body2)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RotateAngle.entries.forEach { option ->
@@ -798,6 +885,14 @@ private fun VideoSpeedTool(padding: PaddingValues) {
     }
     ToolBody(padding) {
         MediaSourceCard("视频文件", name, mediaInfoLabel(name ?: "", size, info), Icons.Filled.VideoLibrary, picker, !state.running)
+        if (uri != null) {
+            val outMs = info?.durationMs?.takeIf { it > 0 }?.let { (it / speed.factor).toLong() }
+            MediaPreviewCard(
+                rememberVideoFrame(uri, representativePreviewTime(info), 640),
+                caption = "变速预览 · ${speed.label}" +
+                    (outMs?.let { " · 输出约 ${mediaTimeLabel(it)}" } ?: ""),
+            )
+        }
         Text("播放速度", style = MiuixTheme.textStyles.body2)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             speedPresets.forEach { option ->
