@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +24,17 @@ import com.mingdai.toTool.ui.components.KeepScreenOn
 import com.mingdai.toTool.ui.components.ToolScaffold
 import com.mingdai.toTool.ui.components.findActivity
 import com.mingdai.toTool.ui.components.setSystemBarsHidden
+import com.mingdai.toTool.system.SystemUiDemoLauncher
+import com.mingdai.toTool.ui.screens.tools.AdvancedRebootTool
+import com.mingdai.toTool.ui.screens.tools.BatterySpoofTool
+import com.mingdai.toTool.ui.screens.tools.DpiTool
+import com.mingdai.toTool.ui.screens.tools.GlobalOrientationTool
+import com.mingdai.toTool.ui.screens.tools.ImageAsciiTool
+import com.mingdai.toTool.ui.screens.tools.ImageBase64Tool
+import com.mingdai.toTool.ui.screens.tools.ImageColorPickerTool
+import com.mingdai.toTool.ui.screens.tools.ImageGrid9Tool
+import com.mingdai.toTool.ui.screens.tools.ImageSketchTool
+import com.mingdai.toTool.ui.screens.tools.SolidColorImageTool
 import com.mingdai.toTool.ui.screens.tools.ApkExtractorTool
 import com.mingdai.toTool.ui.screens.tools.CustomShortcutTool
 import com.mingdai.toTool.ui.screens.tools.Base64Tool
@@ -149,6 +161,15 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
         return
     }
 
+    if (tool.id == SystemUiDemoLauncher.TOOL_ID) {
+        val context = LocalContext.current
+        LaunchedEffect(Unit) {
+            SystemUiDemoLauncher.launch(context)
+            navController.popBackStack()
+        }
+        return
+    }
+
     val spec = ToolWindowSpecs[tool.id]
     val activity = LocalContext.current.findActivity()
     val behavior = LocalBehaviorState.current
@@ -233,6 +254,10 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_shell" -> ShellTool(padding)
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)
             "dev_wallpaper_video" -> VideoWallpaperTool(padding)
+            "dev_battery_spoof" -> BatterySpoofTool(padding)
+            "dev_dpi" -> DpiTool(padding)
+            "dev_advanced_reboot" -> AdvancedRebootTool(padding)
+            "dev_orientation" -> GlobalOrientationTool(padding)
             // --- 日常工具 ---
             "daily_qr" -> BarcodeTool(padding)
             "daily_color" -> ColorTool(padding)
@@ -251,6 +276,12 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "img_blur" -> ImageBlurTool(padding)
             "img_roundrect" -> ImageRoundRectTool(padding)
             "img_audio_record" -> ImageRecordTool(padding)
+            "img_solid" -> SolidColorImageTool(padding)
+            "img_grid9" -> ImageGrid9Tool(padding)
+            "img_ascii" -> ImageAsciiTool(padding)
+            "img_sketch" -> ImageSketchTool(padding)
+            "img_pick_color" -> ImageColorPickerTool(padding)
+            "img_base64" -> ImageBase64Tool(padding)
             // --- 媒体工具 ---
             "media_video_reverse", "media_audio_reverse", "media_pip", "media_subtitle",
             "media_trim", "media_watermark", "media_compress", "media_rotate", "media_speed" ->

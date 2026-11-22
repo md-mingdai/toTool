@@ -85,7 +85,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import com.mingdai.toTool.data.LocalBehaviorState
+import com.mingdai.toTool.system.SystemUiDemoLauncher
 import com.mingdai.toTool.ui.components.favoriteContainerColor
 import com.mingdai.toTool.ui.components.ToolActionMenu
 import com.mingdai.toTool.ui.components.rememberEdgeHaptics
@@ -101,7 +103,12 @@ fun HomeScreen(navController: NavHostController) {
     val favorites = LocalFavorites.current
 
     val selectedCategory = categoryKey?.let { runCatching { ToolCategory.valueOf(it) }.getOrNull() }
-    val onToolClick: (Tool) -> Unit = { navController.navigate(Routes.tool(it.id)) }
+    val context = LocalContext.current
+    val onToolClick: (Tool) -> Unit = { tool ->
+        if (!SystemUiDemoLauncher.handle(context, tool.id)) {
+            navController.navigate(Routes.tool(tool.id))
+        }
+    }
 
     // A stable tag identifying the active view so Crossfade can tween between them.
     val viewTag: String = when {

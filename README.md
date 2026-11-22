@@ -4,9 +4,9 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：60 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：71 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.0-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.1-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [许可证](#许可证)
 
@@ -47,6 +47,23 @@
 - 原始 FFmpeg 命令模式，支持输入占位符、实时日志和进度。
 - 输出保存到「下载/toTool」，文件较多时自动打包；图片保存到「相册/toTool」。
 
+### 图片工具
+
+- 纯色图制作:自定义宽高与 HSV 颜色,生成 PNG 并保存到相册。
+- 九宫格切图:预览 3×3 分割线,一次保存九张切片。
+- 图片文字化:按字符格取色和亮度,用不同颜色、不同密度的 ASCII 字符重新组成图片。
+- 图片转素描:灰度反相、模糊和颜色减淡的铅笔素描效果,可调强度。
+- 图片取色:点击图片读取像素颜色,自动提取主色并复制 HEX。
+- 图片转 Base64:直接编码原图文件字节,可复制或导出为文本文件。
+
+### 系统工具
+
+- 电量伪装:通过 Shizuku / Root 修改系统上报的电量、充电状态,可一键恢复。
+- DPI 修改:读取当前密度并应用自定义 DPI,支持恢复默认。
+- 高级重启:重启系统、Recovery、Bootloader 或关机。
+- 系统界面调节工具:点击工具卡片直接拉起 SystemUI DemoMode,没有工具页面。
+- 全局方向调节:通过不可见悬浮窗锁定竖屏、横屏或传感器方向,需要悬浮窗权限。
+
 ### 媒体工具
 
 - 视频倒放、音频倒放：同时反转画面与音轨；音频默认跟随源文件格式，也可指定 M4A 或 MP3。
@@ -67,8 +84,8 @@
 | 日常工具 | 条码处理、颜色选择器、秒表、手电筒 / SOS、分贝仪、尺子、指南针、量角器、简易画板、时间屏幕、比赛记分牌 |
 | 文本工具 | 字符统计、大小写转换、密码生成、UUID、Base64、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
-| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、通知管理、米游记录获取、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传 |
-| 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片 |
+| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、通知管理、米游记录获取、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
+| 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片、纯色图制作、九宫格切图、图片文字化、图片转素描、图片取色、图片转 Base64 |
 | 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。

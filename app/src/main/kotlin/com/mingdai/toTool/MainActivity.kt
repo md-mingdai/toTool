@@ -29,6 +29,7 @@ import com.mingdai.toTool.data.LocalUnitLabelState
 import com.mingdai.toTool.data.Prefs
 import com.mingdai.toTool.data.ThemeState
 import com.mingdai.toTool.data.UnitLabelState
+import com.mingdai.toTool.system.SystemUiDemoLauncher
 import com.mingdai.toTool.ui.nav.AppNavGraph
 import com.mingdai.toTool.ui.theme.ToolyTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -112,6 +113,10 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         val toolId = intent.getStringExtra(EXTRA_TOOL_ID)
+        if (!toolId.isNullOrEmpty() && SystemUiDemoLauncher.handle(this, toolId)) {
+            deepLinkToolId = null
+            return
+        }
         val data = intent.data
         val scheme = data?.scheme
         if (toolId.isNullOrEmpty() && intent.action == Intent.ACTION_VIEW &&

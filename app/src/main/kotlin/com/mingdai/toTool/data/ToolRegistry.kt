@@ -10,6 +10,14 @@ import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Brightness5
 import androidx.compose.material.icons.filled.BlurOn
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.DeveloperMode
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Compress
@@ -132,6 +140,11 @@ object ToolRegistry {
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.DEVICE, Icons.Filled.Wallpaper),
         Tool("dev_wallpaper_video", "桌面视频壁纸", "将视频设为桌面动态壁纸", ToolCategory.DEVICE, Icons.Filled.VideoLibrary),
         Tool("dev_pixelcheck", "屏幕坏点检测", "纯色与点阵逐格排查", ToolCategory.DEVICE, Icons.Filled.GridView),
+        Tool("dev_battery_spoof", "电量伪装", "通过 Shizuku / Root 修改系统上报的电量与充电状态", ToolCategory.DEVICE, Icons.Filled.BatteryChargingFull),
+        Tool("dev_dpi", "DPI 修改", "修改系统显示密度,可随时恢复默认", ToolCategory.DEVICE, Icons.Filled.Tune),
+        Tool("dev_advanced_reboot", "高级重启", "重启系统、Recovery、Bootloader 或关机", ToolCategory.DEVICE, Icons.Filled.PowerSettingsNew),
+        Tool("dev_systemui_demo", "系统界面调节工具", "直接拉起 SystemUI DemoMode 演示模式", ToolCategory.DEVICE, Icons.Filled.DeveloperMode),
+        Tool("dev_orientation", "全局方向调节", "用不可见悬浮窗锁定屏幕方向,需悬浮窗权限", ToolCategory.DEVICE, Icons.Filled.ScreenRotation),
         // --- 图片工具 ---
         Tool("img_compress", "图片压缩", "降质量或缩小尺寸减小体积", ToolCategory.IMAGE, Icons.Filled.Compress),
         Tool("img_grayscale", "图片黑白滤镜", "一键黑白转换", ToolCategory.IMAGE, Icons.Filled.InvertColors),
@@ -140,6 +153,12 @@ object ToolRegistry {
         Tool("img_blur", "毛玻璃图生成", "高斯模糊加白色蒙层", ToolCategory.IMAGE, Icons.Filled.BlurOn),
         Tool("img_roundrect", "圆角矩形生成", "图片四角圆角裁切", ToolCategory.IMAGE, Icons.Filled.RoundedCorner),
         Tool("img_audio_record", "图片唱片", "把音频编码进 PNG 像素，或从图片唱片还原音频（娱乐，不是加密）", ToolCategory.IMAGE, Icons.Filled.AudioFile),
+        Tool("img_solid", "纯色图制作", "自定义尺寸与颜色,生成纯色图片", ToolCategory.IMAGE, Icons.Filled.FormatColorFill),
+        Tool("img_grid9", "九宫格切图", "把图片按 3×3 等分并分别保存", ToolCategory.IMAGE, Icons.Filled.GridOn),
+        Tool("img_ascii", "图片文字化", "用不同颜色和密度的 ASCII 字符重新组成图片", ToolCategory.IMAGE, Icons.Filled.TextFields),
+        Tool("img_sketch", "图片转素描", "生成铅笔素描风格图片", ToolCategory.IMAGE, Icons.Filled.Brush),
+        Tool("img_pick_color", "图片取色", "点击图片读取像素颜色并提取主色", ToolCategory.IMAGE, Icons.Filled.Colorize),
+        Tool("img_base64", "图片转 Base64", "把图片文件编码为 Base64 文本", ToolCategory.IMAGE, Icons.Filled.Code),
         // --- 媒体工具 ---
         Tool("media_video_reverse", "视频倒放", "视频画面与音轨同时倒放", ToolCategory.MEDIA, Icons.Filled.Replay),
         Tool("media_audio_reverse", "音频倒放", "音频倒放并输出 M4A 或 MP3", ToolCategory.MEDIA, Icons.Filled.GraphicEq),

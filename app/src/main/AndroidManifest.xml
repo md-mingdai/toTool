@@ -221,6 +221,17 @@
                 android:value="gacha_link_watcher" />
         </service>
 
+        <!-- 全局方向调节:不可见悬浮窗 + 前台服务锁定屏幕方向。 -->
+        <service
+            android:name=".system.OrientationOverlayService"
+            android:exported="false"
+            android:label="@string/orientation_overlay_service"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="orientation_overlay" />
+        </service>
+
         <!-- 隐藏系统通知：通过通知使用权把选中的通知 snooze 数年，可本地恢复。 -->
         <service
             android:name=".notification.NotificationHiderService"
