@@ -5,7 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberPlatformOverscrollFactory
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -67,7 +69,12 @@ class MainActivity : ComponentActivity() {
                 customSaturation = themeState.saturation,
                 customValue = themeState.value,
             ) {
+                // 平台拉伸式 overscroll（Android 12+ 拉伸，低版本发光）；不要用 Miuix 默认的位移式效果。
+                val platformOverscrollFactory = rememberPlatformOverscrollFactory(
+                    glowColor = MiuixTheme.colorScheme.primary,
+                )
                 CompositionLocalProvider(
+                    LocalOverscrollFactory provides platformOverscrollFactory,
                     LocalPrefs provides prefs,
                     LocalFavorites provides favorites,
                     LocalThemeState provides themeState,
