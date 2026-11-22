@@ -105,10 +105,12 @@ internal fun composeGif(
             "-f", "concat",
             "-safe", "0",
             "-i", concatFile.absolutePath,
-            "-vf", "scale=480:480:force_original_aspect_ratio=decrease," +
-                "pad=480:480:(ow-iw)/2:(oh-ih)/2:color=black," +
+            "-vf", "scale=720:720:force_original_aspect_ratio=decrease," +
+                "pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black," +
                 "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse=dither=sierra2_4a",
             "-vsync", "vfr",
+            // 不裁剪变化区域、不使用帧间透明，避免部分相册只显示个别帧或花屏；体积会稍大。
+            "-gifflags", "-offsetting-transdiff",
             "-loop", "0",
             "-max_muxing_queue_size", "4096",
             "-y", output.absolutePath,
