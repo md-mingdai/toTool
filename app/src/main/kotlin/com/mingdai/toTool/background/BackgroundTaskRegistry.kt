@@ -4,8 +4,11 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicLong
 
@@ -30,6 +33,8 @@ object BackgroundTaskRegistry {
     private val counter = AtomicLong()
     private val _tasks = MutableStateFlow<List<BackgroundTask>>(emptyList())
     val tasks: StateFlow<List<BackgroundTask>> = _tasks.asStateFlow()
+    private val _completions = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val completions: SharedFlow<String> = _completions.asSharedFlow()
 
     fun newId(prefix: String): String = "${prefix}_${counter.incrementAndGet()}"
 
@@ -56,9 +61,14 @@ object BackgroundTaskRegistry {
         }
     }
 
-    fun remove(id: String) {
-        synchronized(this) {
+    fun remove(id: String, completed: Boolean = false) {
+        val task = synchronized(this) {
+            val found = _tasks.value.firstOrNull { it.id == id }
             _tasks.value = _tasks.value.filterNot { it.id == id }
+            found
+        }
+        if (completed && task != null) {
+            _completions.tryEmit("${task.title} 已完成")
         }
     }
 

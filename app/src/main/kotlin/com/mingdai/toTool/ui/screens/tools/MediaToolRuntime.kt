@@ -126,7 +126,7 @@ internal fun MediaToolRunState.launch(
             stage = ""
             running = false
             syncJob.cancel()
-            BackgroundTaskRegistry.remove(taskId)
+            BackgroundTaskRegistry.remove(taskId, completed = error == null && notice != "已取消")
         }
     }
 }

@@ -514,7 +514,10 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             } finally {
                 stageText = ""
                 isRunning = false
-                BackgroundTaskRegistry.remove(taskId)
+                BackgroundTaskRegistry.remove(
+                    taskId,
+                    completed = errorText == null && noticeText != "已取消转换",
+                )
             }
         }
     }

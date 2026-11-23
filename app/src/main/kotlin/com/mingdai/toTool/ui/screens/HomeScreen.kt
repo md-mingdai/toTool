@@ -313,7 +313,17 @@ fun HomeScreen(navController: NavHostController) {
             }
         }
         }
-        BackgroundTaskDrawer(Modifier.align(Alignment.CenterEnd))
+        BackgroundTaskDrawer(
+            modifier = Modifier.fillMaxSize(),
+            onOpenTool = { toolId ->
+                when (toolId) {
+                    "format_conversion", "ffmpeg_command" -> tab = 2
+                    else -> ToolRegistry.byId[toolId]?.let { tool ->
+                        navController.navigate(Routes.tool(tool.id))
+                    }
+                }
+            },
+        )
     }
 }
 

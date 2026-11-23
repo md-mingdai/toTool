@@ -428,7 +428,10 @@ internal fun FfmpegCommandPane(
                 stageText = ""
                 liveText = ""
                 syncJob.cancel()
-                BackgroundTaskRegistry.remove(taskId)
+                BackgroundTaskRegistry.remove(
+                    taskId,
+                    completed = !run.stopped && errorMsg == null && noticeMsg != "已取消保存",
+                )
                 if (!pageAttached) {
                     withContext(NonCancellable + Dispatchers.IO) {
                         usedInputs.forEach { it.file.delete() }
