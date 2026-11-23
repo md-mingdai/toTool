@@ -169,6 +169,7 @@ object ToolRegistry {
         Tool("media_compress", "视频压缩", "按 480p / 540p / 720p / 1080p 压缩，可调 CRF 与编码预设", ToolCategory.MEDIA, Icons.Filled.Compress),
         Tool("media_rotate", "视频旋转", "顺时针旋转 90° / 180° / 270°", ToolCategory.MEDIA, Icons.Filled.RotateRight),
         Tool("media_speed", "视频变速", "0.5×–2× 调整视频与音轨速度", ToolCategory.MEDIA, Icons.Filled.Speed),
+        Tool("media_parse", "视频链接解析", "解析抖音/小红书/快手/微博/AcFun/B站/Pixiv 分享链接", ToolCategory.MEDIA, Icons.Filled.Link),
     )
 
     val byId: Map<String, Tool> = all.associateBy { it.id }

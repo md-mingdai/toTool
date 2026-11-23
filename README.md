@@ -4,9 +4,9 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：71 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：72 个日常、文本、计算、设备、图片与媒体工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
-[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.1-blue)](https://github.com/md-mingdai/toTool/actions)
+[![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.2-blue)](https://github.com/md-mingdai/toTool/actions)
 
 [功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [许可证](#许可证)
 
@@ -83,6 +83,13 @@
 - 音频工具显示内嵌封面，并支持试听原音频。
 - 全部使用内置 FFmpeg；字幕和水印由 Android Canvas 渲染成透明覆盖层，不依赖 libass / drawtext。
 
+### 视频链接解析
+
+- 支持抖音、小红书、快手、微博、AcFun、哔哩哔哩、Pixiv 的分享链接/分享文案识别与解析。
+- 展示作品标题、作者、文案、封面和视频/图集直链,可复制、浏览器打开或用系统下载器下载;下载会带上平台要求的 Referer/Cookie。
+- 小红书需要登录 Cookie;哔哩哔哩和 Pixiv 可选填 Cookie 以提升清晰度或解锁受限作品。
+- 解析逻辑按各平台公开页面/接口协议独立实现;YunX 采用 AGPL-3.0,不能直接并入本项目的 GPL-3.0 代码。
+
 ### 内置工具
 
 | 分类 | 工具 |
@@ -92,7 +99,7 @@
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图 |
 | 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、弱网助手、通知管理、米游记录获取、提取 APK、振动器、安装 APKS / XAPK / APKM、自定义快捷方式、Shizuku Shell、提取壁纸、视频壁纸、屏幕坏点检测、隔空闪传、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片、纯色图制作、九宫格切图、图片文字化、图片转素描、图片取色、图片转 Base64 |
-| 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速 |
+| 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速、视频链接解析 |
 
 - 收藏、搜索、桌面快捷方式、紧凑模式和统一工具外壳。
 - 亮色 / 暗色 / 跟随系统 / 动态取色 / 自定义种子色。

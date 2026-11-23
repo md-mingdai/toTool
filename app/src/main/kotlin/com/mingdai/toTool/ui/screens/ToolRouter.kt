@@ -84,6 +84,7 @@ import com.mingdai.toTool.ui.screens.tools.UrlTool
 import com.mingdai.toTool.ui.screens.tools.UuidTool
 import com.mingdai.toTool.ui.screens.tools.VibratorTool
 import com.mingdai.toTool.ui.screens.tools.VideoWallpaperTool
+import com.mingdai.toTool.ui.screens.tools.VideoParseTool
 import com.mingdai.toTool.ui.screens.tools.WeakNetTool
 import com.mingdai.toTool.ui.screens.tools.WallpaperExtractorTool
 import com.mingdai.toTool.ui.screens.tools.WhiteboardFullscreen
@@ -286,6 +287,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "media_video_reverse", "media_audio_reverse", "media_pip", "media_subtitle",
             "media_trim", "media_watermark", "media_compress", "media_rotate", "media_speed" ->
                 MediaToolScreen(tool.id, padding)
+            "media_parse" -> VideoParseTool(padding)
             else -> Box(modifier = Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("该工具尚未实现")
             }
