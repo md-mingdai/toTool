@@ -56,6 +56,7 @@ import com.mingdai.toTool.barcode.BarcodeType
 import com.mingdai.toTool.data.LocalPrefs
 import com.mingdai.toTool.flashdrop.ClipboardMessage
 import com.mingdai.toTool.flashdrop.FlashDropController
+import com.mingdai.toTool.flashdrop.FlashDropRuntime
 import com.mingdai.toTool.flashdrop.FlashDropState
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
@@ -84,16 +85,6 @@ private enum class FlashDropTab(val label: String) {
     CLIPBOARD("剪贴板"),
 }
 
-private object FlashDropRuntime {
-    @Volatile
-    private var shared: FlashDropController? = null
-
-    fun get(context: android.content.Context, prefs: com.mingdai.toTool.data.Prefs): FlashDropController =
-        shared ?: synchronized(this) {
-            shared ?: FlashDropController(context.applicationContext, prefs).also { shared = it }
-        }
-}
-
 /**
  * 隔空闪传：在手机上启动一个局域网网页服务，电脑浏览器访问后管理手机文件。
  *
@@ -119,15 +110,26 @@ fun FlashDropTool(padding: PaddingValues) {
     ) { controller.refresh() }
 
     LaunchedEffect(Unit) {
+        controller.setToolVisible(true)
         controller.start()
     }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) controller.refresh()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    controller.setToolVisible(true)
+                    controller.refresh()
+                }
+                Lifecycle.Event.ON_PAUSE -> controller.setToolVisible(false)
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            controller.setToolVisible(false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     fun openCodeDialog() {

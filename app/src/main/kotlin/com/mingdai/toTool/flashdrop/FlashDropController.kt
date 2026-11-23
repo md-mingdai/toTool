@@ -1,7 +1,12 @@
 package com.mingdai.toTool.flashdrop
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.Build
@@ -9,6 +14,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.StatFs
+import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,6 +46,20 @@ data class FlashDropState(
  * 管理隔空闪传服务生命周期与设置。
  * 服务只在工具页显示期间运行；离开页面时停止，避免后台常驻。
  */
+private const val PAIR_CHANNEL_ID = "flashdrop_pair"
+internal const val PAIR_NOTIFICATION_ID = 4211
+
+/** 隔空闪传控制器单例：工具页、后台任务和配对弹窗共用同一份服务状态。 */
+internal object FlashDropRuntime {
+    @Volatile
+    private var shared: FlashDropController? = null
+
+    fun get(context: Context, prefs: Prefs): FlashDropController =
+        shared ?: synchronized(this) {
+            shared ?: FlashDropController(context.applicationContext, prefs).also { shared = it }
+        }
+}
+
 class FlashDropController(
     context: Context,
     private val prefs: Prefs,
@@ -51,6 +71,22 @@ class FlashDropController(
 
     @Volatile
     private var wantRunning = false
+
+    @Volatile
+    var toolVisible: Boolean = false
+        private set
+
+    private var lastPairPopupId: String? = null
+
+    fun setToolVisible(visible: Boolean) {
+        toolVisible = visible
+        if (visible) {
+            getSystemServiceCompat()?.cancel(PAIR_NOTIFICATION_ID)
+        }
+    }
+
+    private fun getSystemServiceCompat(): NotificationManager? =
+        appContext.getSystemService(NotificationManager::class.java)
 
     @Volatile
     private var starting = false
@@ -80,7 +116,15 @@ class FlashDropController(
 
         override fun onPairRequestsChanged(requests: List<PairRequestInfo>) {
             mainHandler.post {
-                if (wantRunning) state = state.copy(pairRequests = requests)
+                if (wantRunning) {
+                    state = state.copy(pairRequests = requests)
+                    if (requests.isEmpty()) {
+                        lastPairPopupId = null
+                        getSystemServiceCompat()?.cancel(PAIR_NOTIFICATION_ID)
+                    } else {
+                        maybeShowPairRequest(requests.first())
+                    }
+                }
             }
         }
 
@@ -149,11 +193,70 @@ class FlashDropController(
         }, "flashdrop-start").start()
     }
 
+    private fun maybeShowPairRequest(request: PairRequestInfo) {
+        if (toolVisible || lastPairPopupId == request.id) return
+        lastPairPopupId = request.id
+        if (!Settings.canDrawOverlays(appContext)) {
+            postPairNotification(request)
+            return
+        }
+        val intent = Intent(appContext, PairRequestActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(PairRequestActivity.EXTRA_REQUEST_ID, request.id)
+        runCatching { appContext.startActivity(intent) }
+            .onFailure { postPairNotification(request) }
+    }
+
+    private fun postPairNotification(request: PairRequestInfo) {
+        val manager = getSystemServiceCompat() ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (manager.getNotificationChannel(PAIR_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(
+                        PAIR_CHANNEL_ID,
+                        "隔空闪传配对请求",
+                        NotificationManager.IMPORTANCE_HIGH,
+                    ).apply {
+                        description = "网页请求配对时提醒选择两位数字"
+                        setShowBadge(true)
+                    },
+                )
+            }
+        }
+        val intent = Intent(appContext, PairRequestActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(PairRequestActivity.EXTRA_REQUEST_ID, request.id)
+        val pending = PendingIntent.getActivity(
+            appContext,
+            3,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(appContext, PAIR_CHANNEL_ID)
+        } else {
+            Notification.Builder(appContext)
+        }
+        manager.notify(
+            PAIR_NOTIFICATION_ID,
+            builder
+                .setSmallIcon(com.mingdai.toTool.R.drawable.ic_launcher_foreground)
+                .setContentTitle("隔空闪传配对请求")
+                .setContentText("${request.remoteHost} 请求配对，点此选择数字")
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .setPriority(Notification.PRIORITY_HIGH)
+                .build(),
+        )
+    }
+
     fun stop() {
         wantRunning = false
         starting = false
         server?.stop()
         server = null
+        lastPairPopupId = null
+        getSystemServiceCompat()?.cancel(PAIR_NOTIFICATION_ID)
         BackgroundTaskRegistry.remove("flashdrop")
         state = state.copy(
             running = false,

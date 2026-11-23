@@ -221,6 +221,14 @@
                 android:value="gacha_link_watcher" />
         </service>
 
+        <!-- 隔空闪传后台收到配对请求时弹出的透明选择窗口。 -->
+        <activity
+            android:name=".flashdrop.PairRequestActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ToolyBox.Transparent"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+
         <!-- 后台任务保活:FFmpeg / 隔空闪传等任务运行时维持前台服务。 -->
         <service
             android:name=".background.BackgroundTaskService"
