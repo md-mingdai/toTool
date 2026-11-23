@@ -142,7 +142,7 @@ object ToolRegistry {
         Tool("dev_pixelcheck", "屏幕坏点检测", "纯色与点阵逐格排查", ToolCategory.DEVICE, Icons.Filled.GridView),
         Tool("dev_battery_spoof", "电量伪装", "通过 Shizuku / Root 修改系统上报的电量与充电状态", ToolCategory.DEVICE, Icons.Filled.BatteryChargingFull),
         Tool("dev_dpi", "DPI 修改", "修改系统显示密度,可随时恢复默认", ToolCategory.DEVICE, Icons.Filled.Tune),
-        Tool("dev_advanced_reboot", "高级重启", "设备/软重启、重启 SystemUI、关机、Recovery、fastboot 与安全模式", ToolCategory.DEVICE, Icons.Filled.PowerSettingsNew),
+        Tool("dev_advanced_reboot", "高级重启", "设备/软重启、Root 重启 SystemUI、关机、Recovery、fastboot/fastbootd 与安全模式", ToolCategory.DEVICE, Icons.Filled.PowerSettingsNew),
         Tool("dev_systemui_demo", "系统界面调节工具", "直接拉起 SystemUI DemoMode 演示模式", ToolCategory.DEVICE, Icons.Filled.DeveloperMode),
         Tool("dev_orientation", "全局方向调节", "不可见悬浮窗锁定方向,右下角单个悬浮开关暂停/恢复", ToolCategory.DEVICE, Icons.Filled.ScreenRotation),
         // --- 图片工具 ---

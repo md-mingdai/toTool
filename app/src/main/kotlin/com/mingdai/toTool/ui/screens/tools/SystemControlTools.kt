@@ -344,10 +344,11 @@ private enum class RebootAction(
 ) {
     REBOOT("设备重启", "svc power reboot || reboot"),
     SOFT_REBOOT("快速重启（软重启）", "setprop ctl.restart zygote", rootOnly = true),
-    RESTART_UI("重启用户界面", "pkill -f com.android.systemui || killall com.android.systemui"),
+    RESTART_UI("重启用户界面", "pkill -f com.android.systemui || killall com.android.systemui", rootOnly = true),
     SHUTDOWN("设备关机", "svc power shutdown || reboot -p"),
     RECOVERY("重启至 Recovery", "reboot recovery"),
-    FASTBOOT("重启至 fastboot / fastbootd", "reboot fastboot || reboot bootloader"),
+    FASTBOOT("重启至 fastboot（bootloader）", "reboot bootloader"),
+    FASTBOOTD("重启至 fastbootd", "reboot fastboot"),
     SAFE_MODE("重启至安全模式", "setprop persist.sys.safemode 1; reboot", rootOnly = true),
 }
 
