@@ -10,16 +10,12 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
@@ -52,7 +48,6 @@ enum class OrientationOption(
 
 data class OrientationOverlayState(
     val running: Boolean,
-    val active: Boolean = false,
     val orientation: Int = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
     val detail: String? = null,
 ) {
@@ -62,7 +57,6 @@ data class OrientationOverlayState(
 object OrientationOverlayController {
     const val ACTION_START = "com.mingdai.toTool.orientation.START"
     const val ACTION_UPDATE = "com.mingdai.toTool.orientation.UPDATE"
-    const val ACTION_TOGGLE = "com.mingdai.toTool.orientation.TOGGLE"
     const val ACTION_STOP = "com.mingdai.toTool.orientation.STOP"
     const val EXTRA_ORIENTATION = "orientation"
     const val TOOL_ID = "dev_orientation"
@@ -100,10 +94,7 @@ object OrientationOverlayController {
     }
 }
 
-/**
- * 方向控制服务：一个不可见的全屏窗口负责向 WindowManager 申请方向，
- * 另外只在右下角保留一个圆形悬浮开关，点按即可暂停/恢复方向锁定。
- */
+/** 方向控制服务：只用一扇不可见悬浮窗向 WindowManager 申请方向，不再显示任何悬浮控件。 */
 class OrientationOverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "orientation_overlay"
@@ -111,12 +102,9 @@ class OrientationOverlayService : Service() {
     }
 
     private var windowManager: WindowManager? = null
-    private var orientationOverlay: View? = null
-    private var orientationParams: WindowManager.LayoutParams? = null
-    private var toggleButton: TextView? = null
-    private var toggleParams: WindowManager.LayoutParams? = null
+    private var overlay: View? = null
+    private var params: WindowManager.LayoutParams? = null
     private var orientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    private var active = false
 
     override fun onCreate() {
         super.onCreate()
@@ -127,153 +115,44 @@ class OrientationOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            OrientationOverlayController.ACTION_STOP -> {
-                stopEverything()
-                return START_NOT_STICKY
-            }
-            OrientationOverlayController.ACTION_TOGGLE -> {
-                startForeground(NOTIFICATION_ID, buildNotification())
-                if (!Settings.canDrawOverlays(this)) {
-                    OrientationOverlayController.publish(
-                        OrientationOverlayState(false, detail = "没有悬浮窗权限，无法锁定屏幕方向"),
-                    )
-                    stopEverything()
-                    return START_NOT_STICKY
-                }
-                active = !active
-                applyActiveState()
-                return START_NOT_STICKY
-            }
-            else -> {
-                orientation = intent?.getIntExtra(
-                    OrientationOverlayController.EXTRA_ORIENTATION,
-                    orientation,
-                ) ?: orientation
-                active = true
-                startForeground(NOTIFICATION_ID, buildNotification())
-                if (!Settings.canDrawOverlays(this)) {
-                    OrientationOverlayController.publish(
-                        OrientationOverlayState(false, detail = "没有悬浮窗权限，无法锁定屏幕方向"),
-                    )
-                    stopEverything()
-                    return START_NOT_STICKY
-                }
-                if (!ensureToggleButton() || !showOrUpdateOrientationOverlay()) {
-                    stopEverything()
-                    return START_NOT_STICKY
-                }
-                BackgroundTaskRegistry.add(
-                    this,
-                    BackgroundTask(
-                        id = OrientationOverlayController.TASK_ID,
-                        toolId = OrientationOverlayController.TOOL_ID,
-                        title = "全局方向",
-                        detail = detailText(),
-                        keepAlive = false,
-                        cancel = { stopEverything() },
-                    ),
-                    keepAlive = false,
-                )
-                publishState()
-                return START_NOT_STICKY
-            }
+        if (intent?.action == OrientationOverlayController.ACTION_STOP) {
+            stopEverything()
+            return START_NOT_STICKY
         }
-    }
-
-    private fun applyActiveState() {
-        if (active) {
-            if (!showOrUpdateOrientationOverlay()) {
-                stopEverything()
-                return
-            }
-        } else {
-            removeOrientationOverlay()
+        orientation = intent?.getIntExtra(
+            OrientationOverlayController.EXTRA_ORIENTATION,
+            orientation,
+        ) ?: orientation
+        startForeground(NOTIFICATION_ID, buildNotification())
+        if (!Settings.canDrawOverlays(this)) {
+            OrientationOverlayController.publish(
+                OrientationOverlayState(false, detail = "没有悬浮窗权限，无法锁定屏幕方向"),
+            )
+            stopEverything()
+            return START_NOT_STICKY
         }
-        updateToggleButton()
-        updateNotification()
-        publishState()
-    }
-
-    private fun publishState() {
-        OrientationOverlayController.publish(
-            OrientationOverlayState(
-                running = true,
-                active = active,
-                orientation = orientation,
-                detail = null,
+        if (!showOrUpdateOverlay()) {
+            stopEverything()
+            return START_NOT_STICKY
+        }
+        BackgroundTaskRegistry.add(
+            this,
+            BackgroundTask(
+                id = OrientationOverlayController.TASK_ID,
+                toolId = OrientationOverlayController.TOOL_ID,
+                title = "全局方向",
+                detail = OrientationOption.fromValue(orientation)?.label ?: "自定义方向",
+                keepAlive = false,
+                cancel = { stopEverything() },
             ),
         )
-        BackgroundTaskRegistry.update(
-            OrientationOverlayController.TASK_ID,
-            detailText(),
-            null,
-        )
+        OrientationOverlayController.publish(OrientationOverlayState(true, orientation))
+        return START_NOT_STICKY
     }
 
-    private fun detailText(): String {
-        val label = OrientationOption.fromValue(orientation)?.label ?: "自定义方向"
-        return if (active) "$label · 已启用" else "$label · 已暂停"
-    }
-
-    private fun ensureToggleButton(): Boolean {
+    private fun showOrUpdateOverlay(): Boolean {
         val manager = windowManager ?: return false
-        if (toggleButton != null) return true
-        val size = (52 * resources.displayMetrics.density).toInt().coerceAtLeast(40)
-        val button = TextView(this).apply {
-            text = "↻"
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-            gravity = Gravity.CENTER
-            typeface = Typeface.DEFAULT_BOLD
-            elevation = 8 * resources.displayMetrics.density
-            setOnClickListener { toggleActive() }
-        }
-        val layout = WindowManager.LayoutParams(
-            size,
-            size,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            x = (24 * resources.displayMetrics.density).toInt()
-            y = (104 * resources.displayMetrics.density).toInt()
-        }
-        return try {
-            manager.addView(button, layout)
-            toggleButton = button
-            toggleParams = layout
-            updateToggleButton()
-            true
-        } catch (e: Exception) {
-            OrientationOverlayController.publish(
-                OrientationOverlayState(false, detail = "创建悬浮开关失败：${e.message ?: e.javaClass.simpleName}"),
-            )
-            false
-        }
-    }
-
-    private fun updateToggleButton() {
-        val button = toggleButton ?: return
-        val color = if (active) Color.rgb(46, 125, 50) else Color.argb(220, 70, 70, 70)
-        button.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(color)
-            setStroke((2 * resources.displayMetrics.density).toInt(), Color.argb(90, 255, 255, 255))
-        }
-        button.alpha = if (active) 1f else 0.8f
-    }
-
-    private fun toggleActive() {
-        active = !active
-        applyActiveState()
-    }
-
-    private fun showOrUpdateOrientationOverlay(): Boolean {
-        val manager = windowManager ?: return false
-        val existing = orientationOverlay
+        val existing = overlay
         if (existing == null) {
             val view = View(this).apply { setBackgroundColor(Color.TRANSPARENT) }
             val layout = WindowManager.LayoutParams(
@@ -292,24 +171,22 @@ class OrientationOverlayService : Service() {
             }
             return try {
                 manager.addView(view, layout)
-                orientationOverlay = view
-                orientationParams = layout
+                overlay = view
+                params = layout
                 true
             } catch (e: Exception) {
-                active = false
                 OrientationOverlayController.publish(
                     OrientationOverlayState(false, detail = "创建方向窗口失败：${e.message ?: e.javaClass.simpleName}"),
                 )
                 false
             }
         }
-        val layout = orientationParams ?: return false
+        val layout = params ?: return false
         layout.screenOrientation = orientation
         return try {
             manager.updateViewLayout(existing, layout)
             true
         } catch (e: Exception) {
-            active = false
             OrientationOverlayController.publish(
                 OrientationOverlayState(false, detail = "更新方向窗口失败：${e.message ?: e.javaClass.simpleName}"),
             )
@@ -317,32 +194,22 @@ class OrientationOverlayService : Service() {
         }
     }
 
-    private fun removeOrientationOverlay() {
-        orientationOverlay?.let { view -> runCatching { windowManager?.removeView(view) } }
-        orientationOverlay = null
-        orientationParams = null
+    private fun removeOverlay() {
+        overlay?.let { view -> runCatching { windowManager?.removeView(view) } }
+        overlay = null
+        params = null
     }
 
     private fun stopEverything() {
-        removeOrientationOverlay()
-        toggleButton?.let { button -> runCatching { windowManager?.removeView(button) } }
-        toggleButton = null
-        toggleParams = null
+        removeOverlay()
         BackgroundTaskRegistry.remove(OrientationOverlayController.TASK_ID)
         OrientationOverlayController.publish(OrientationOverlayState(false))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun updateNotification() {
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        manager.notify(NOTIFICATION_ID, buildNotification())
-    }
-
     override fun onDestroy() {
-        removeOrientationOverlay()
-        toggleButton?.let { button -> runCatching { windowManager?.removeView(button) } }
-        toggleButton = null
+        removeOverlay()
         BackgroundTaskRegistry.remove(OrientationOverlayController.TASK_ID)
         OrientationOverlayController.publish(OrientationOverlayState(false))
         super.onDestroy()
@@ -358,7 +225,7 @@ class OrientationOverlayService : Service() {
                 "屏幕方向控制",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "通过不可见悬浮窗切换全局屏幕方向"
+                description = "通过不可见悬浮窗锁定系统屏幕方向"
                 setShowBadge(false)
             },
         )
@@ -389,7 +256,7 @@ class OrientationOverlayService : Service() {
         return builder
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("屏幕方向控制")
-            .setContentText(if (active) "已锁定为$label；点右下角悬浮按钮可暂停" else "已暂停；点右下角悬浮按钮可恢复$label")
+            .setContentText("已锁定为$label")
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

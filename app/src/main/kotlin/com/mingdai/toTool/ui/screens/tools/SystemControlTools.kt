@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -459,17 +460,41 @@ fun GlobalOrientationTool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("全局方向", style = MiuixTheme.textStyles.title4)
+                        Text(
+                            state.option?.label ?: "未锁定方向",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    Switch(
+                        checked = state.running,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                if (overlayAllowed) {
+                                    OrientationOverlayController.start(context, selected)
+                                } else {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}"),
+                                    )
+                                    runCatching { context.startActivity(intent) }.onFailure {
+                                        Toast.makeText(context, "无法打开悬浮窗权限设置", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            } else {
+                                OrientationOverlayController.stop(context)
+                            }
+                        },
+                    )
+                }
                 Text(
-                    when {
-                        !state.running -> "未运行"
-                        state.active -> "已启用 · ${state.option?.label ?: "自定义方向"}"
-                        else -> "已暂停 · ${state.option?.label ?: "自定义方向"}"
-                    },
-                    style = MiuixTheme.textStyles.title4,
-                    color = if (state.active) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-                )
-                Text(
-                    "启动后只会在右下角显示一个圆形悬浮开关，点按可暂停或恢复方向锁定。",
+                    "顶端胶囊开关控制启停；选择方向后立即生效。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -530,26 +555,9 @@ fun GlobalOrientationTool(padding: PaddingValues) {
                 }
             }
         }
-        if (state.running) {
-            PrimaryButton(
-                onClick = { OrientationOverlayController.update(context, selected) },
-                enabled = overlayAllowed,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("应用当前方向") }
-            SecondaryButton(
-                onClick = { OrientationOverlayController.stop(context) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("停止方向控制") }
-        } else {
-            PrimaryButton(
-                onClick = { OrientationOverlayController.start(context, selected) },
-                enabled = overlayAllowed,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("启动方向控制") }
-        }
         state.detail?.let {
             MessageCard("悬浮窗方向控制", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
         }
-        HintText("通过一扇不可见、不拦截触摸的悬浮窗向 WindowManager 申请方向；停止后恢复系统自动旋转。部分 ROM 可能忽略这类方向请求。")
+        HintText("方向由不可见悬浮窗向 WindowManager 申请；停止后恢复系统自动旋转。部分 ROM 可能忽略这类方向请求。")
     }
 }
