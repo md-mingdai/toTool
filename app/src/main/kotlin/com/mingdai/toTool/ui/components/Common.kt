@@ -347,6 +347,7 @@ fun ResultBox(
     monospace: Boolean = false,
     modifier: Modifier = Modifier,
     minHeight: Dp = 0.dp,
+    maxLines: Int? = null,
 ) {
     val context = LocalContext.current
     val colors = MiuixTheme.colorScheme
@@ -385,6 +386,8 @@ fun ResultBox(
                             style = MiuixTheme.textStyles.body2,
                             color = colors.onSurface,
                             fontFamily = if (monospace) FontFamily.Monospace else null,
+                            maxLines = maxLines ?: Int.MAX_VALUE,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

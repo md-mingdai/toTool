@@ -158,7 +158,7 @@ object ToolRegistry {
         Tool("img_ascii", "图片文字化", "用不同颜色和密度的 ASCII 字符重新组成图片", ToolCategory.IMAGE, Icons.Filled.TextFields),
         Tool("img_sketch", "图片转素描", "生成铅笔素描风格图片", ToolCategory.IMAGE, Icons.Filled.Brush),
         Tool("img_pick_color", "图片取色", "点击图片读取像素颜色并提取主色", ToolCategory.IMAGE, Icons.Filled.Colorize),
-        Tool("img_base64", "图片转 Base64", "把图片文件编码为 Base64 文本", ToolCategory.IMAGE, Icons.Filled.Code),
+        Tool("img_base64", "图片 Base64 互转", "图片编码为 Base64,或把 Base64 还原为图片", ToolCategory.IMAGE, Icons.Filled.Code),
         // --- 媒体工具 ---
         Tool("media_video_reverse", "视频倒放", "视频画面与音轨同时倒放", ToolCategory.MEDIA, Icons.Filled.Replay),
         Tool("media_audio_reverse", "音频倒放", "音频倒放并输出 M4A 或 MP3", ToolCategory.MEDIA, Icons.Filled.GraphicEq),

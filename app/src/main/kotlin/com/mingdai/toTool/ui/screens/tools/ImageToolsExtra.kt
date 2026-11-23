@@ -1,6 +1,7 @@
 package com.mingdai.toTool.ui.screens.tools
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
@@ -35,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.runtime.Composable
@@ -62,6 +64,7 @@ import com.mingdai.toTool.media.baseNameOf
 import com.mingdai.toTool.media.humanSize
 import com.mingdai.toTool.media.queryFileName
 import com.mingdai.toTool.media.queryFileSize
+import com.mingdai.toTool.media.saveImageToGallery
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.ColorWheelPicker
 import com.mingdai.toTool.ui.components.HintText
@@ -70,6 +73,7 @@ import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.ResultBox
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SectionLabel
+import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.copyText
 import java.io.ByteArrayOutputStream
@@ -85,6 +89,7 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -767,6 +772,13 @@ fun ImageBase64Tool(padding: PaddingValues) {
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
 
+    var mode by rememberSaveable { mutableStateOf(Base64Mode.ENCODE) }
+    var decodeInput by remember { mutableStateOf("") }
+    var decoded by remember { mutableStateOf<DecodedBase64Image?>(null) }
+    var decodeBusy by remember { mutableStateOf(false) }
+    var decodeError by remember { mutableStateOf<String?>(null) }
+    var decodeNotice by remember { mutableStateOf<String?>(null) }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { picked ->
         if (picked != null) {
             uri = picked
@@ -804,6 +816,7 @@ fun ImageBase64Tool(padding: PaddingValues) {
         val source = uri ?: return@LaunchedEffect
         busy = true
         error = null
+        val type = mime
         val encoded = withContext(Dispatchers.IO) {
             runCatching {
                 val output = ByteArrayOutputStream()
@@ -820,7 +833,8 @@ fun ImageBase64Tool(padding: PaddingValues) {
                         output.write(buffer, 0, read)
                     }
                 } ?: throw IOException("无法读取图片")
-                Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                val raw = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                if (!type.isNullOrBlank()) "data:$type;base64,$raw" else raw
             }
         }
         busy = false
@@ -828,11 +842,80 @@ fun ImageBase64Tool(padding: PaddingValues) {
         error = encoded.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
     }
 
-    if (uri == null) {
-        EmptyImageState(padding, "把图片文件转换成 Base64 文本", { picker.launch("image/*") })
-        return
+    fun decode() {
+        val text = decodeInput
+        if (text.isBlank() || decodeBusy) return
+        decodeBusy = true
+        decodeError = null
+        decodeNotice = null
+        decoded = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { decodeBase64Image(text) } }
+            decodeBusy = false
+            result.onSuccess { decoded = it }
+                .onFailure { decodeError = it.message ?: it.javaClass.simpleName }
+        }
     }
-    ToolBody(padding) {
+
+    fun saveDecoded() {
+        val image = decoded ?: return
+        if (decodeBusy) return
+        decodeBusy = true
+        decodeError = null
+        decodeNotice = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val fileName = "base64_${System.currentTimeMillis()}.${image.extension}"
+                    val (where, bytes) = saveImageToGallery(context, fileName, image.mime) { out ->
+                        out.write(image.bytes)
+                    }
+                    "$where(${humanSize(bytes)})"
+                }
+            }
+            decodeBusy = false
+            result.onSuccess { decodeNotice = "已保存到 $it" }
+                .onFailure { decodeError = it.message ?: "保存失败" }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .padding(padding)
+            .fillMaxSize(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SelectChip(
+                selected = mode == Base64Mode.ENCODE,
+                onClick = { mode = Base64Mode.ENCODE },
+                label = "图片转 Base64",
+                modifier = Modifier.weight(1f),
+            )
+            SelectChip(
+                selected = mode == Base64Mode.DECODE,
+                onClick = { mode = Base64Mode.DECODE },
+                label = "Base64 转图片",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            if (mode == Base64Mode.ENCODE && uri == null) {
+                EmptyImageState(
+                    PaddingValues(0.dp),
+                    "把图片文件转换成 Base64 文本",
+                    { picker.launch("image/*") },
+                )
+            } else if (mode == Base64Mode.ENCODE) {
+                ToolBody(PaddingValues(0.dp)) {
         PickImageButton { picker.launch("image/*") }
         Text(
             "${name ?: "图片"} · ${if (size > 0) humanSize(size) else "未知大小"} · ${mime ?: "未知类型"}",
@@ -848,7 +931,7 @@ fun ImageBase64Tool(padding: PaddingValues) {
                 style = MiuixTheme.textStyles.footnote2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            ResultBox(text = text, label = "Base64", monospace = true)
+            ResultBox(text = text, label = "Base64", monospace = true, maxLines = 10)
             SecondaryButton(
                 onClick = {
                     val suggested = baseNameOf(name ?: "image") + "_base64.txt"
@@ -858,12 +941,184 @@ fun ImageBase64Tool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("导出为文本文件") }
         }
-        HintText("直接编码原图文件的字节，不重新压缩；较大的图片可能超过剪贴板容量，建议导出文本。")
+        HintText("输出带 data:<MIME>;base64, 标记；直接编码原图字节，不重新压缩。较大的图片建议导出文本。")
         notice?.let {
             MessageCard(null, it, MiuixTheme.colorScheme.secondaryContainer, MiuixTheme.colorScheme.onSecondaryContainer)
         }
         error?.let {
             MessageCard("Base64 转换失败", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
         }
+                }
+            } else {
+                ToolBody(PaddingValues(0.dp)) {
+                    TextField(
+                        value = decodeInput,
+                        onValueChange = {
+                            decodeInput = it
+                            decoded = null
+                            decodeError = null
+                            decodeNotice = null
+                        },
+                        label = "粘贴 Base64 文本",
+                        minLines = 6,
+                        maxLines = 10,
+                        enabled = !decodeBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            if (decodeInput.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    decodeInput = ""
+                                    decoded = null
+                                    decodeError = null
+                                    decodeNotice = null
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = "清空 Base64",
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                    HintText("支持 data:image/png;base64, 等 MIME 标记；标记会保留，并用于确定保存格式。")
+                    PrimaryButton(
+                        onClick = ::decode,
+                        enabled = decodeInput.isNotBlank() && !decodeBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (decodeBusy) "正在处理..." else "解码预览") }
+                    if (decodeBusy) {
+                        LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth())
+                    }
+                    decoded?.let { image ->
+                        Text(
+                            "${image.mime} · ${humanSize(image.bytes.size.toLong())} · ${image.width}×${image.height}",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        BitmapPreviewCard(
+                            bitmap = image.preview,
+                            modifier = Modifier.fillMaxWidth().height(220.dp),
+                        )
+                        PrimaryButton(
+                            onClick = ::saveDecoded,
+                            enabled = !decodeBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("保存到相册") }
+                    }
+                    decodeNotice?.let {
+                        MessageCard(null, it, MiuixTheme.colorScheme.secondaryContainer, MiuixTheme.colorScheme.onSecondaryContainer)
+                    }
+                    decodeError?.let {
+                        MessageCard("Base64 解码失败", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
+                    }
+                    HintText("解码结果会写入「相册/toTool」；MIME 标记决定保存格式。")
+                }
+            }
+        }
     }
+}
+
+private enum class Base64Mode { ENCODE, DECODE }
+
+private class DecodedBase64Image(
+    val bytes: ByteArray,
+    val mime: String,
+    val extension: String,
+    val width: Int,
+    val height: Int,
+    val preview: Bitmap,
+)
+
+private val BASE64_DATA_URI = Regex("""^data:([^;,]*)((?:;[^,]*)*),""", RegexOption.IGNORE_CASE)
+
+/** 解码 Base64 / data URI;MIME 标记只用于解析,不会改写用户输入的文本。 */
+private fun decodeBase64Image(input: String): DecodedBase64Image {
+    val trimmed = input.trim()
+    if (trimmed.isBlank()) throw IOException("请先粘贴 Base64 文本")
+    if (trimmed.length > 64 * 1024 * 1024) throw IOException("Base64 文本过大")
+    val marker = BASE64_DATA_URI.find(trimmed)
+    val markerMime = marker?.groupValues?.getOrNull(1)
+        ?.trim()
+        ?.takeIf { it.contains('/') }
+    val payload = if (marker != null) trimmed.substring(marker.range.last + 1) else trimmed
+    val clean = payload.filterNot { it.isWhitespace() }
+    if (clean.isBlank()) throw IOException("Base64 内容为空")
+    val bytes = decodeBase64Bytes(clean)
+    if (bytes.isEmpty()) throw IOException("Base64 内容为空")
+    val mime = (markerMime ?: sniffImageMime(bytes))?.lowercase(Locale.ROOT)
+        ?: throw IOException("无法识别图片格式;请确认 Base64 是图片数据")
+    if (!mime.startsWith("image/")) {
+        throw IOException("MIME 标记不是图片类型:$mime")
+    }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        throw IOException("Base64 数据不是可解码的图片")
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = base64SampleSize(bounds.outWidth, bounds.outHeight, 1600)
+    }
+    val preview = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        ?: throw IOException("图片解码失败")
+    return DecodedBase64Image(
+        bytes = bytes,
+        mime = mime,
+        extension = base64Extension(mime),
+        width = bounds.outWidth,
+        height = bounds.outHeight,
+        preview = preview,
+    )
+}
+
+private fun decodeBase64Bytes(clean: String): ByteArray {
+    val padded = if (clean.length % 4 == 0) clean else clean + "=".repeat(4 - clean.length % 4)
+    val attempts = listOf(Base64.DEFAULT, Base64.URL_SAFE)
+    var last: Exception? = null
+    for (flags in attempts) {
+        try {
+            val decoded = Base64.decode(padded, flags)
+            if (decoded.isNotEmpty()) return decoded
+        } catch (e: Exception) {
+            last = e
+        }
+    }
+    throw IOException("不是有效的 Base64 文本", last)
+}
+
+private fun sniffImageMime(bytes: ByteArray): String? {
+    if (bytes.size >= 8 &&
+        bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&
+        bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()
+    ) return "image/png"
+    if (bytes.size >= 3 &&
+        bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
+    ) return "image/jpeg"
+    if (bytes.size >= 6 && bytes.copyOfRange(0, 3).contentEquals("GIF".toByteArray())) return "image/gif"
+    if (bytes.size >= 12 &&
+        bytes.copyOfRange(0, 4).contentEquals("RIFF".toByteArray()) &&
+        bytes.copyOfRange(8, 12).contentEquals("WEBP".toByteArray())
+    ) return "image/webp"
+    if (bytes.size >= 2 && bytes[0] == 'B'.code.toByte() && bytes[1] == 'M'.code.toByte()) return "image/bmp"
+    return null
+}
+
+private fun base64Extension(mime: String): String = when (mime) {
+    "image/png" -> "png"
+    "image/jpeg", "image/jpg" -> "jpg"
+    "image/gif" -> "gif"
+    "image/webp" -> "webp"
+    "image/bmp", "image/x-ms-bmp" -> "bmp"
+    "image/heic", "image/heif" -> "heic"
+    else -> mime.substringAfter('/', "img")
+        .substringBefore('+')
+        .filter { it.isLetterOrDigit() }
+        .ifBlank { "img" }
+}
+
+private fun base64SampleSize(width: Int, height: Int, maxSide: Int): Int {
+    var sample = 1
+    while (max(width, height) / sample > maxSide) sample *= 2
+    return sample
 }
