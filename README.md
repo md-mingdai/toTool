@@ -8,7 +8,7 @@
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.2-blue)](https://github.com/md-mingdai/toTool/actions)
 
-[功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [许可证](#许可证)
+[功能](#功能) · [实现](#大致实现) · [隐私与权限](#隐私与权限) · [参考](#参考与致谢) · [许可证](#许可证)
 
 </div>
 
@@ -31,7 +31,7 @@
 ### 方程求解与函数绘图
 
 - 支持一元一次、二次及可化为多项式的分式方程，给出精确根、定义域和增根提示；无法精确求解时回退数值扫描。
-- 方程输入器采用 Desmos 风格；函数绘图支持多曲线、缩放平移、点按取值和渐近线断开。
+- 方程输入器支持分式与根式的结构化输入；函数绘图支持多曲线、缩放平移、点按取值和渐近线断开。
 
 ### 格式转换
 
@@ -88,7 +88,7 @@
 - 支持抖音、小红书、快手、微博、AcFun、哔哩哔哩、Pixiv 的分享链接/分享文案识别与解析。
 - 展示作品标题、作者、文案、封面和视频/图集直链,可复制、浏览器打开或用系统下载器下载;下载会带上平台要求的 Referer/Cookie。
 - 小红书需要登录 Cookie;哔哩哔哩和 Pixiv 可选填 Cookie 以提升清晰度或解锁受限作品。
-- 解析逻辑按各平台公开页面/接口协议独立实现;YunX 采用 AGPL-3.0,不能直接并入本项目的 GPL-3.0 代码。
+- 解析逻辑按各平台公开页面与接口协议独立实现；遇到登录态或风控限制时会给出针对性提示。
 
 ### 内置工具
 
@@ -138,6 +138,16 @@
 | 通知使用权 | 通知管理：隐藏、提取和导出通知（在系统设置中手动授权） |
 
 > 隔空闪传是局域网 HTTP 服务，配对码和接口请求不经过 TLS；请只在可信 Wi-Fi 下使用。
+
+## 参考与致谢
+
+以下项目仅在功能设计或协议解析上提供参考，本项目代码均为独立实现：
+
+- [YunX](https://github.com/CYQawa/YunX)：视频平台解析协议参考。该项目使用 AGPL-3.0，本项目未复制其代码。
+- [Ascent](https://github.com/4o3F/Ascent)：米游社抽卡链接获取流程参考。
+- Telegram：实时条码扫描的界面参考。
+- Desmos：方程输入器的交互风格参考。
+- KernelSU / Magisk：快速重启（软重启）的概念参考。
 
 ## 许可证
 
