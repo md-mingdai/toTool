@@ -7,13 +7,26 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,7 +37,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.HintText
@@ -45,8 +60,12 @@ import com.mingdai.toTool.videoparse.VideoParseResult
 import com.mingdai.toTool.videoparse.VideoParsers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -68,6 +87,13 @@ fun VideoParseTool(padding: PaddingValues) {
 
     LaunchedEffect(platform) {
         cookie = platform?.let { VideoCookieStore.get(context, it) }.orEmpty()
+        result = null
+        error = null
+        cover = null
+    }
+
+    fun clearInput() {
+        input = ""
         result = null
         error = null
         cover = null
@@ -102,59 +128,131 @@ fun VideoParseTool(padding: PaddingValues) {
         }
     }
 
-    ToolBody(padding) {
-        TextField(
-            value = input,
-            onValueChange = { input = it },
-            label = "粘贴视频分享链接或分享文案",
-            minLines = 3,
-            maxLines = 6,
-            enabled = !loading,
+    val idle = result == null && error == null && !loading
+
+    val form: @Composable () -> Unit = {
+        Column(
             modifier = Modifier.fillMaxWidth(),
-        )
-        detected?.let { link ->
-            ReviewPlatformLine(link)
-        } ?: Text(
-            "支持抖音、小红书、快手、微博、AcFun、哔哩哔哩、Pixiv。",
-            style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        if (platform?.needsCookie == true) {
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             TextField(
-                value = cookie,
-                onValueChange = { cookie = it },
-                label = if (platform.cookieRequired) "Cookie（必填）" else "Cookie（可选）",
-                minLines = 2,
-                maxLines = 5,
+                value = input,
+                onValueChange = { input = it },
+                label = "粘贴视频分享链接或分享文案",
+                minLines = 3,
+                maxLines = 6,
                 enabled = !loading,
                 modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    if (input.isNotEmpty()) {
+                        IconButton(onClick = ::clearInput) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "清空输入",
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                },
             )
-            HintText(platform.cookieHint)
-        }
-        PrimaryButton(
-            onClick = ::parse,
-            enabled = detected != null && !loading &&
-                (!detected.platform.cookieRequired || cookie.isNotBlank()),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (loading) "正在解析…" else "解析链接") }
-        if (loading) {
-            LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth())
-            Text(
-                "正在请求平台页面…",
+            detected?.let { link ->
+                ReviewPlatformLine(link)
+            } ?: Text(
+                "支持抖音、小红书、快手、微博、AcFun、哔哩哔哩、Pixiv。",
                 style = MiuixTheme.textStyles.footnote2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
+            if (platform?.needsCookie == true) {
+                TextField(
+                    value = cookie,
+                    onValueChange = { cookie = it },
+                    label = if (platform.cookieRequired) "Cookie（必填）" else "Cookie（可选）",
+                    minLines = 2,
+                    maxLines = 5,
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HintText(platform.cookieHint)
+            }
+            PrimaryButton(
+                onClick = ::parse,
+                enabled = detected != null && !loading &&
+                    (!detected.platform.cookieRequired || cookie.isNotBlank()),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (loading) "正在解析…" else "解析链接") }
         }
-        error?.let {
-            MessageCard(
-                title = "解析失败",
-                message = it,
-                container = MiuixTheme.colorScheme.errorContainer,
-                content = MiuixTheme.colorScheme.onErrorContainer,
+    }
+
+    if (idle) {
+        IdleVideoParseLayout(padding, form)
+    } else {
+        ToolBody(padding) {
+            form()
+            if (loading) {
+                LinearProgressIndicator(progress = null, modifier = Modifier.fillMaxWidth())
+                Text(
+                    "正在请求平台页面…",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            error?.let {
+                MessageCard(
+                    title = "解析失败",
+                    message = it,
+                    container = MiuixTheme.colorScheme.errorContainer,
+                    content = MiuixTheme.colorScheme.onErrorContainer,
+                )
+            }
+            result?.let { parsed ->
+                VideoParseResultCard(parsed, cover)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IdleVideoParseLayout(padding: PaddingValues, form: @Composable () -> Unit) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .padding(padding)
+            .fillMaxSize(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Link,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("视频链接解析", style = MiuixTheme.textStyles.title4)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "粘贴分享链接或分享文案，解析视频与图集直链",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                textAlign = TextAlign.Center,
             )
-        }
-        result?.let { parsed ->
-            VideoParseResultCard(parsed, cover)
+            Spacer(Modifier.height(18.dp))
+            form()
         }
     }
 }
@@ -215,6 +313,25 @@ private fun VideoParseResultCard(result: VideoParseResult, cover: Bitmap?) {
 @Composable
 private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
     val context = LocalContext.current
+    var preview by remember(media.url) { mutableStateOf<Bitmap?>(null) }
+    var previewLoading by remember(media.url) {
+        mutableStateOf(media.kind == VideoMediaKind.IMAGE)
+    }
+
+    if (media.kind == VideoMediaKind.IMAGE) {
+        LaunchedEffect(media.url) {
+            preview = previewSemaphore.withPermit {
+                VideoHttp.getBitmap(
+                    url = media.url,
+                    headers = media.headers,
+                    maxSide = 480,
+                    maxEncodedBytes = 12 * 1024 * 1024,
+                )
+            }
+            previewLoading = false
+        }
+    }
+
     val kind = when (media.kind) {
         VideoMediaKind.VIDEO -> "视频"
         VideoMediaKind.IMAGE -> "图片"
@@ -238,6 +355,13 @@ private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
                         color = MiuixTheme.colorScheme.primary,
                     )
                 }
+            }
+            if (media.kind == VideoMediaKind.IMAGE) {
+                BitmapPreviewCard(
+                    bitmap = preview,
+                    placeholder = if (previewLoading) "正在加载预览..." else "预览加载失败",
+                    modifier = Modifier.fillMaxWidth().height(180.dp),
+                )
             }
             Text(
                 media.fileName.ifBlank { "${platformLabel}_${index + 1}" },
@@ -275,6 +399,8 @@ private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
         }
     }
 }
+
+private val previewSemaphore = Semaphore(3)
 
 private fun enqueueDownload(context: Context, media: ParsedMedia, index: Int) {
     val name = (media.fileName.ifBlank {

@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -187,17 +188,42 @@ internal object VideoHttp {
         url: String,
         headers: Map<String, String> = emptyMap(),
         maxSide: Int = 1080,
+        maxEncodedBytes: Int = 24 * 1024 * 1024,
     ): Bitmap? = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext null
+        var connection: HttpURLConnection? = null
         try {
-            val connection = URL(secureUrl(url)).openConnection() as HttpURLConnection
-            connection.instanceFollowRedirects = true
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 20_000
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
-            if (connection.responseCode !in 200..299) return@withContext null
-            val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
+            val active = URL(secureUrl(url)).openConnection() as HttpURLConnection
+            connection = active
+            active.instanceFollowRedirects = true
+            active.connectTimeout = 15_000
+            active.readTimeout = 20_000
+            active.setRequestProperty("Accept-Encoding", "identity")
+            headers.forEach { (name, value) -> active.setRequestProperty(name, value) }
+            if (active.responseCode !in 200..299) return@withContext null
+            val bytes = active.inputStream.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > maxEncodedBytes) return@withContext null
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray()
+            }
+            if (bytes.isEmpty()) return@withContext null
+            // 先读尺寸再按 inSampleSize 解码,避免为一张缩略图把数千万像素的原图整个解出来。
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val sourceSide = maxOf(bounds.outWidth, bounds.outHeight)
+            if (sourceSide <= 0) return@withContext null
+            var sample = 1
+            while (sourceSide / sample > maxSide) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                 ?: return@withContext null
             val longest = maxOf(bitmap.width, bitmap.height)
             if (longest <= maxSide || longest <= 0) {
@@ -215,6 +241,8 @@ internal object VideoHttp {
             }
         } catch (_: Exception) {
             null
+        } finally {
+            connection?.disconnect()
         }
     }
 }
