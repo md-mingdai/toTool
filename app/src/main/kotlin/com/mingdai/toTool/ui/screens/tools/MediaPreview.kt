@@ -203,6 +203,15 @@ internal fun rememberRotatedPreview(base: Bitmap?, degrees: Int): Bitmap? =
         }
     }
 
+internal fun displayVideoSize(info: VideoFrameInfo?): Pair<Int, Int>? {
+    if (info == null || info.width <= 0 || info.height <= 0) return null
+    return if (info.rotationDegrees % 180 != 0) {
+        info.height to info.width
+    } else {
+        info.width to info.height
+    }
+}
+
 @Composable
 internal fun rememberPipPreview(main: Bitmap?, inset: Bitmap?, corner: OverlayCorner): Bitmap? =
     remember(main, inset, corner) {
@@ -213,42 +222,49 @@ internal fun rememberPipPreview(main: Bitmap?, inset: Bitmap?, corner: OverlayCo
         }
     }
 
-private fun composePipPreview(main: Bitmap, inset: Bitmap, corner: OverlayCorner): Bitmap {
-    val out = main.copy(Bitmap.Config.ARGB_8888, true) ?: return main
-    val canvas = Canvas(out)
-    val margin = maxOf(4, (out.height * 0.025f).toInt())
-    var width = (out.width * 0.28f).toInt().coerceAtLeast(1)
-    var height = (inset.height.toFloat() / inset.width * width).toInt().coerceAtLeast(1)
-    val maxHeight = (out.height * 0.6f).toInt().coerceAtLeast(1)
+internal data class PipLayout(
+    val width: Int,
+    val height: Int,
+    val x: Int,
+    val y: Int,
+)
+
+/** 画中画预览和 FFmpeg 输出共用同一套几何计算，避免预览与成品比例/位置不一致。 */
+internal fun pipLayout(
+    mainWidth: Int,
+    mainHeight: Int,
+    insetWidth: Int,
+    insetHeight: Int,
+    corner: OverlayCorner,
+): PipLayout {
+    val margin = maxOf(4, (mainHeight * 0.025f).toInt())
+    var width = (mainWidth * 0.28f).toInt().coerceAtLeast(1)
+    var height = (insetHeight.toFloat() / insetWidth * width).toInt().coerceAtLeast(1)
+    val maxHeight = (mainHeight * 0.6f).toInt().coerceAtLeast(1)
     if (height > maxHeight) {
         height = maxHeight
-        width = (inset.width.toFloat() / inset.height * height).toInt().coerceAtLeast(1)
+        width = (insetWidth.toFloat() / insetHeight * height).toInt().coerceAtLeast(1)
     }
-    val scaled = Bitmap.createScaledBitmap(inset, width, height, true)
     val x = if (corner == OverlayCorner.TOP_RIGHT || corner == OverlayCorner.BOTTOM_RIGHT) {
-        out.width - margin - width
+        mainWidth - margin - width
     } else {
         margin
     }
     val y = if (corner == OverlayCorner.BOTTOM_LEFT || corner == OverlayCorner.BOTTOM_RIGHT) {
-        out.height - margin - height
+        mainHeight - margin - height
     } else {
         margin
     }
+    return PipLayout(width, height, x, y)
+}
+
+private fun composePipPreview(main: Bitmap, inset: Bitmap, corner: OverlayCorner): Bitmap {
+    val out = main.copy(Bitmap.Config.ARGB_8888, true) ?: return main
+    val canvas = Canvas(out)
+    val layout = pipLayout(out.width, out.height, inset.width, inset.height, corner)
+    val scaled = Bitmap.createScaledBitmap(inset, layout.width, layout.height, true)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    canvas.drawBitmap(scaled, x.toFloat(), y.toFloat(), paint)
-    val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = maxOf(1f, out.width * 0.003f)
-        color = 0x80FFFFFF.toInt()
-    }
-    canvas.drawRect(
-        x.toFloat(),
-        y.toFloat(),
-        (x + width).toFloat(),
-        (y + height).toFloat(),
-        border,
-    )
+    canvas.drawBitmap(scaled, layout.x.toFloat(), layout.y.toFloat(), paint)
     if (scaled !== inset) scaled.recycle()
     return out
 }

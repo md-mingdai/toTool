@@ -355,7 +355,7 @@ private fun PictureInPictureTool(padding: PaddingValues) {
                 )
             }
         }
-        HintText("画中画缩放为主视频宽度的 28%，使用主视频的音轨。")
+        HintText("画中画宽度为主视频宽度的 28%，保持画中画自身宽高比，使用主视频的音轨。")
         PrimaryButton(
             onClick = {
                 val main = mainUri ?: return@PrimaryButton
@@ -366,8 +366,23 @@ private fun PictureInPictureTool(padding: PaddingValues) {
                         "${baseNameOf(mainName ?: "video")}_pip.mp4", "video/mp4",
                         mainInfo?.durationMs?.toSecondsOrNull(),
                     ) { files, output, _, ffmpeg, caps ->
-                        val filter = "[1:v][0:v]scale2ref=w=main_w*0.28:h=-2[pip][base];" +
-                            "[base][pip]overlay=${corner.expression}:eof_action=pass:format=auto[outv]"
+                        val mainMeta = mainInfo ?: probeVideo(context, main)
+                        val insetMeta = insetInfo ?: probeVideo(context, inset)
+                        val mainDims = displayVideoSize(mainMeta)
+                        val insetDims = displayVideoSize(insetMeta)
+                        val mainWidth = mainDims?.first ?: 1920
+                        val mainHeight = mainDims?.second ?: 1080
+                        val insetWidth = insetDims?.first ?: 1280
+                        val insetHeight = insetDims?.second ?: 720
+                        val layout = pipLayout(
+                            mainWidth = mainWidth,
+                            mainHeight = mainHeight,
+                            insetWidth = insetWidth,
+                            insetHeight = insetHeight,
+                            corner = corner,
+                        )
+                        val filter = "[1:v]scale=${layout.width}:${layout.height}[pip];" +
+                            "[0:v][pip]overlay=${layout.x}:${layout.y}:eof_action=pass:format=auto[outv]"
                         buildList {
                             add(ffmpeg.absolutePath)
                             addAll(listOf("-hide_banner", "-nostdin", "-i", files[0].absolutePath, "-i", files[1].absolutePath))
