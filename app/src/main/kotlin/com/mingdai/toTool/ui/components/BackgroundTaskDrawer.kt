@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -57,7 +58,9 @@ import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** 主界面上的可拖动任务抽屉；按钮和展开主体都能拖，任务行可跳回对应工具。 */
+private enum class DrawerSide { LEFT, RIGHT }
+
+/** 主界面上的可拖动任务抽屉；松手后自动吸附到最近的左右屏幕边缘。 */
 @Composable
 fun BackgroundTaskDrawer(
     modifier: Modifier = Modifier,
@@ -65,8 +68,11 @@ fun BackgroundTaskDrawer(
 ) {
     val tasks by BackgroundTaskRegistry.tasks.collectAsState()
     var open by rememberSaveable { mutableStateOf(false) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var side by rememberSaveable { mutableStateOf(DrawerSide.RIGHT) }
     var panelSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    val handleWidthPx = with(density) { 34.dp.toPx() }
+    val handleHeightPx = with(density) { 100.dp.toPx() }
 
     LaunchedEffect(tasks.isEmpty()) {
         if (tasks.isEmpty()) open = false
@@ -76,29 +82,59 @@ fun BackgroundTaskDrawer(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val maxWidth = constraints.maxWidth.toFloat()
         val maxHeight = constraints.maxHeight.toFloat()
-        val baseLeft = (maxWidth - panelSize.width).coerceAtLeast(0f)
-        val baseTop = ((maxHeight - panelSize.height) / 2f).coerceAtLeast(0f)
+        var position by remember(maxWidth, maxHeight) {
+            mutableStateOf(
+                Offset(
+                    x = (maxWidth - handleWidthPx).coerceAtLeast(0f),
+                    y = ((maxHeight - handleHeightPx) / 2f).coerceAtLeast(0f),
+                ),
+            )
+        }
+
+        LaunchedEffect(maxWidth, maxHeight, panelSize, side) {
+            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
+            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
+            val x = if (side == DrawerSide.LEFT) 0f else (maxWidth - width).coerceAtLeast(0f)
+            val y = position.y.coerceIn(0f, (maxHeight - height).coerceAtLeast(0f))
+            position = Offset(x, y)
+        }
 
         Box(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
+                .offset { IntOffset(position.x.roundToInt(), position.y.roundToInt()) }
                 .onSizeChanged { panelSize = it }
                 .pointerInput(maxWidth, maxHeight, panelSize) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val maxLeft = (maxWidth - panelSize.width).coerceAtLeast(0f)
-                        val maxTop = (maxHeight - panelSize.height).coerceAtLeast(0f)
-                        val left = (baseLeft + dragOffset.x + dragAmount.x).coerceIn(0f, maxLeft)
-                        val top = (baseTop + dragOffset.y + dragAmount.y).coerceIn(0f, maxTop)
-                        dragOffset = Offset(left - baseLeft, top - baseTop)
-                    }
+                    detectDragGestures(
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
+                            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
+                            position = Offset(
+                                (position.x + dragAmount.x)
+                                    .coerceIn(0f, (maxWidth - width).coerceAtLeast(0f)),
+                                (position.y + dragAmount.y)
+                                    .coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)),
+                            )
+                        },
+                        onDragEnd = {
+                            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
+                            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
+                            val newSide = if (position.x + width / 2f < maxWidth / 2f) {
+                                DrawerSide.LEFT
+                            } else {
+                                DrawerSide.RIGHT
+                            }
+                            side = newSide
+                            val x = if (newSide == DrawerSide.LEFT) 0f else (maxWidth - width).coerceAtLeast(0f)
+                            position = Offset(x, position.y.coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)))
+                        },
+                    )
                 },
         ) {
             AnimatedVisibility(
                 visible = open,
-                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+                enter = slideInHorizontally(initialOffsetX = { if (side == DrawerSide.LEFT) -it else it }) + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { if (side == DrawerSide.LEFT) -it else it }) + fadeOut(),
             ) {
                 val colors = MiuixTheme.colorScheme
                 Card(
@@ -156,18 +192,19 @@ fun BackgroundTaskDrawer(
             }
             if (!open) {
                 val colors = MiuixTheme.colorScheme
+                val shape = if (side == DrawerSide.LEFT) {
+                    RoundedCornerShape(topEnd = 17.dp, bottomEnd = 17.dp)
+                } else {
+                    RoundedCornerShape(topStart = 17.dp, bottomStart = 17.dp)
+                }
                 Box(
                     modifier = Modifier
                         .width(34.dp)
                         .height(100.dp)
-                        .shadow(10.dp, RoundedCornerShape(topStart = 17.dp, bottomStart = 17.dp))
-                        .clip(RoundedCornerShape(topStart = 17.dp, bottomStart = 17.dp))
+                        .shadow(10.dp, shape)
+                        .clip(shape)
                         .background(colors.primary)
-                        .border(
-                            1.dp,
-                            colors.onPrimary.copy(alpha = 0.35f),
-                            RoundedCornerShape(topStart = 17.dp, bottomStart = 17.dp),
-                        )
+                        .border(1.dp, colors.onPrimary.copy(alpha = 0.35f), shape)
                         .clickable { open = true },
                     contentAlignment = Alignment.Center,
                 ) {

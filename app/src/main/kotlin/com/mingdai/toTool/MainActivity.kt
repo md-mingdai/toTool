@@ -75,7 +75,9 @@ class MainActivity : ComponentActivity() {
             ) {
                 LaunchedEffect(Unit) {
                     BackgroundTaskRegistry.completions.collect { message ->
-                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
                 // 平台拉伸式 overscroll（Android 12+ 拉伸，低版本发光）；不要用 Miuix 默认的位移式效果。
