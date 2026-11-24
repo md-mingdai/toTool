@@ -1,10 +1,11 @@
 package com.mingdai.toTool.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector2D
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.TwoWayConverter
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +34,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,10 +47,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.background.BackgroundTask
 import com.mingdai.toTool.background.BackgroundTaskRegistry
+import kotlinx.coroutines.launch
+import kotlin.math.min
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -60,7 +63,21 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private enum class DrawerSide { LEFT, RIGHT }
 
-/** 主界面上的可拖动任务抽屉；松手后自动吸附到最近的左右屏幕边缘。 */
+private val OffsetToVector = TwoWayConverter<Offset, AnimationVector2D>(
+    convertToVector = { AnimationVector2D(it.x, it.y) },
+    convertFromVector = { Offset(it.v1, it.v2) },
+)
+
+private val DrawerSnap: SpringSpec<Offset> = spring(
+    dampingRatio = 0.78f,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+/**
+ * 主界面上的可拖动任务抽屉。
+ * 位置由 [Animatable] 驱动：拖动时跟手，松手后用弹簧动画吸附到左右侧边；
+ * 关闭主体后按钮回到打开前记录的纵向位置，而不是停在面板的旧位置。
+ */
 @Composable
 fun BackgroundTaskDrawer(
     modifier: Modifier = Modifier,
@@ -69,8 +86,8 @@ fun BackgroundTaskDrawer(
     val tasks by BackgroundTaskRegistry.tasks.collectAsState()
     var open by rememberSaveable { mutableStateOf(false) }
     var side by rememberSaveable { mutableStateOf(DrawerSide.RIGHT) }
-    var panelSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
     val handleWidthPx = with(density) { 34.dp.toPx() }
     val handleHeightPx = with(density) { 100.dp.toPx() }
 
@@ -82,71 +99,119 @@ fun BackgroundTaskDrawer(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val maxWidth = constraints.maxWidth.toFloat()
         val maxHeight = constraints.maxHeight.toFloat()
-        var position by remember(maxWidth, maxHeight) {
-            mutableStateOf(
-                Offset(
-                    x = (maxWidth - handleWidthPx).coerceAtLeast(0f),
-                    y = ((maxHeight - handleHeightPx) / 2f).coerceAtLeast(0f),
-                ),
-            )
+        val panelWidthPx = min(with(density) { 300.dp.toPx() }, maxWidth)
+        var panelHeightPx by remember { mutableStateOf(0f) }
+        var handleY by remember { mutableStateOf(Float.NaN) }
+        var initialized by remember { mutableStateOf(false) }
+        val position = remember { Animatable(Offset.Zero, OffsetToVector) }
+
+        fun handleTargetX(targetSide: DrawerSide): Float =
+            if (targetSide == DrawerSide.LEFT) 0f else (maxWidth - handleWidthPx).coerceAtLeast(0f)
+
+        fun panelTargetX(targetSide: DrawerSide): Float =
+            if (targetSide == DrawerSide.LEFT) 0f else (maxWidth - panelWidthPx).coerceAtLeast(0f)
+
+        fun snapTo(target: Offset, animate: Boolean) {
+            scope.launch {
+                if (animate) position.animateTo(target, DrawerSnap) else position.snapTo(target)
+            }
         }
 
-        LaunchedEffect(maxWidth, maxHeight, panelSize, side) {
-            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
-            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
-            val x = if (side == DrawerSide.LEFT) 0f else (maxWidth - width).coerceAtLeast(0f)
-            val y = position.y.coerceIn(0f, (maxHeight - height).coerceAtLeast(0f))
-            position = Offset(x, y)
+        LaunchedEffect(maxWidth, maxHeight) {
+            if (maxWidth <= 0f || maxHeight <= 0f) return@LaunchedEffect
+            if (!initialized) {
+                initialized = true
+                val y = ((maxHeight - handleHeightPx) / 2f).coerceAtLeast(0f)
+                handleY = y
+                position.snapTo(Offset(handleTargetX(side), y))
+            } else {
+                val width = if (open) panelWidthPx else handleWidthPx
+                val height = if (open) panelHeightPx.coerceAtLeast(handleHeightPx) else handleHeightPx
+                position.snapTo(
+                    Offset(
+                        position.value.x.coerceIn(0f, (maxWidth - width).coerceAtLeast(0f)),
+                        position.value.y.coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)),
+                    ),
+                )
+            }
         }
 
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(position.x.roundToInt(), position.y.roundToInt()) }
-                .onSizeChanged { panelSize = it }
-                .pointerInput(maxWidth, maxHeight, panelSize) {
-                    detectDragGestures(
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
-                            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
-                            position = Offset(
-                                (position.x + dragAmount.x)
-                                    .coerceIn(0f, (maxWidth - width).coerceAtLeast(0f)),
-                                (position.y + dragAmount.y)
-                                    .coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)),
-                            )
-                        },
-                        onDragEnd = {
-                            val width = panelSize.width.toFloat().takeIf { it > 0f } ?: handleWidthPx
-                            val height = panelSize.height.toFloat().takeIf { it > 0f } ?: handleHeightPx
-                            val newSide = if (position.x + width / 2f < maxWidth / 2f) {
-                                DrawerSide.LEFT
-                            } else {
-                                DrawerSide.RIGHT
-                            }
-                            side = newSide
-                            val x = if (newSide == DrawerSide.LEFT) 0f else (maxWidth - width).coerceAtLeast(0f)
-                            position = Offset(x, position.y.coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)))
-                        },
-                    )
-                },
-        ) {
-            AnimatedVisibility(
-                visible = open,
-                enter = slideInHorizontally(initialOffsetX = { if (side == DrawerSide.LEFT) -it else it }) + fadeIn(),
-                exit = slideOutHorizontally(targetOffsetX = { if (side == DrawerSide.LEFT) -it else it }) + fadeOut(),
-            ) {
+        LaunchedEffect(open, panelHeightPx, maxWidth, maxHeight) {
+            if (!initialized || maxWidth <= 0f) return@LaunchedEffect
+            if (open) {
+                val maxY = if (panelHeightPx > 0f) {
+                    (maxHeight - panelHeightPx).coerceAtLeast(0f)
+                } else {
+                    maxHeight
+                }
+                position.animateTo(
+                    Offset(panelTargetX(side), position.value.y.coerceIn(0f, maxY)),
+                    DrawerSnap,
+                )
+            } else {
+                // 关闭主体时回到打开前的按钮位置，而不是面板被夹紧后的位置。
+                val y = (if (handleY.isNaN()) position.value.y else handleY)
+                    .coerceIn(0f, (maxHeight - handleHeightPx).coerceAtLeast(0f))
+                position.animateTo(Offset(handleTargetX(side), y), DrawerSnap)
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            val offsetX = position.value.x.roundToInt()
+            val offsetY = position.value.y.roundToInt()
+
+            if (open) {
                 val colors = MiuixTheme.colorScheme
                 Card(
                     modifier = Modifier
-                        .width(300.dp)
-                        .padding(6.dp)
+                        .offset { IntOffset(offsetX, offsetY) }
+                        .width(with(density) { panelWidthPx.toDp() })
+                        .onSizeChanged { panelHeightPx = it.height.toFloat() }
                         .shadow(12.dp, RoundedCornerShape(18.dp))
                         .border(
                             1.dp,
                             colors.outline.copy(alpha = 0.55f),
                             RoundedCornerShape(18.dp),
-                        ),
+                        )
+                        .pointerInput(panelWidthPx, panelHeightPx, maxWidth, maxHeight) {
+                            detectDragGestures(
+                                onDragStart = { scope.launch { position.stop() } },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val height = panelHeightPx.coerceAtLeast(handleHeightPx)
+                                    val next = Offset(
+                                        (position.value.x + dragAmount.x)
+                                            .coerceIn(0f, (maxWidth - panelWidthPx).coerceAtLeast(0f)),
+                                        (position.value.y + dragAmount.y)
+                                            .coerceIn(0f, (maxHeight - height).coerceAtLeast(0f)),
+                                    )
+                                    scope.launch { position.snapTo(next) }
+                                },
+                                onDragEnd = {
+                                    val newSide = if (position.value.x + panelWidthPx / 2f < maxWidth / 2f) {
+                                        DrawerSide.LEFT
+                                    } else {
+                                        DrawerSide.RIGHT
+                                    }
+                                    side = newSide
+                                    val maxY = (maxHeight - panelHeightPx.coerceAtLeast(handleHeightPx))
+                                        .coerceAtLeast(0f)
+                                    snapTo(
+                                        Offset(
+                                            panelTargetX(newSide),
+                                            position.value.y.coerceIn(0f, maxY),
+                                        ),
+                                        animate = true,
+                                    )
+                                },
+                                onDragCancel = {
+                                    snapTo(
+                                        Offset(panelTargetX(side), position.value.y),
+                                        animate = true,
+                                    )
+                                },
+                            )
+                        },
                     colors = CardDefaults.defaultColors(
                         color = colors.surface,
                         contentColor = colors.onSurface,
@@ -189,8 +254,7 @@ fun BackgroundTaskDrawer(
                         }
                     }
                 }
-            }
-            if (!open) {
+            } else {
                 val colors = MiuixTheme.colorScheme
                 val shape = if (side == DrawerSide.LEFT) {
                     RoundedCornerShape(topEnd = 17.dp, bottomEnd = 17.dp)
@@ -199,12 +263,45 @@ fun BackgroundTaskDrawer(
                 }
                 Box(
                     modifier = Modifier
+                        .offset { IntOffset(offsetX, offsetY) }
                         .width(34.dp)
                         .height(100.dp)
                         .shadow(10.dp, shape)
                         .clip(shape)
                         .background(colors.primary)
                         .border(1.dp, colors.onPrimary.copy(alpha = 0.35f), shape)
+                        .pointerInput(handleWidthPx, handleHeightPx, maxWidth, maxHeight) {
+                            detectDragGestures(
+                                onDragStart = { scope.launch { position.stop() } },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val next = Offset(
+                                        (position.value.x + dragAmount.x)
+                                            .coerceIn(0f, (maxWidth - handleWidthPx).coerceAtLeast(0f)),
+                                        (position.value.y + dragAmount.y)
+                                            .coerceIn(0f, (maxHeight - handleHeightPx).coerceAtLeast(0f)),
+                                    )
+                                    scope.launch { position.snapTo(next) }
+                                },
+                                onDragEnd = {
+                                    val newSide = if (position.value.x + handleWidthPx / 2f < maxWidth / 2f) {
+                                        DrawerSide.LEFT
+                                    } else {
+                                        DrawerSide.RIGHT
+                                    }
+                                    side = newSide
+                                    handleY = position.value.y
+                                    val y = position.value.y.coerceIn(
+                                        0f,
+                                        (maxHeight - handleHeightPx).coerceAtLeast(0f),
+                                    )
+                                    snapTo(Offset(handleTargetX(newSide), y), animate = true)
+                                },
+                                onDragCancel = {
+                                    snapTo(Offset(handleTargetX(side), position.value.y), animate = true)
+                                },
+                            )
+                        }
                         .clickable { open = true },
                     contentAlignment = Alignment.Center,
                 ) {
