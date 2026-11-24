@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -65,6 +66,7 @@ import com.mingdai.toTool.media.humanSize
 import com.mingdai.toTool.media.queryFileName
 import com.mingdai.toTool.media.queryFileSize
 import com.mingdai.toTool.media.saveImageToGallery
+import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.ColorWheelPicker
 import com.mingdai.toTool.ui.components.HintText
@@ -428,22 +430,32 @@ fun ImageGrid9Tool(padding: PaddingValues) {
 
 /* ─────────────────────────── 图片文字化 ─────────────────────────── */
 
+private const val DEFAULT_ASCII_GLYPHS = " .:-=+*#%@"
+
 @Composable
 fun ImageAsciiTool(padding: PaddingValues) {
     var source by remember { mutableStateOf<Bitmap?>(null) }
     var cellSize by rememberSaveable { mutableStateOf(10f) }
+    var glyphText by rememberSaveable { mutableStateOf(DEFAULT_ASCII_GLYPHS) }
+    var backgroundArgb by rememberSaveable { mutableStateOf(AndroidColor.BLACK) }
+    var showColorDialog by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberBitmapPicker(1600) { source = it; error = null }
 
-    LaunchedEffect(source, cellSize) {
+    val glyphs = remember(glyphText) { asciiGlyphs(glyphText) }
+    val background = remember(backgroundArgb) { Color(backgroundArgb) }
+
+    LaunchedEffect(source, cellSize, glyphs, backgroundArgb) {
         val input = source ?: return@LaunchedEffect
         busy = true
         error = null
         delay(100)
         result = withContext(Dispatchers.Default) {
-            runCatching { renderAsciiArt(input, cellSize.roundToInt()) }.getOrNull()
+            runCatching {
+                renderAsciiArt(input, cellSize.roundToInt(), glyphs, backgroundArgb)
+            }.getOrNull()
         }
         busy = false
         if (result == null) error = "生成文字化图片失败。"
@@ -455,6 +467,34 @@ fun ImageAsciiTool(padding: PaddingValues) {
     }
     ToolBody(padding) {
         PickImageButton(pick)
+        TextField(
+            value = glyphText,
+            onValueChange = { glyphText = it.filter(::isPrintableAscii).take(64) },
+            label = "使用的字符（仅标准 ASCII）",
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        HintText("只保留 ASCII 32–126 的可打印字符；顺序按从暗到亮使用，默认 \"$DEFAULT_ASCII_GLYPHS\"。")
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "背景颜色",
+                    style = MiuixTheme.textStyles.body1,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(background)
+                        .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .clickable { showColorDialog = true },
+                )
+            }
+        }
         Text("字符大小：${cellSize.roundToInt()} px", style = MiuixTheme.textStyles.body2)
         Slider(
             value = cellSize,
@@ -467,21 +507,75 @@ fun ImageAsciiTool(padding: PaddingValues) {
             placeholder = "正在生成…",
             busy = busy,
         )
-        HintText("每个字符格取原图中心像素的颜色与亮度；黑底上字符越密表示原图越亮。")
+        HintText("每个字符格取原图中心像素的颜色与亮度；字符越密表示原图越亮。")
         SavePngButton(result, busy, "ascii")
         error?.let {
             MessageCard("生成失败", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
         }
     }
+
+    if (showColorDialog) {
+        AsciiBackgroundColorDialog(
+            initial = background,
+            onDismiss = { showColorDialog = false },
+            onConfirm = {
+                backgroundArgb = it.toArgb()
+                showColorDialog = false
+            },
+        )
+    }
 }
 
-private fun renderAsciiArt(source: Bitmap, requestedCell: Int): Bitmap {
+@Composable
+private fun AsciiBackgroundColorDialog(
+    initial: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (Color) -> Unit,
+) {
+    val hsv = remember(initial) {
+        FloatArray(3).also { android.graphics.Color.colorToHSV(initial.toArgb(), it) }
+    }
+    var hue by remember(initial) { mutableStateOf(hsv[0]) }
+    var sat by remember(initial) { mutableStateOf(hsv[1]) }
+    var value by remember(initial) { mutableStateOf(hsv[2]) }
+    AppDialog(
+        show = true,
+        title = "背景颜色",
+        onDismiss = onDismiss,
+        confirmText = "使用这个颜色",
+        onConfirm = { onConfirm(Color.hsv(hue, sat, value)) },
+    ) {
+        ColorWheelPicker(
+            hue = hue,
+            saturation = sat,
+            value = value,
+            onHueChange = { hue = it },
+            onSaturationChange = { sat = it },
+            onValueChange = { value = it },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun isPrintableAscii(ch: Char): Boolean = ch.code in 32..126
+
+private fun asciiGlyphs(text: String): String {
+    val filtered = text.filter(::isPrintableAscii)
+    return if (filtered.any { it != ' ' }) filtered else DEFAULT_ASCII_GLYPHS
+}
+
+private fun renderAsciiArt(
+    source: Bitmap,
+    requestedCell: Int,
+    glyphs: String,
+    background: Int,
+): Bitmap {
     val cell = requestedCell.coerceIn(4, 32)
     val columns = (source.width / cell).coerceAtLeast(1)
     val rows = (source.height / cell).coerceAtLeast(1)
     val out = Bitmap.createBitmap(columns * cell, rows * cell, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(out)
-    canvas.drawColor(AndroidColor.BLACK)
+    canvas.drawColor(background)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
         textAlign = Paint.Align.CENTER
@@ -489,7 +583,7 @@ private fun renderAsciiArt(source: Bitmap, requestedCell: Int): Bitmap {
     }
     val metrics = paint.fontMetrics
     val baselineOffset = -(metrics.ascent + metrics.descent) / 2f
-    val glyphs = " .:-=+*#%@"
+    val glyphList = glyphs.ifBlank { DEFAULT_ASCII_GLYPHS }
     for (row in 0 until rows) {
         for (column in 0 until columns) {
             val x = (column * cell + cell / 2).coerceIn(0, source.width - 1)
@@ -501,7 +595,7 @@ private fun renderAsciiArt(source: Bitmap, requestedCell: Int): Bitmap {
             val green = (pixel shr 8) and 0xFF
             val blue = pixel and 0xFF
             val luminance = (0.299f * red + 0.587f * green + 0.114f * blue).toInt().coerceIn(0, 255)
-            val glyph = glyphs[luminance * (glyphs.length - 1) / 255]
+            val glyph = glyphList[luminance * (glyphList.length - 1) / 255]
             if (glyph == ' ') continue
             paint.color = (0xFF shl 24) or
                 (max(red, 56) shl 16) or
