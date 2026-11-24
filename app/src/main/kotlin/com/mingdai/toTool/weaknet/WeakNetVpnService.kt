@@ -217,7 +217,19 @@ class WeakNetVpnService : VpnService() {
                         appendLine("  log-level: warn")
                     },
                 )
-                WeakNetTunnel.start(configFile, established.fd)
+                // 放在独立线程里启动：即使 JNI 变成阻塞式的 tunnel 循环，服务状态也能正常建立。
+                thread(name = "weaknet-tunnel", isDaemon = true) {
+                    try {
+                        if (!running && !starting) return@thread
+                        WeakNetTunnel.start(configFile, established.fd)
+                    } catch (e: Throwable) {
+                        handler.post {
+                            if (running || starting) {
+                                fail("弱网转发层启动失败：${e.message ?: e.javaClass.simpleName}")
+                            }
+                        }
+                    }
+                }
 
                 synchronized(stateLock) {
                     if (!starting) {
