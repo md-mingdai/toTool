@@ -198,15 +198,15 @@ internal class WeakNetSocksServer(
             replyError(output, REPLY_GENERAL_FAILURE)
             return
         }
-        val throttle = matchesHost(address.host, config.hostFilter)
         val upstream = Socket()
         try {
+            val target = address.resolved ?: InetAddress.getByName(address.host)
+            val throttle = matchesHost(address.host, config.hostFilter, target)
             if (throttle && config.latencyMs > 0) {
                 Thread.sleep(config.latencyMs.toLong())
             }
             vpn.protect(upstream)
             upstream.tcpNoDelay = true
-            val target = address.resolved ?: InetAddress.getByName(address.host)
             upstream.connect(InetSocketAddress(target, port), CONNECT_TIMEOUT_MS)
             sockets.add(upstream)
             replySuccess(output, null, 0)
@@ -412,6 +412,7 @@ internal class WeakNetSocksServer(
 
         val clientUdp = AtomicReference<InetSocketAddress?>(null)
         val shapedTargets = ConcurrentHashMap.newKeySet<InetSocketAddress>()
+        val resolvedHosts = ConcurrentHashMap<String, InetAddress>()
         val closed = AtomicBoolean(false)
         val cleanup = {
             if (closed.compareAndSet(false, true)) {
@@ -497,11 +498,16 @@ internal class WeakNetSocksServer(
                 clientUdp.set(source)
                 val request = parseUdpRequest(packet.data, packet.length) ?: continue
                 lastHost.set(request.host)
-                val targetAddress = request.address ?: runCatching {
-                    InetAddress.getByName(request.host)
-                }.getOrNull() ?: continue
+                val targetAddress = request.address
+                    ?: resolvedHosts[request.host]
+                    ?: runCatching { InetAddress.getByName(request.host) }
+                        .getOrNull()
+                        ?.also {
+                            if (resolvedHosts.size < 512) resolvedHosts[request.host] = it
+                        }
+                    ?: continue
                 val target = InetSocketAddress(targetAddress, request.port)
-                val throttle = matchesHost(request.host, config.hostFilter)
+                val throttle = matchesHost(request.host, config.hostFilter, targetAddress)
                 if (throttle) shapedTargets.add(target) else shapedTargets.remove(target)
                 sendDatagram(
                     socket = targetSocket,
@@ -680,15 +686,40 @@ internal class WeakNetSocksServer(
         output.flush()
     }
 
-    private fun matchesHost(host: String, filter: String): Boolean {
+    private fun matchesHost(host: String, filter: String, resolved: InetAddress? = null): Boolean {
         if (filter.isBlank()) return true
+        val patterns = filterPatterns(filter)
+        if (patterns.isEmpty()) return true
         val cleanHost = host.lowercase(Locale.ROOT).removeSuffix(".")
-        return filter.lowercase(Locale.ROOT)
-            .split(',', ';', ' ', '\n')
-            .map { it.substringAfter("://").substringBefore('/').substringBefore(':').removePrefix("*.").trim() }
-            .filter { it.isNotEmpty() }
-            .any { pattern -> cleanHost == pattern || cleanHost.endsWith(".$pattern") }
+        if (patterns.any { pattern -> cleanHost == pattern || cleanHost.endsWith(".$pattern") }) {
+            return true
+        }
+        val addresses = if (resolved != null) {
+            listOf(resolved)
+        } else {
+            runCatching { InetAddress.getAllByName(host).toList() }.getOrNull().orEmpty()
+        }
+        return addresses.any addressLoop@{ address ->
+            val ip = address.hostAddress?.lowercase(Locale.ROOT) ?: return@addressLoop false
+            patterns.any { pattern -> pattern == ip }
+        }
     }
+
+    private fun filterPatterns(filter: String): List<String> =
+        filter.lowercase(Locale.ROOT)
+            .split(',', ';', ' ', '\n')
+            .map { raw ->
+                var text = raw.trim()
+                if (text.contains("://")) text = text.substringAfter("://")
+                text = text.substringBefore('/')
+                if (text.startsWith("[")) {
+                    text = text.substringAfter('[').substringBefore(']')
+                } else if (text.count { it == ':' } == 1) {
+                    text = text.substringBefore(':')
+                }
+                text.removePrefix("*.").removeSuffix(".").trim()
+            }
+            .filter { it.isNotEmpty() }
 
     private fun closeQuietly(socket: Socket) {
         runCatching { socket.close() }
