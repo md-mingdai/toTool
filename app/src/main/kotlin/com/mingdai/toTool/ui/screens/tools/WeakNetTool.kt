@@ -83,6 +83,8 @@ fun WeakNetTool(padding: PaddingValues) {
     var downloadText by rememberSaveable { mutableStateOf(stored.downloadKBps.toString()) }
     var uploadText by rememberSaveable { mutableStateOf(stored.uploadKBps.toString()) }
     var latencyText by rememberSaveable { mutableStateOf(stored.latencyMs.toString()) }
+    var jitterText by rememberSaveable { mutableStateOf(stored.jitterMs.toString()) }
+    var lossText by rememberSaveable { mutableStateOf(stored.lossPercent.toString()) }
     var showOverlay by rememberSaveable { mutableStateOf(stored.showOverlay) }
     var showAppPicker by remember { mutableStateOf(false) }
     var showWarning by rememberSaveable { mutableStateOf(true) }
@@ -115,6 +117,8 @@ fun WeakNetTool(padding: PaddingValues) {
         downloadKBps = downloadText.toIntOrNull() ?: 128,
         uploadKBps = uploadText.toIntOrNull() ?: 64,
         latencyMs = latencyText.toIntOrNull() ?: 300,
+        jitterMs = jitterText.toIntOrNull() ?: 0,
+        lossPercent = lossText.toIntOrNull() ?: 0,
         showOverlay = showOverlay,
     ).normalized()
 
@@ -174,10 +178,12 @@ fun WeakNetTool(padding: PaddingValues) {
         overlayLauncher.launch(intent)
     }
 
-    fun applyPreset(down: Int, up: Int, latency: Int, name: String) {
+    fun applyPreset(down: Int, up: Int, latency: Int, jitter: Int, loss: Int, name: String) {
         downloadText = down.toString()
         uploadText = up.toString()
         latencyText = latency.toString()
+        jitterText = jitter.toString()
+        lossText = loss.toString()
         selectedPreset = name
     }
 
@@ -330,9 +336,9 @@ fun WeakNetTool(padding: PaddingValues) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SelectChip(selectedPreset == "2G", { applyPreset(16, 8, 800, "2G") }, "2G", enabled = !running)
-            SelectChip(selectedPreset == "3G", { applyPreset(64, 32, 300, "3G") }, "3G", enabled = !running)
-            SelectChip(selectedPreset == "弱 Wi-Fi", { applyPreset(256, 128, 120, "弱 Wi-Fi") }, "弱 Wi-Fi", enabled = !running)
+            SelectChip(selectedPreset == "2G", { applyPreset(16, 8, 800, 400, 5, "2G") }, "2G", enabled = !running)
+            SelectChip(selectedPreset == "3G", { applyPreset(64, 32, 300, 120, 2, "3G") }, "3G", enabled = !running)
+            SelectChip(selectedPreset == "弱 Wi-Fi", { applyPreset(256, 128, 120, 60, 1, "弱 Wi-Fi") }, "弱 Wi-Fi", enabled = !running)
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -355,14 +361,36 @@ fun WeakNetTool(padding: PaddingValues) {
                 keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextField(
+                value = latencyText,
+                onValueChange = { latencyText = it.filter(Char::isDigit) },
+                label = "附加延迟 ms",
+                modifier = Modifier.weight(1f),
+                enabled = !running,
+                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            )
+            TextField(
+                value = jitterText,
+                onValueChange = { jitterText = it.filter(Char::isDigit) },
+                label = "抖动 ms",
+                modifier = Modifier.weight(1f),
+                enabled = !running,
+                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            )
+        }
         TextField(
-            value = latencyText,
-            onValueChange = { latencyText = it.filter(Char::isDigit) },
-            label = "附加延迟 ms",
+            value = lossText,
+            onValueChange = { lossText = it.filter(Char::isDigit) },
+            label = "丢包 %（0–50）",
             modifier = Modifier.fillMaxWidth(),
             enabled = !running,
             keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
         )
+        HintText("抖动会在附加延迟上随机增加 0–N ms；丢包对 UDP 直接丢数据报，对 TCP 以重传停顿模拟，避免破坏字节流。")
 
         SectionLabel("悬浮窗")
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -406,7 +434,7 @@ fun WeakNetTool(padding: PaddingValues) {
             }
         }
 
-        HintText("弱网助手通过系统 VPN 的 HTTP 代理限速，适合浏览器和遵循系统代理的 HTTP/HTTPS 应用。不使用代理的 App 或非 HTTP 协议可能没有网络；这是代理级模拟，不是内核级流量整形。目标主机留空时会限制该应用的全部代理流量。")
+        HintText("弱网助手通过 VpnService 的 TUN 接管所选应用的 TCP/UDP 流量（含 DNS、QUIC 等 UDP），按带宽、附加延迟、抖动与丢包限速。TCP 的丢包以重传停顿模拟，UDP 则直接丢弃数据报；目标主机留空时限制该应用的全部流量。")
     }
 
     if (showWarning) {

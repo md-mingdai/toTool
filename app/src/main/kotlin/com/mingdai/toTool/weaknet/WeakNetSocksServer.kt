@@ -17,6 +17,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
 import kotlin.concurrent.thread
+import kotlin.math.pow
 
 private const val MAX_SESSIONS = 96
 private const val MAX_UDP_ASSOCIATIONS = 32
@@ -32,6 +34,7 @@ private const val TCP_QUEUE_CHUNKS = 128
 private const val UDP_BUFFER_SIZE = 65_535
 private const val CONNECT_TIMEOUT_MS = 10_000
 private const val TCP_IDLE_TIMEOUT_MS = 30 * 60 * 1000
+private const val TCP_RETRANSMIT_DELAY_MS = 300
 
 /**
  * 本地 SOCKS5 服务端，给 hev-socks5-tunnel 做真正的 TCP/UDP 转发：
@@ -202,8 +205,10 @@ internal class WeakNetSocksServer(
         try {
             val target = address.resolved ?: InetAddress.getByName(address.host)
             val throttle = matchesHost(address.host, config.hostFilter, target)
-            if (throttle && config.latencyMs > 0) {
-                Thread.sleep(config.latencyMs.toLong())
+            if (throttle) {
+                var connectDelay = jitterDelay(config.latencyMs, config.jitterMs)
+                if (rollLoss(config.lossPercent)) connectDelay += TCP_RETRANSMIT_DELAY_MS
+                if (connectDelay > 0) Thread.sleep(connectDelay.toLong())
             }
             vpn.protect(upstream)
             upstream.tcpNoDelay = true
@@ -237,12 +242,16 @@ internal class WeakNetSocksServer(
             }
         }
         val latency = if (throttle) config.latencyMs else 0
+        val jitter = if (throttle) config.jitterMs else 0
+        val loss = if (throttle) config.lossPercent else 0
         val upload = startPipe(
             input = clientInput,
             output = upstream.getOutputStream(),
             limiter = if (throttle) uploadLimiter else null,
             counter = txBytes,
             latencyMs = latency,
+            jitterMs = jitter,
+            lossPercent = loss,
             onEof = { runCatching { upstream.shutdownOutput() } },
             onError = closeBoth,
         )
@@ -252,6 +261,8 @@ internal class WeakNetSocksServer(
             limiter = if (throttle) downloadLimiter else null,
             counter = rxBytes,
             latencyMs = latency,
+            jitterMs = jitter,
+            lossPercent = loss,
             onEof = { runCatching { client.shutdownOutput() } },
             onError = closeBoth,
         )
@@ -270,6 +281,8 @@ internal class WeakNetSocksServer(
         limiter: RateLimiter?,
         counter: AtomicLong,
         latencyMs: Int,
+        jitterMs: Int,
+        lossPercent: Int,
         onEof: () -> Unit,
         onError: () -> Unit,
     ): Pipe {
@@ -277,7 +290,7 @@ internal class WeakNetSocksServer(
         val fail = {
             if (pipeClosed.compareAndSet(false, true)) onError()
         }
-        if (latencyMs <= 0) {
+        if (latencyMs <= 0 && jitterMs <= 0 && lossPercent <= 0) {
             val worker = thread(name = "weaknet-pipe", isDaemon = true) {
                 val buffer = ByteArray(TCP_BUFFER_SIZE)
                 var eof = false
@@ -313,6 +326,7 @@ internal class WeakNetSocksServer(
         val queue = ArrayBlockingQueue<Chunk>(TCP_QUEUE_CHUNKS)
         val writer = thread(name = "weaknet-pipe-w", isDaemon = true) {
             var normalEnd = false
+            var stalledUntilNanos = 0L
             try {
                 while (running && !pipeClosed.get()) {
                     val chunk = try {
@@ -324,7 +338,20 @@ internal class WeakNetSocksServer(
                         normalEnd = true
                         break
                     }
-                    val wait = chunk.atNanos + latencyMs * 1_000_000L - System.nanoTime()
+                    val now = System.nanoTime()
+                    var delayMs = jitterDelay(latencyMs, jitterMs)
+                    if (rollLossForBytes(lossPercent, chunk.length)) {
+                        delayMs += TCP_RETRANSMIT_DELAY_MS
+                        // 丢包会让 TCP 头部阻塞，后续数据一起等一个 RTO，而不是只推迟这一块。
+                        stalledUntilNanos = maxOf(
+                            stalledUntilNanos,
+                            now + TCP_RETRANSMIT_DELAY_MS * 1_000_000L,
+                        )
+                    }
+                    val wait = maxOf(
+                        chunk.atNanos + delayMs * 1_000_000L,
+                        stalledUntilNanos,
+                    ) - now
                     if (wait > 0) LockSupport.parkNanos(wait)
                     if (Thread.interrupted() || !running || pipeClosed.get()) break
                     limiter?.acquire(chunk.length)
@@ -472,6 +499,9 @@ internal class WeakNetSocksServer(
                         limiter = if (throttle) downloadLimiter else null,
                         counter = rxBytes,
                         closed = closed,
+                        latencyMs = if (throttle) config.latencyMs else 0,
+                        jitterMs = if (throttle) config.jitterMs else 0,
+                        lossPercent = if (throttle) config.lossPercent else 0,
                     )
                 }
             } catch (e: Exception) {
@@ -516,6 +546,9 @@ internal class WeakNetSocksServer(
                     limiter = if (throttle) uploadLimiter else null,
                     counter = txBytes,
                     closed = closed,
+                    latencyMs = if (throttle) config.latencyMs else 0,
+                    jitterMs = if (throttle) config.jitterMs else 0,
+                    lossPercent = if (throttle) config.lossPercent else 0,
                 )
             }
         } catch (e: Exception) {
@@ -534,7 +567,11 @@ internal class WeakNetSocksServer(
         limiter: RateLimiter?,
         counter: AtomicLong,
         closed: AtomicBoolean,
+        latencyMs: Int,
+        jitterMs: Int,
+        lossPercent: Int,
     ) {
+        if (rollLoss(lossPercent)) return
         val send = Runnable {
             if (!running || closed.get()) return@Runnable
             limiter?.acquire(data.size)
@@ -545,12 +582,26 @@ internal class WeakNetSocksServer(
             if (success) counter.addAndGet(data.size.toLong())
         }
         if (limiter != null) {
+            val delay = jitterDelay(latencyMs, jitterMs)
             runCatching {
-                scheduler.schedule(send, config.latencyMs.toLong(), TimeUnit.MILLISECONDS)
+                scheduler.schedule(send, delay.toLong(), TimeUnit.MILLISECONDS)
             }
         } else {
             send.run()
         }
+    }
+
+    private fun jitterDelay(baseMs: Int, jitterMs: Int): Int =
+        baseMs + if (jitterMs > 0) ThreadLocalRandom.current().nextInt(jitterMs + 1) else 0
+
+    private fun rollLoss(percent: Int): Boolean =
+        percent > 0 && ThreadLocalRandom.current().nextInt(100) < percent
+
+    /** TCP 的丢包按 1500 字节左右的包折算，避免把 16KB 一块当成单个包低估丢包率。 */
+    private fun rollLossForBytes(percent: Int, bytes: Int): Boolean {
+        if (percent <= 0 || bytes <= 0) return false
+        val probability = 1.0 - (1.0 - percent / 100.0).pow(bytes / 1500.0)
+        return ThreadLocalRandom.current().nextDouble() < probability
     }
 
     private class UdpRequest(

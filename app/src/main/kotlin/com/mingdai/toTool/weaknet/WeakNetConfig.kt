@@ -9,6 +9,8 @@ data class WeakNetConfig(
     val downloadKBps: Int = 128,
     val uploadKBps: Int = 64,
     val latencyMs: Int = 300,
+    val jitterMs: Int = 0,
+    val lossPercent: Int = 0,
     val showOverlay: Boolean = true,
 ) {
     fun normalized(): WeakNetConfig = copy(
@@ -16,6 +18,8 @@ data class WeakNetConfig(
         downloadKBps = downloadKBps.coerceIn(1, 102400),
         uploadKBps = uploadKBps.coerceIn(1, 102400),
         latencyMs = latencyMs.coerceIn(0, 5_000),
+        jitterMs = jitterMs.coerceIn(0, 5_000),
+        lossPercent = lossPercent.coerceIn(0, 50),
         appLabel = appLabel?.take(80),
         packageName = packageName?.take(200),
     )
@@ -37,6 +41,8 @@ object WeakNetStore {
     private const val KEY_DOWNLOAD = "download_kbps"
     private const val KEY_UPLOAD = "upload_kbps"
     private const val KEY_LATENCY = "latency_ms"
+    private const val KEY_JITTER = "jitter_ms"
+    private const val KEY_LOSS = "loss_percent"
     private const val KEY_OVERLAY = "show_overlay"
 
     fun load(context: Context): WeakNetConfig {
@@ -48,6 +54,8 @@ object WeakNetStore {
             downloadKBps = sp.getInt(KEY_DOWNLOAD, 128),
             uploadKBps = sp.getInt(KEY_UPLOAD, 64),
             latencyMs = sp.getInt(KEY_LATENCY, 300),
+            jitterMs = sp.getInt(KEY_JITTER, 0),
+            lossPercent = sp.getInt(KEY_LOSS, 0),
             showOverlay = sp.getBoolean(KEY_OVERLAY, true),
         ).normalized()
     }
@@ -61,6 +69,8 @@ object WeakNetStore {
             .putInt(KEY_DOWNLOAD, value.downloadKBps)
             .putInt(KEY_UPLOAD, value.uploadKBps)
             .putInt(KEY_LATENCY, value.latencyMs)
+            .putInt(KEY_JITTER, value.jitterMs)
+            .putInt(KEY_LOSS, value.lossPercent)
             .putBoolean(KEY_OVERLAY, value.showOverlay)
             .apply()
     }

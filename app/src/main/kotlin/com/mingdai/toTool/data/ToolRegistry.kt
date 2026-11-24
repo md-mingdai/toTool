@@ -123,7 +123,7 @@ object ToolRegistry {
         Tool("calc_plot", "函数绘图", "多条曲线、缩放平移与点按取值", ToolCategory.CALC, Icons.Filled.ShowChart),
         // --- 设备工具 ---
         Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.DEVICE, Icons.Filled.Devices),
-        Tool("dev_weaknet", "弱网助手", "用系统 VPN 代理限制应用或目标主机的带宽与延迟", ToolCategory.DEVICE, Icons.Filled.Speed),
+        Tool("dev_weaknet", "弱网助手", "用 TUN 转发限制应用的 TCP/UDP 带宽、延迟、抖动与丢包", ToolCategory.DEVICE, Icons.Filled.Speed),
         Tool("dev_notif_hide", "通知管理", "查看、隐藏和导出系统通知", ToolCategory.DEVICE, Icons.Filled.NotificationsOff),
         Tool("dev_gacha", "米游记录获取", "通过 Shizuku 从系统日志提取米游抽卡记录链接", ToolCategory.DEVICE, Icons.Filled.SportsEsports),
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
