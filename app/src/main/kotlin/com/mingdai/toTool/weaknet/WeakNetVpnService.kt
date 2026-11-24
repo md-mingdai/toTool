@@ -19,6 +19,9 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
+import com.mingdai.toTool.background.BackgroundTask
+import com.mingdai.toTool.background.BackgroundTaskRegistry
+import java.util.Locale
 import kotlin.concurrent.thread
 
 class WeakNetVpnService : VpnService() {
@@ -27,6 +30,8 @@ class WeakNetVpnService : VpnService() {
         const val ACTION_STOP = "com.mingdai.toTool.weaknet.STOP"
         const val ACTION_UPDATE = "com.mingdai.toTool.weaknet.UPDATE"
         const val ACTION_PAUSE = "com.mingdai.toTool.weaknet.PAUSE"
+        const val ACTION_RESUME = "com.mingdai.toTool.weaknet.RESUME"
+        const val TASK_ID = "weaknet"
         private const val CHANNEL_ID = "weaknet"
         private const val NOTIFICATION_ID = 4201
 
@@ -47,6 +52,13 @@ class WeakNetVpnService : VpnService() {
 
         fun pause(context: Context) {
             context.startService(Intent(context, WeakNetVpnService::class.java).setAction(ACTION_PAUSE))
+        }
+
+        fun resume(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, WeakNetVpnService::class.java).setAction(ACTION_RESUME),
+            )
         }
     }
 
@@ -106,6 +118,7 @@ class WeakNetVpnService : VpnService() {
                 )
             }
             overlay?.refresh(WeakNetManager.state.value)
+            updateTaskDetail()
             handler.postDelayed(this, 1000)
         }
     }
@@ -122,17 +135,23 @@ class WeakNetVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             ACTION_UPDATE -> {
-                if (running) {
+                if (running || paused) {
                     config = WeakNetStore.load(this)
-                    proxy?.updateConfig(config)
+                    if (running) proxy?.updateConfig(config)
                     WeakNetManager.update { it.copy(config = config) }
                     if (config.showOverlay) showOverlay() else hideOverlay()
+                    updateTaskDetail()
+                    updateNotification()
                 }
                 return START_STICKY
             }
             ACTION_PAUSE -> {
-                if (running || starting) stopEverything(keepPaused = true)
-                return START_NOT_STICKY
+                if (running || starting) pauseWeakNet()
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                if (!running && !starting) startWeakNet()
+                return START_STICKY
             }
             ACTION_START -> if (!running) startWeakNet()
             else -> if (!running) startWeakNet()
@@ -206,6 +225,7 @@ class WeakNetVpnService : VpnService() {
                             config = startConfig,
                         )
                     }
+                    registerTask()
                     if (startConfig.showOverlay) showOverlay()
                     handler.post(statsTick)
                 }
@@ -235,7 +255,7 @@ class WeakNetVpnService : VpnService() {
         if (overlay == null) {
             overlay = WeakNetOverlay(
                 this,
-                onTogglePause = { stopEverything(keepPaused = true) },
+                onTogglePause = { if (paused) startWeakNet() else pauseWeakNet() },
                 onStop = { stopEverything() },
             )
         }
@@ -248,17 +268,67 @@ class WeakNetVpnService : VpnService() {
         overlay = null
     }
 
-    private fun stopEverything(keepPaused: Boolean = false) {
+    /** 暂停限速：关闭 VPN / 代理资源，但保留前台服务与悬浮球，方便随时继续。 */
+    private fun pauseWeakNet() {
         var p: WeakNetProxyServer? = null
         var d: WeakNetDnsForwarder? = null
         var t: ParcelFileDescriptor? = null
         synchronized(stateLock) {
-            if (!running && !starting && proxy == null && dns == null && tun == null) {
-                stopSelf()
+            if (!running && !starting) {
+                paused = true
                 return
             }
             running = false
             starting = false
+            paused = true
+            p = proxy
+            d = dns
+            t = tun
+            proxy = null
+            dns = null
+            tun = null
+        }
+        handler.removeCallbacks(statsTick)
+        WeakNetManager.update {
+            it.copy(
+                running = false,
+                paused = true,
+                port = null,
+                rxSpeed = 0,
+                txSpeed = 0,
+                connections = 0,
+            )
+        }
+        overlay?.refresh(WeakNetManager.state.value)
+        registerTask()
+        updateNotification()
+        thread(name = "weaknet-pause", isDaemon = true) {
+            try {
+                p?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                d?.stop()
+            } catch (e: Exception) {
+                // 忽略
+            }
+            try {
+                t?.close()
+            } catch (e: Exception) {
+                // 忽略
+            }
+        }
+    }
+
+    private fun stopEverything() {
+        var p: WeakNetProxyServer? = null
+        var d: WeakNetDnsForwarder? = null
+        var t: ParcelFileDescriptor? = null
+        synchronized(stateLock) {
+            running = false
+            starting = false
+            paused = false
             p = proxy
             d = dns
             t = tun
@@ -268,10 +338,11 @@ class WeakNetVpnService : VpnService() {
         }
         handler.removeCallbacks(statsTick)
         hideOverlay()
+        BackgroundTaskRegistry.remove(TASK_ID)
         WeakNetManager.update {
             it.copy(
                 running = false,
-                paused = keepPaused,
+                paused = false,
                 port = null,
                 rxSpeed = 0,
                 txSpeed = 0,
@@ -300,6 +371,50 @@ class WeakNetVpnService : VpnService() {
         }
     }
 
+    private fun registerTask() {
+        val state = WeakNetManager.state.value
+        BackgroundTaskRegistry.add(
+            this,
+            BackgroundTask(
+                id = TASK_ID,
+                toolId = "dev_weaknet",
+                title = "弱网助手",
+                detail = taskDetail(state),
+                keepAlive = false,
+                cancel = { handler.post { stopEverything() } },
+            ),
+            keepAlive = false,
+        )
+    }
+
+    private fun updateTaskDetail(state: WeakNetState = WeakNetManager.state.value) {
+        BackgroundTaskRegistry.update(TASK_ID) { it.copy(detail = taskDetail(state)) }
+    }
+
+    private fun taskDetail(state: WeakNetState): String =
+        if (state.paused) {
+            "已暂停限速 · ${state.config.targetLabel}"
+        } else {
+            "↓${formatRate(state.rxSpeed)} ↑${formatRate(state.txSpeed)} · " +
+                "${state.connections} 连接 · ${state.config.targetLabel}"
+        }
+
+    private fun formatRate(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB/s", bytes / 1048576.0)
+        bytes >= 1024L -> String.format(Locale.US, "%.1f KB/s", bytes / 1024.0)
+        else -> "$bytes B/s"
+    }
+
+    private fun updateNotification() {
+        if (!running && !paused) return
+        runCatching {
+            getSystemService(NotificationManager::class.java)?.notify(
+                NOTIFICATION_ID,
+                buildNotification(),
+            )
+        }
+    }
+
     private fun fail(message: String) {
         var p: WeakNetProxyServer? = null
         var d: WeakNetDnsForwarder? = null
@@ -316,6 +431,7 @@ class WeakNetVpnService : VpnService() {
         }
         handler.removeCallbacks(statsTick)
         hideOverlay()
+        BackgroundTaskRegistry.remove(TASK_ID)
         WeakNetManager.update {
             it.copy(
                 running = false,
@@ -344,6 +460,11 @@ class WeakNetVpnService : VpnService() {
                 // 忽略
             }
         }
+    }
+
+    override fun onDestroy() {
+        BackgroundTaskRegistry.remove(TASK_ID)
+        super.onDestroy()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -379,19 +500,25 @@ class WeakNetVpnService : VpnService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val resumeIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, WeakNetVpnService::class.java).setAction(ACTION_RESUME),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val target = config.targetLabel
         val detail = if (paused) {
             "已暂停限速 · $target"
         } else {
             "↓${config.downloadKBps}KB/s ↑${config.uploadKBps}KB/s · $target"
         }
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("弱网助手运行中")
+            .setContentTitle(if (paused) "弱网助手已暂停" else "弱网助手运行中")
             .setContentText(detail)
             .setContentIntent(openIntent)
             .setOngoing(true)
-            .addAction(0, "停止", stopIntent)
-            .build()
+        if (paused) builder.addAction(0, "继续", resumeIntent)
+        return builder.addAction(0, "停止", stopIntent).build()
     }
 }
