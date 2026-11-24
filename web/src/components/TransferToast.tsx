@@ -47,9 +47,11 @@ export function TransferToast({ records, visible, onClose, onView }: TransferToa
           <strong>{title}</strong>
           <small>{done ? `${records.length} 个文件已完成` : `${active.length} 个文件传输中 · ${overall}%`}</small>
         </span>
-        <button type="button" className="icon-button tiny toast-close" onClick={onClose} aria-label="关闭传输面板">
-          <X size={15} weight="regular" />
-        </button>
+        {active.length === 0 && (
+          <button type="button" className="icon-button tiny toast-close" onClick={onClose} aria-label="关闭传输面板">
+            <X size={15} weight="regular" />
+          </button>
+        )}
       </div>
 
       <ul className="toast-list">

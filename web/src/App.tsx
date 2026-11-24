@@ -861,11 +861,14 @@ export default function App() {
     setFolder(null)
     setQuery('')
     setPage(1)
-    setToastOpen(false)
+    // 有任务进行时进度面板保持常驻，切到传输记录也不收起。
+    if (!toastRecords.some((record) => record.status === 'active')) {
+      setToastOpen(false)
+    }
     syncUrl('transfers', '', '', 'all')
     closeSidebar()
     scrollTop()
-  }, [closeSidebar, scrollTop, syncUrl])
+  }, [closeSidebar, scrollTop, syncUrl, toastRecords])
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!paired) return
@@ -1306,7 +1309,9 @@ export default function App() {
       <TransferToast
         records={toastRecords}
         visible={toastOpen}
-        onClose={() => setToastOpen(false)}
+        onClose={() => {
+          if (!toastRecords.some((record) => record.status === 'active')) setToastOpen(false)
+        }}
         onView={handleViewTransfers}
       />
 
