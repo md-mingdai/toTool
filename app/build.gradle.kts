@@ -147,6 +147,13 @@ dependencies {
 
     implementation("com.google.zxing:core:3.5.3")
 
+    // 弱网助手：把 VpnService 的 TUN 报文转成 SOCKS5 TCP/UDP 的 native 转发层
+    // （Apache-2.0 AAR，内部为 MIT 的 hev-socks5-tunnel）
+    implementation("com.zaneschepke:hevtunnel:1.0.1") {
+        exclude(group = "androidx.appcompat")
+        exclude(group = "com.google.android.material")
+    }
+
     // 隔空闪传：手机上的轻量 HTTP 服务（静态页面 + 同源 API）
     val ktorVersion = "3.6.1"
     implementation("io.ktor:ktor-server-core-jvm:$ktorVersion")

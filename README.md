@@ -118,7 +118,7 @@
 - FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译；启用 GPL 构建，带 x264（H.264）与 libvpx（VP8/VP9），并保留 mpeg4 兜底。媒体工具的字幕、水印先由 Canvas 渲染成透明 PNG，再交给 FFmpeg overlay，避免依赖 libass / drawtext。
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 放进 APK。
 - 手机端内嵌 Ktor 服务器，提供静态页面和同源 API；文件通过「所有文件访问权限」读写，上传默认保存到 `Download/toTool/FlashDrop/`。
-- 弱网助手通过 VPN 把所选应用导向本地 HTTP 代理，按 KB/s 和附加延迟限速，并支持目标主机过滤与悬浮窗监控；暂停限速后悬浮球保留，可从悬浮球、通知或任务抽屉继续限制。
+- 弱网助手用 VpnService 的 TUN 接管所选应用的 TCP 与 UDP 流量，交给本地 SOCKS5 转发层（hev-socks5-tunnel）直连目标，按 KB/s 与附加延迟限速，支持 UDP 会话、DNS、IPv4 / IPv6、目标主机过滤与悬浮窗监控；暂停限速后悬浮球保留，可从悬浮球、通知或任务抽屉继续限制。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 
 ## 隐私与权限
@@ -142,13 +142,14 @@
 
 ## 参考与致谢
 
-以下项目仅在功能设计或协议解析上提供参考，本项目代码均为独立实现：
+以下项目在功能设计、协议解析或运行时组件上提供参考与支持：
 
 - [YunX](https://github.com/CYQawa/YunX)：视频平台解析协议参考。该项目使用 AGPL-3.0，本项目未复制其代码。
 - [Ascent](https://github.com/4o3F/Ascent)：米游社抽卡链接获取流程参考。
 - Telegram：实时条码扫描的界面参考。
 - Desmos：方程输入器的交互风格参考。
 - KernelSU / Magisk：快速重启（软重启）的概念参考。
+- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel)：TUN 报文与 SOCKS5 TCP / UDP 的转换（MIT），通过 `com.zaneschepke:hevtunnel` AAR（Apache-2.0）引入。
 
 ## 许可证
 

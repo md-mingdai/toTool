@@ -8,7 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.net.ProxyInfo
+import android.net.ConnectivityManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -21,6 +21,8 @@ import com.mingdai.toTool.MainActivity
 import com.mingdai.toTool.R
 import com.mingdai.toTool.background.BackgroundTask
 import com.mingdai.toTool.background.BackgroundTaskRegistry
+import java.io.File
+import java.net.InetAddress
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -66,10 +68,7 @@ class WeakNetVpnService : VpnService() {
     private val stateLock = Any()
 
     @Volatile
-    private var proxy: WeakNetProxyServer? = null
-
-    @Volatile
-    private var dns: WeakNetDnsForwarder? = null
+    private var socks: WeakNetSocksServer? = null
 
     @Volatile
     private var tun: ParcelFileDescriptor? = null
@@ -95,7 +94,7 @@ class WeakNetVpnService : VpnService() {
 
         override fun run() {
             if (!running) return
-            val stats = proxy?.snapshot() ?: return
+            val stats = socks?.snapshot() ?: return
             val now = SystemClock.elapsedRealtime()
             val elapsed = if (lastAt == 0L) 0L else (now - lastAt).coerceAtLeast(1L)
             val rxSpeed = if (lastAt == 0L) 0L else ((stats.rxBytes - lastRx) * 1000 / elapsed).coerceAtLeast(0L)
@@ -108,7 +107,7 @@ class WeakNetVpnService : VpnService() {
                     running = true,
                     paused = paused,
                     config = config,
-                    port = proxy?.port,
+                    port = socks?.port,
                     rxBytes = stats.rxBytes,
                     txBytes = stats.txBytes,
                     rxSpeed = rxSpeed,
@@ -137,7 +136,7 @@ class WeakNetVpnService : VpnService() {
             ACTION_UPDATE -> {
                 if (running || paused) {
                     config = WeakNetStore.load(this)
-                    if (running) proxy?.updateConfig(config)
+                    if (running) socks?.updateConfig(config)
                     WeakNetManager.update { it.copy(config = config) }
                     if (config.showOverlay) showOverlay() else hideOverlay()
                     updateTaskDetail()
@@ -171,10 +170,10 @@ class WeakNetVpnService : VpnService() {
         starting = true
         val startConfig = config
         thread(name = "weaknet-start", isDaemon = true) {
-            var server: WeakNetProxyServer? = null
+            var server: WeakNetSocksServer? = null
             var descriptor: ParcelFileDescriptor? = null
             try {
-                val startedServer = WeakNetProxyServer(this, startConfig)
+                val startedServer = WeakNetSocksServer(this, startConfig)
                 server = startedServer
                 val port = startedServer.start()
                 val builder = Builder()
@@ -182,36 +181,47 @@ class WeakNetVpnService : VpnService() {
                     .setMtu(1500)
                     .addAddress("10.66.0.2", 32)
                     .addRoute("0.0.0.0", 0)
-                    .addDnsServer("10.66.0.1")
+                    .addAddress("fc00::2", 128)
+                    .addRoute("::", 0)
                     .setBlocking(false)
+                dnsServers().forEach { builder.addDnsServer(it) }
                 val targetPackage = startConfig.packageName
                 if (targetPackage != null) {
                     builder.addAllowedApplication(targetPackage)
-                } else {
-                    val selfPackage = packageName
-                    builder.addDisallowedApplication(selfPackage)
                 }
-                builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", port))
+                if (targetPackage != packageName) {
+                    // 工具自身的 DNS 解析和 SOCKS 转发必须绕过 VPN，避免回环。
+                    builder.addDisallowedApplication(packageName)
+                }
                 val established = builder.establish()
                     ?: throw IllegalStateException("VPN 授权未完成，或系统拒绝了代理网络")
                 descriptor = established
+
+                val configFile = File(cacheDir, "weaknet_tproxy.conf")
+                configFile.writeText(
+                    buildString {
+                        appendLine("tunnel:")
+                        appendLine("  mtu: 1500")
+                        appendLine("  icmp: 'reply'")
+                        appendLine("socks5:")
+                        appendLine("  address: '127.0.0.1'")
+                        appendLine("  port: $port")
+                        appendLine("  udp: 'udp'")
+                        appendLine("misc:")
+                        appendLine("  log-level: warn")
+                    },
+                )
+                WeakNetTunnel.start(configFile, established.fd)
+
                 synchronized(stateLock) {
                     if (!starting) {
-                        try {
-                            startedServer.stop()
-                        } catch (e: Exception) {
-                            // 忽略
-                        }
-                        try {
-                            established.close()
-                        } catch (e: Exception) {
-                            // 忽略
-                        }
+                        runCatching { WeakNetTunnel.stop() }
+                        runCatching { startedServer.stop() }
+                        runCatching { established.close() }
                         return@thread
                     }
-                    proxy = startedServer
+                    socks = startedServer
                     tun = established
-                    dns = WeakNetDnsForwarder(this, established).also { it.start() }
                     running = true
                     starting = false
                 }
@@ -229,17 +239,10 @@ class WeakNetVpnService : VpnService() {
                     if (startConfig.showOverlay) showOverlay()
                     handler.post(statsTick)
                 }
-            } catch (e: Exception) {
-                try {
-                    server?.stop()
-                } catch (ignored: Exception) {
-                    // 忽略
-                }
-                try {
-                    descriptor?.close()
-                } catch (ignored: Exception) {
-                    // 忽略
-                }
+            } catch (e: Throwable) {
+                runCatching { WeakNetTunnel.stop() }
+                runCatching { server?.stop() }
+                runCatching { descriptor?.close() }
                 val canceled = synchronized(stateLock) { !starting }
                 if (!canceled) {
                     handler.post {
@@ -270,8 +273,7 @@ class WeakNetVpnService : VpnService() {
 
     /** 暂停限速：关闭 VPN / 代理资源，但保留前台服务与悬浮球，方便随时继续。 */
     private fun pauseWeakNet() {
-        var p: WeakNetProxyServer? = null
-        var d: WeakNetDnsForwarder? = null
+        var p: WeakNetSocksServer? = null
         var t: ParcelFileDescriptor? = null
         synchronized(stateLock) {
             if (!running && !starting) {
@@ -281,11 +283,9 @@ class WeakNetVpnService : VpnService() {
             running = false
             starting = false
             paused = true
-            p = proxy
-            d = dns
+            p = socks
             t = tun
-            proxy = null
-            dns = null
+            socks = null
             tun = null
         }
         handler.removeCallbacks(statsTick)
@@ -303,37 +303,22 @@ class WeakNetVpnService : VpnService() {
         registerTask()
         updateNotification()
         thread(name = "weaknet-pause", isDaemon = true) {
-            try {
-                p?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                d?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                t?.close()
-            } catch (e: Exception) {
-                // 忽略
-            }
+            runCatching { WeakNetTunnel.stop() }
+            runCatching { p?.stop() }
+            runCatching { t?.close() }
         }
     }
 
     private fun stopEverything() {
-        var p: WeakNetProxyServer? = null
-        var d: WeakNetDnsForwarder? = null
+        var p: WeakNetSocksServer? = null
         var t: ParcelFileDescriptor? = null
         synchronized(stateLock) {
             running = false
             starting = false
             paused = false
-            p = proxy
-            d = dns
+            p = socks
             t = tun
-            proxy = null
-            dns = null
+            socks = null
             tun = null
         }
         handler.removeCallbacks(statsTick)
@@ -353,21 +338,9 @@ class WeakNetVpnService : VpnService() {
         stopSelf()
         // 关闭 socket / TUN / DNS 线程可能涉及系统调用，放到后台，避免停止或转屏时卡住主线程。
         thread(name = "weaknet-stop", isDaemon = true) {
-            try {
-                p?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                d?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                t?.close()
-            } catch (e: Exception) {
-                // 忽略
-            }
+            runCatching { WeakNetTunnel.stop() }
+            runCatching { p?.stop() }
+            runCatching { t?.close() }
         }
     }
 
@@ -416,17 +389,14 @@ class WeakNetVpnService : VpnService() {
     }
 
     private fun fail(message: String) {
-        var p: WeakNetProxyServer? = null
-        var d: WeakNetDnsForwarder? = null
+        var p: WeakNetSocksServer? = null
         var t: ParcelFileDescriptor? = null
         synchronized(stateLock) {
             running = false
             starting = false
-            p = proxy
-            d = dns
+            p = socks
             t = tun
-            proxy = null
-            dns = null
+            socks = null
             tun = null
         }
         handler.removeCallbacks(statsTick)
@@ -444,25 +414,16 @@ class WeakNetVpnService : VpnService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         thread(name = "weaknet-fail-cleanup", isDaemon = true) {
-            try {
-                p?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                d?.stop()
-            } catch (e: Exception) {
-                // 忽略
-            }
-            try {
-                t?.close()
-            } catch (e: Exception) {
-                // 忽略
-            }
+            runCatching { WeakNetTunnel.stop() }
+            runCatching { p?.stop() }
+            runCatching { t?.close() }
         }
     }
 
     override fun onDestroy() {
+        runCatching { WeakNetTunnel.stop() }
+        runCatching { socks?.stop() }
+        runCatching { tun?.close() }
         BackgroundTaskRegistry.remove(TASK_ID)
         super.onDestroy()
     }
@@ -471,6 +432,26 @@ class WeakNetVpnService : VpnService() {
         super.onConfigurationChanged(newConfig)
         // WindowManager 的配置更新也在主线程排队，延后到当前转屏消息处理完再 reposition。
         handler.postDelayed({ overlay?.refreshPosition() }, 120)
+    }
+
+    private fun dnsServers(): List<InetAddress> {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        val active = manager?.activeNetwork
+        val properties = if (manager != null && active != null) {
+            manager.getLinkProperties(active)
+        } else {
+            null
+        }
+        val servers = properties?.dnsServers
+            .orEmpty()
+            .filterNot { it.isLoopbackAddress || it.isLinkLocalAddress || it.isAnyLocalAddress }
+            .distinct()
+            .take(4)
+        if (servers.isNotEmpty()) return servers
+        return listOfNotNull(
+            runCatching { InetAddress.getByName("1.1.1.1") }.getOrNull(),
+            runCatching { InetAddress.getByName("8.8.8.8") }.getOrNull(),
+        )
     }
 
     private fun createChannel() {
