@@ -57,6 +57,7 @@ import com.mingdai.toTool.data.LocalPrefs
 import com.mingdai.toTool.flashdrop.ClipboardMessage
 import com.mingdai.toTool.flashdrop.FlashDropController
 import com.mingdai.toTool.flashdrop.FlashDropRuntime
+import com.mingdai.toTool.flashdrop.FlashDropPairRequestDialog
 import com.mingdai.toTool.flashdrop.FlashDropState
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
@@ -240,126 +241,10 @@ fun FlashDropTool(padding: PaddingValues) {
     }
 
     val pendingPairRequest = state.pairRequests.firstOrNull()
-    var selectedPairNumber by remember { mutableStateOf<Int?>(null) }
-    var pairNumberError by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(pendingPairRequest?.id) {
-        selectedPairNumber = null
-        pairNumberError = null
-    }
-    AppDialog(
-        show = pendingPairRequest != null,
-        title = "确认配对数字",
-        summary = null,
-        confirmText = null,
-        dismissText = null,
-        onDismiss = {},
-        onConfirm = {},
-    ) {
-        pendingPairRequest?.let { request ->
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    "${request.remoteHost} 请求连接这台手机",
-                    style = MiuixTheme.textStyles.body1,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    request.userAgent.ifBlank { "未知浏览器" },
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "请求时间：${formatFileTime(request.createdAt)}",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                Text(
-                    "请在网页上查看本次配对数字，选择相同的一项后再点确认。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    request.options.forEach { option ->
-                        val selected = selectedPairNumber == option
-                        val container = if (selected) {
-                            MiuixTheme.colorScheme.primary
-                        } else {
-                            MiuixTheme.colorScheme.secondaryContainer
-                        }
-                        val content = if (selected) {
-                            MiuixTheme.colorScheme.onPrimary
-                        } else {
-                            MiuixTheme.colorScheme.onSecondaryContainer
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(container)
-                                .clickable {
-                                    selectedPairNumber = option
-                                    pairNumberError = null
-                                }
-                                .padding(vertical = 14.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                option.toString(),
-                                style = MiuixTheme.textStyles.title4.copy(fontFamily = FontFamily.Monospace),
-                                fontWeight = FontWeight.Bold,
-                                color = content,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-                pairNumberError?.let { message ->
-                    Text(
-                        message,
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = WarnColor,
-                    )
-                }
-                PrimaryButton(
-                    onClick = {
-                        val choice = selectedPairNumber
-                        if (choice != null && !controller.approvePairRequest(request.id, choice)) {
-                            pairNumberError = "数字与网页不一致，请重新选择"
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = selectedPairNumber != null,
-                ) { Text("确认配对") }
-                Text(
-                    "确认前可以随时改选；选错不会结束请求。也可以直接拒绝或暂时拉黑。",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton(
-                        onClick = { controller.denyPairRequest(request.id) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("拒绝", maxLines = 1) }
-                    SecondaryButton(
-                        onClick = { controller.blockPairRequest(request.id) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("暂时拉黑", maxLines = 1) }
-                }
-                Text(
-                    "暂时拉黑只对本次隔空闪传服务生效，关闭服务后解除。",
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        }
-    }
+    FlashDropPairRequestDialog(
+        request = pendingPairRequest,
+        controller = controller,
+    )
 
     AppDialog(
         show = showCodeDialog,
