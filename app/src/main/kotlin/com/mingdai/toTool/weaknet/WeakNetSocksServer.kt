@@ -31,6 +31,7 @@ private const val TCP_BUFFER_SIZE = 16 * 1024
 private const val TCP_QUEUE_CHUNKS = 128
 private const val UDP_BUFFER_SIZE = 65_535
 private const val CONNECT_TIMEOUT_MS = 10_000
+private const val TCP_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * 本地 SOCKS5 服务端，给 hev-socks5-tunnel 做真正的 TCP/UDP 转发：
@@ -209,7 +210,10 @@ internal class WeakNetSocksServer(
             upstream.connect(InetSocketAddress(target, port), CONNECT_TIMEOUT_MS)
             sockets.add(upstream)
             replySuccess(output, null, 0)
-            client.soTimeout = 0
+            client.soTimeout = TCP_IDLE_TIMEOUT_MS
+            upstream.soTimeout = TCP_IDLE_TIMEOUT_MS
+            upstream.keepAlive = true
+            client.keepAlive = true
             relay(client, clientInput, upstream, throttle)
         } catch (e: Exception) {
             runCatching { replyError(output, REPLY_CONNECTION_REFUSED) }
@@ -239,7 +243,8 @@ internal class WeakNetSocksServer(
             limiter = if (throttle) uploadLimiter else null,
             counter = txBytes,
             latencyMs = latency,
-            onEnd = closeBoth,
+            onEof = { runCatching { upstream.shutdownOutput() } },
+            onError = closeBoth,
         )
         val download = startPipe(
             input = upstream.getInputStream(),
@@ -247,11 +252,17 @@ internal class WeakNetSocksServer(
             limiter = if (throttle) downloadLimiter else null,
             counter = rxBytes,
             latencyMs = latency,
-            onEnd = closeBoth,
+            onEof = { runCatching { client.shutdownOutput() } },
+            onError = closeBoth,
         )
-        upload.join()
-        download.join()
+        upload.reader.join()
+        upload.writer?.join()
+        download.reader.join()
+        download.writer?.join()
+        closeBoth()
     }
+
+    private class Pipe(val reader: Thread, val writer: Thread? = null)
 
     private fun startPipe(
         input: InputStream,
@@ -259,19 +270,24 @@ internal class WeakNetSocksServer(
         limiter: RateLimiter?,
         counter: AtomicLong,
         latencyMs: Int,
-        onEnd: () -> Unit,
-    ): Thread {
+        onEof: () -> Unit,
+        onError: () -> Unit,
+    ): Pipe {
         val pipeClosed = AtomicBoolean(false)
-        val finish = {
-            if (pipeClosed.compareAndSet(false, true)) onEnd()
+        val fail = {
+            if (pipeClosed.compareAndSet(false, true)) onError()
         }
         if (latencyMs <= 0) {
             val worker = thread(name = "weaknet-pipe", isDaemon = true) {
                 val buffer = ByteArray(TCP_BUFFER_SIZE)
+                var eof = false
                 try {
                     while (running && !pipeClosed.get()) {
                         val read = input.read(buffer)
-                        if (read < 0) break
+                        if (read < 0) {
+                            eof = true
+                            break
+                        }
                         if (read == 0) continue
                         limiter?.acquire(read)
                         if (!running || pipeClosed.get()) break
@@ -283,15 +299,20 @@ internal class WeakNetSocksServer(
                     // 流关闭 / 对端断开
                 } finally {
                     workers.remove(Thread.currentThread())
-                    finish()
+                    if (eof) {
+                        runCatching { onEof() }
+                    } else {
+                        fail()
+                    }
                 }
             }
             workers.add(worker)
-            return worker
+            return Pipe(worker)
         }
 
         val queue = ArrayBlockingQueue<Chunk>(TCP_QUEUE_CHUNKS)
         val writer = thread(name = "weaknet-pipe-w", isDaemon = true) {
+            var normalEnd = false
             try {
                 while (running && !pipeClosed.get()) {
                     val chunk = try {
@@ -299,7 +320,10 @@ internal class WeakNetSocksServer(
                     } catch (e: InterruptedException) {
                         break
                     } ?: continue
-                    if (chunk.length < 0) break
+                    if (chunk.length < 0) {
+                        normalEnd = true
+                        break
+                    }
                     val wait = chunk.atNanos + latencyMs * 1_000_000L - System.nanoTime()
                     if (wait > 0) LockSupport.parkNanos(wait)
                     if (Thread.interrupted() || !running || pipeClosed.get()) break
@@ -313,15 +337,23 @@ internal class WeakNetSocksServer(
                 // 流关闭 / 对端断开
             } finally {
                 workers.remove(Thread.currentThread())
-                finish()
+                if (normalEnd) {
+                    runCatching { onEof() }
+                } else {
+                    fail()
+                }
             }
         }
         val reader = thread(name = "weaknet-pipe-r", isDaemon = true) {
             val buffer = ByteArray(TCP_BUFFER_SIZE)
+            var eof = false
             try {
                 while (running && !pipeClosed.get()) {
                     val read = input.read(buffer)
-                    if (read < 0) break
+                    if (read < 0) {
+                        eof = true
+                        break
+                    }
                     if (read == 0) continue
                     val chunk = Chunk(buffer.copyOf(read), read, System.nanoTime())
                     while (running && !pipeClosed.get()) {
@@ -331,21 +363,23 @@ internal class WeakNetSocksServer(
             } catch (e: Exception) {
                 // 流关闭 / 对端断开
             } finally {
-                while (!pipeClosed.get()) {
-                    try {
-                        if (queue.offer(Chunk(ByteArray(0), -1, 0), 100, TimeUnit.MILLISECONDS)) break
-                    } catch (e: InterruptedException) {
-                        break
+                if (eof) {
+                    while (!pipeClosed.get()) {
+                        try {
+                            if (queue.offer(Chunk(ByteArray(0), -1, 0), 100, TimeUnit.MILLISECONDS)) break
+                        } catch (e: InterruptedException) {
+                            break
+                        }
+                        if (!running) break
                     }
-                    if (!running) break
                 }
                 workers.remove(Thread.currentThread())
-                finish()
+                if (!eof) fail()
             }
         }
         workers.add(writer)
         workers.add(reader)
-        return reader
+        return Pipe(reader, writer)
     }
 
     private class Chunk(val data: ByteArray, val length: Int, val atNanos: Long)

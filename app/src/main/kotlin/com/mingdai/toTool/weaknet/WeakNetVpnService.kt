@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.net.ConnectivityManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -22,7 +21,6 @@ import com.mingdai.toTool.R
 import com.mingdai.toTool.background.BackgroundTask
 import com.mingdai.toTool.background.BackgroundTaskRegistry
 import java.io.File
-import java.net.InetAddress
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -184,7 +182,9 @@ class WeakNetVpnService : VpnService() {
                     .addAddress("fc00::2", 128)
                     .addRoute("::", 0)
                     .setBlocking(false)
-                dnsServers().forEach { builder.addDnsServer(it) }
+                // mapdns 会拦截发往这个地址的 DNS 查询,返回 240.0.0.0/4 里的映射 IP;
+                // 应用连接映射 IP 时,hev 把原始域名交给本地 SOCKS5,域名过滤和远端解析都能生效。
+                builder.addDnsServer("10.66.0.1")
                 val targetPackage = startConfig.packageName
                 if (targetPackage != null) {
                     builder.addAllowedApplication(targetPackage)
@@ -207,6 +207,12 @@ class WeakNetVpnService : VpnService() {
                         appendLine("  address: '127.0.0.1'")
                         appendLine("  port: $port")
                         appendLine("  udp: 'udp'")
+                        appendLine("mapdns:")
+                        appendLine("  address: 10.66.0.1")
+                        appendLine("  port: 53")
+                        appendLine("  network: 240.0.0.0")
+                        appendLine("  netmask: 240.0.0.0")
+                        appendLine("  cache-size: 10000")
                         appendLine("misc:")
                         appendLine("  log-level: warn")
                     },
@@ -432,26 +438,6 @@ class WeakNetVpnService : VpnService() {
         super.onConfigurationChanged(newConfig)
         // WindowManager 的配置更新也在主线程排队，延后到当前转屏消息处理完再 reposition。
         handler.postDelayed({ overlay?.refreshPosition() }, 120)
-    }
-
-    private fun dnsServers(): List<InetAddress> {
-        val manager = getSystemService(ConnectivityManager::class.java)
-        val active = manager?.activeNetwork
-        val properties = if (manager != null && active != null) {
-            manager.getLinkProperties(active)
-        } else {
-            null
-        }
-        val servers = properties?.dnsServers
-            .orEmpty()
-            .filterNot { it.isLoopbackAddress || it.isLinkLocalAddress || it.isAnyLocalAddress }
-            .distinct()
-            .take(4)
-        if (servers.isNotEmpty()) return servers
-        return listOfNotNull(
-            runCatching { InetAddress.getByName("1.1.1.1") }.getOrNull(),
-            runCatching { InetAddress.getByName("8.8.8.8") }.getOrNull(),
-        )
     }
 
     private fun createChannel() {
