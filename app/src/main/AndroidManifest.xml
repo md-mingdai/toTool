@@ -42,6 +42,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 模拟来电：系统通话账户、电话状态、定时闹钟与通话音频。 -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -275,6 +282,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="weak_network_proxy" />
         </service>
+
+        <!-- 模拟来电：系统 Telecom 绑定此 ConnectionService 显示来电。 -->
+        <service
+            android:name=".fakecall.FakeCallConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".fakecall.FakeCallAlarmReceiver"
+            android:exported="false" />
 
         <!-- Shizuku：「执行 Shell 指令」工具靠它拿到 shell 权限。
              Shizuku 服务启动后会通过这个 Provider 把 Binder 送进本应用。 -->

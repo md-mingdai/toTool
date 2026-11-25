@@ -49,6 +49,7 @@ import com.mingdai.toTool.ui.screens.tools.DateTool
 import com.mingdai.toTool.ui.screens.tools.DecibelTool
 import com.mingdai.toTool.ui.screens.tools.DeviceInfoTool
 import com.mingdai.toTool.ui.screens.tools.EquationSolverTool
+import com.mingdai.toTool.ui.screens.tools.FakeCallTool
 import com.mingdai.toTool.ui.screens.tools.FlashDropTool
 import com.mingdai.toTool.ui.screens.tools.FlashlightTool
 import com.mingdai.toTool.ui.screens.tools.FunctionPlotTool
@@ -251,6 +252,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_apk" -> ApkExtractorTool(padding)
             "dev_vibrate" -> VibratorTool(padding)
             "dev_installer" -> SplitInstallerTool(padding)
+            "dev_fake_call" -> FakeCallTool(padding)
             "dev_shortcut" -> CustomShortcutTool(padding)
             "dev_shell" -> ShellTool(padding)
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)

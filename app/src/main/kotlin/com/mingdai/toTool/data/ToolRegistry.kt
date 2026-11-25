@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Percent
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QrCode
@@ -135,6 +136,7 @@ object ToolRegistry {
         Tool("dev_apk", "提取 APK", "导出已安装应用安装包，AAB 应用导出为 APKS", ToolCategory.DEVICE, Icons.Filled.Android),
         Tool("dev_vibrate", "振动器", "预设模式循环振动，可调强度，手动停止", ToolCategory.DEVICE, Icons.Filled.Vibration),
         Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.DEVICE, Icons.Filled.Apps),
+        Tool("dev_fake_call", "模拟来电", "用系统电话界面模拟来电，支持定时、隐藏号码与接听语音", ToolCategory.DEVICE, Icons.Filled.PhoneInTalk),
         Tool("dev_shortcut", "自定义快捷方式", "选择目标 Activity 与图标，创建桌面快捷方式", ToolCategory.DEVICE, Icons.Filled.AddToHomeScreen),
         Tool("dev_shell", "执行 Shell 指令", "通过 Shizuku 执行命令或 .sh 脚本，查看日志", ToolCategory.DEVICE, Icons.Filled.Terminal),
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.DEVICE, Icons.Filled.Wallpaper),
