@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -105,6 +106,9 @@ internal fun PasswordEntropySection(
                         enabled = !collecting,
                         onStart = onStrokeStart,
                         onPoint = onStrokePoint,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .widthIn(max = 300.dp),
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
