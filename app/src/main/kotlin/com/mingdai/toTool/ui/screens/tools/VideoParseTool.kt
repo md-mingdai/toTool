@@ -6,6 +6,13 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
+import android.text.TextUtils
+import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,13 +30,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,10 +47,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.MessageCard
@@ -305,13 +318,23 @@ private fun VideoParseResultCard(result: VideoParseResult, cover: Bitmap?) {
     }
     SectionLabel("媒体（${result.medias.size}）")
     result.medias.forEachIndexed { index, media ->
-        MediaCard(media = media, index = index, platformLabel = result.platform.label)
+        MediaCard(
+            media = media,
+            index = index,
+            platformLabel = result.platform.label,
+            cover = cover,
+        )
     }
     HintText("部分直链需要 Referer/Cookie 才能访问；应用内下载会自动带上解析时得到的请求头。m3u8 请复制直链后用支持 HLS 的工具下载。")
 }
 
 @Composable
-private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
+private fun MediaCard(
+    media: ParsedMedia,
+    index: Int,
+    platformLabel: String,
+    cover: Bitmap?,
+) {
     val context = LocalContext.current
     var preview by remember(media.url) { mutableStateOf<Bitmap?>(null) }
     var previewLoading by remember(media.url) {
@@ -356,6 +379,13 @@ private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
                     )
                 }
             }
+            if (media.kind == VideoMediaKind.VIDEO) {
+                VideoWebPreview(
+                    media = media,
+                    cover = cover,
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                )
+            }
             if (media.kind == VideoMediaKind.IMAGE) {
                 BitmapPreviewCard(
                     bitmap = preview,
@@ -375,12 +405,12 @@ private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
                         copyText(context, media.url, "直链")
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("复制直链") }
+                ) { Text("复制", maxLines = 1) }
                 if (!media.isHls) {
                     SecondaryButton(
                         onClick = { enqueueDownload(context, media, index) },
                         modifier = Modifier.weight(1f),
-                    ) { Text("下载") }
+                    ) { Text("下载", maxLines = 1) }
                 }
                 SecondaryButton(
                     onClick = {
@@ -394,13 +424,176 @@ private fun MediaCard(media: ParsedMedia, index: Int, platformLabel: String) {
                         }
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("打开") }
+                ) { Text("打开", maxLines = 1) }
             }
         }
     }
 }
 
 private val previewSemaphore = Semaphore(3)
+
+/**
+ * 视频预览：优先用 WebView 播放直链；需要额外请求头、HLS 不被支持或加载失败时，
+ * 自动回退到解析结果封面，并保持下载/复制/打开按钮可用。
+ */
+@Composable
+private fun VideoWebPreview(
+    media: ParsedMedia,
+    cover: Bitmap?,
+    modifier: Modifier = Modifier,
+) {
+    var ready by remember(media.url) { mutableStateOf(false) }
+    var failed by remember(media.url) { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black),
+    ) {
+        BitmapPreviewCard(
+            bitmap = cover,
+            modifier = Modifier.fillMaxSize(),
+            placeholder = when {
+                failed && cover == null -> "视频预览不可用"
+                failed -> "仅显示封面"
+                else -> "正在加载视频预览…"
+            },
+            busy = !ready && !failed,
+        )
+        if (!failed) {
+            key(media.url) {
+                var webView by remember { mutableStateOf<WebView?>(null) }
+                DisposableEffect(media.url) {
+                    onDispose {
+                        webView?.let { view ->
+                            view.stopLoading()
+                            view.loadUrl("about:blank")
+                            view.destroy()
+                        }
+                        webView = null
+                    }
+                }
+                AndroidView(
+                    modifier = Modifier.fillMaxSize().alpha(if (ready) 1f else 0f),
+                    factory = { context ->
+                        WebView(context).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = false
+                            settings.mediaPlaybackRequiresUserGesture = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            media.headers["User-Agent"]
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let { settings.userAgentString = it }
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            applyPreviewCookies(media)
+                            val previewView = this
+                            addJavascriptInterface(
+                                object {
+                                    @android.webkit.JavascriptInterface
+                                    fun onReady() {
+                                        previewView.post { ready = true }
+                                    }
+
+                                    @android.webkit.JavascriptInterface
+                                    fun onError() {
+                                        previewView.post { if (!ready) failed = true }
+                                    }
+                                },
+                                "TtVideo",
+                            )
+                            webViewClient = object : WebViewClient() {
+                                override fun onReceivedError(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                    error: WebResourceError,
+                                ) {
+                                    if (!request.isForMainFrame && !ready) {
+                                        view.post { failed = true }
+                                    }
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                    errorResponse: WebResourceResponse,
+                                ) {
+                                    if (!request.isForMainFrame && !ready) {
+                                        view.post { failed = true }
+                                    }
+                                }
+                            }
+                            loadDataWithBaseURL(
+                                media.headers["Referer"]
+                                    ?.takeIf { it.startsWith("http") }
+                                    ?: media.url,
+                                videoPreviewHtml(media.url),
+                                "text/html",
+                                "UTF-8",
+                                null,
+                            )
+                            webView = this
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun applyPreviewCookies(media: ParsedMedia) {
+    val cookie = media.headers["Cookie"]?.takeIf { it.isNotBlank() } ?: return
+    val manager = CookieManager.getInstance()
+    val targets = listOfNotNull(
+        media.url,
+        media.headers["Referer"]?.takeIf { it.startsWith("http") },
+    )
+    cookie.split(';')
+        .map { it.trim() }
+        .filter { it.contains('=') }
+        .forEach { pair ->
+            targets.forEach { target ->
+                runCatching { manager.setCookie(target, "$pair; path=/") }
+            }
+        }
+    manager.flush()
+}
+
+private fun videoPreviewHtml(url: String): String {
+    val escaped = TextUtils.htmlEncode(url)
+    return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+          <style>
+            html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}
+            video{width:100%;height:100%;object-fit:contain;background:#000}
+          </style>
+        </head>
+        <body>
+          <video id="v" src="$escaped" controls playsinline preload="metadata"></video>
+          <script>
+            (function(){
+              var v=document.getElementById('v');
+              var done=false;
+              function ok(){if(done)return;done=true;try{TtVideo.onReady()}catch(e){}}
+              function bad(){if(done)return;done=true;try{TtVideo.onError()}catch(e){}}
+              v.addEventListener('loadedmetadata',ok);
+              v.addEventListener('canplay',ok);
+              v.addEventListener('error',bad);
+              setTimeout(function(){if(v.readyState===0)bad()},10000);
+            })();
+          </script>
+        </body>
+        </html>
+    """.trimIndent()
+}
 
 private fun enqueueDownload(context: Context, media: ParsedMedia, index: Int) {
     val name = (media.fileName.ifBlank {
