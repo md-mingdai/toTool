@@ -62,6 +62,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.res.ResourcesCompat
+import com.mingdai.toTool.R
 import com.mingdai.toTool.media.baseNameOf
 import com.mingdai.toTool.media.humanSize
 import com.mingdai.toTool.media.queryFileName
@@ -487,6 +489,10 @@ fun ImageAsciiTool(padding: PaddingValues) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberBitmapPicker(1600) { source = it; error = null }
+    val context = LocalContext.current
+    val asciiTypeface = remember(context) {
+        ResourcesCompat.getFont(context, R.font.onest_regular) ?: Typeface.MONOSPACE
+    }
 
     val effectiveBackground = if (backgroundFromImage) imageColor else backgroundArgb
     val glyphs = remember(glyphText) { asciiGlyphs(glyphText) }
@@ -501,14 +507,14 @@ fun ImageAsciiTool(padding: PaddingValues) {
         }
     }
 
-    LaunchedEffect(source, density, glyphs, effectiveBackground) {
+    LaunchedEffect(source, density, glyphs, effectiveBackground, asciiTypeface) {
         val input = source ?: return@LaunchedEffect
         busy = true
         error = null
         delay(100)
         result = withContext(Dispatchers.Default) {
             runCatching {
-                renderAsciiArt(input, density.roundToInt(), glyphs, effectiveBackground)
+                renderAsciiArt(input, density.roundToInt(), glyphs, effectiveBackground, asciiTypeface)
             }.getOrNull()
         }
         busy = false
@@ -655,6 +661,7 @@ private fun renderAsciiArt(
     requestedColumns: Int,
     glyphs: String,
     background: Int,
+    typeface: Typeface,
 ): Bitmap {
     val (columns, rows) = asciiLayout(source.width, source.height, requestedColumns)
     val cell = ASCII_GLYPH_PX
@@ -662,7 +669,7 @@ private fun renderAsciiArt(
     val canvas = Canvas(out)
     canvas.drawColor(background)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.MONOSPACE
+        this.typeface = typeface
         textAlign = Paint.Align.CENTER
         textSize = cell * 0.95f
     }
