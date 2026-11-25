@@ -87,6 +87,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.mingdai.toTool.data.LocalBehaviorState
 import com.mingdai.toTool.system.SystemUiDemoLauncher
 import com.mingdai.toTool.ui.components.favoriteContainerColor
@@ -105,7 +107,12 @@ fun HomeScreen(navController: NavHostController) {
 
     val selectedCategory = categoryKey?.let { runCatching { ToolCategory.valueOf(it) }.getOrNull() }
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val onToolClick: (Tool) -> Unit = { tool ->
+        // 从搜索结果进入工具时，搜索框仍可能持有焦点，输入法会跟着进入工具页。
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
         if (!SystemUiDemoLauncher.handle(context, tool.id)) {
             navController.navigate(Routes.tool(tool.id))
         }
