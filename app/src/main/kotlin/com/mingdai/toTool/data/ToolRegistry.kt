@@ -110,7 +110,7 @@ object ToolRegistry {
         // --- 文本工具 ---
         Tool("text_charcount", "字符统计", "统计字符、单词、行数与字节数", ToolCategory.TEXT, Icons.Filled.Numbers),
         Tool("text_case", "大小写转换", "大写/小写/标题/句子/反转", ToolCategory.TEXT, Icons.Filled.TextFields),
-        Tool("text_password", "密码生成", "生成可配置的随机强密码", ToolCategory.TEXT, Icons.Filled.Lock),
+        Tool("text_password", "密码生成", "生成可配置的随机强密码，支持传感器与绘制熵源", ToolCategory.TEXT, Icons.Filled.Lock),
         Tool("text_uuid", "UUID 生成", "生成随机 UUID v4", ToolCategory.TEXT, Icons.Filled.Fingerprint),
         Tool("text_base64", "Base64 编解码", "编码或解码 Base64 字符串", ToolCategory.TEXT, Icons.Filled.Code),
         Tool("text_hash", "哈希计算", "MD5 / SHA-1 / SHA-256 / SHA-512", ToolCategory.TEXT, Icons.Filled.DataObject),

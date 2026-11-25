@@ -1,5 +1,7 @@
 package com.mingdai.toTool.ui.screens.tools
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -9,13 +11,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.ResultBox
 import com.mingdai.toTool.ui.components.ToolBody
 import java.security.MessageDigest
@@ -24,6 +32,7 @@ import java.util.Base64
 import java.util.UUID
 import java.net.URLEncoder
 import java.net.URLDecoder
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -215,10 +224,13 @@ private const val SYMBOLS = "!@#\$%^&*()-_=+[]{};:,.?/"
  * 如果某个勾选的类别一个都没抽到，就整个重来。
  * 这样结果在所有“每类至少出现一次”的密码上是完全均匀的，下面的熵值公式才是准确的。
  */
-private fun genPassword(length: Int, sets: List<String>): String {
+private fun genPassword(
+    length: Int,
+    sets: List<String>,
+    rng: SecureRandom = SecureRandom(),
+): String {
     val pool = sets.joinToString("")
     if (pool.isEmpty()) return ""
-    val rng = SecureRandom()
     val len = maxOf(length, sets.size)
     val chars = CharArray(len)
     repeat(10_000) {
@@ -378,6 +390,10 @@ private fun EntropyCard(bits: Double, length: Int, poolSize: Int) {
 @Composable
 fun PasswordTool(padding: PaddingValues) {
     val colors = MiuixTheme.colorScheme
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+
     var length by remember { mutableStateOf(16) }
     var upper by remember { mutableStateOf(true) }
     var lower by remember { mutableStateOf(true) }
@@ -395,9 +411,119 @@ fun PasswordTool(padding: PaddingValues) {
     val poolSize = sets.sumOf { it.length }
     val bits = remember(length, sets) { passwordEntropyBits(length, sets.map { it.length }) }
 
+    val entropySources = remember(context) { PasswordEntropy.sources(context) }
+    var entropyTab by rememberSaveable { mutableStateOf(PasswordEntropyTab.SENSORS) }
+    var selectedSourceIds by rememberSaveable {
+        mutableStateOf(entropySources.filter { it.sensorType != null }.map { it.id })
+    }
+    val drawPoints = remember { mutableStateListOf<PasswordDrawPoint?>() }
+    val drawCount = drawPoints.count { it != null }
+    var collecting by remember { mutableStateOf(false) }
+    var entropyNote by remember { mutableStateOf<String?>(null) }
+    var entropyError by remember { mutableStateOf<String?>(null) }
+    var pendingEntropyGenerate by remember { mutableStateOf<(() -> Unit)?>(null) }
+
     // 选项一变就重新生成，这样下面显示的密码、熵值永远对应当前的设置；按钮用来“再来一个”
     var output by remember { mutableStateOf("") }
-    LaunchedEffect(length, sets) { output = genPassword(length, sets) }
+    LaunchedEffect(length, sets) {
+        output = genPassword(length, sets)
+        entropyNote = null
+        entropyError = null
+    }
+
+    fun startEntropyGeneration(selected: List<PasswordEntropySource>) {
+        if (collecting) return
+        if (entropyTab == PasswordEntropyTab.DRAW) {
+            if (drawCount < 500) {
+                entropyNote = null
+                entropyError = "还需要采集 ${500 - drawCount} 个绘制点"
+                return
+            }
+            val rng = PasswordEntropy.mix(listOf(PasswordEntropy.hashDrawing(drawPoints)))
+            output = genPassword(length, sets, rng)
+            entropyError = null
+            entropyNote = "已混入绘制坐标熵源；原始笔迹不会保存。"
+            return
+        }
+        if (selected.isEmpty()) {
+            output = genPassword(length, sets)
+            entropyError = null
+            entropyNote = "未选择传感器，使用系统安全随机数。"
+            return
+        }
+        scope.launch {
+            collecting = true
+            entropyError = null
+            entropyNote = null
+            try {
+                val collection = PasswordEntropy.collect(context, lifecycleOwner, selected)
+                val rng = PasswordEntropy.mix(collection.parts)
+                output = genPassword(length, sets, rng)
+                entropyNote = buildString {
+                    if (collection.parts.isEmpty()) {
+                        append("未能采集到额外熵源，已使用系统安全随机数生成。")
+                    } else {
+                        append("已混入熵源：")
+                        append(selected.joinToString("、") { it.label })
+                        append("。")
+                    }
+                    append("原始数据不会保存")
+                    if (collection.notes.isNotEmpty()) {
+                        append("；")
+                        append(collection.notes.joinToString("；"))
+                    }
+                }
+            } catch (e: Exception) {
+                entropyError = "采集熵源失败：${e.message ?: "未知错误"}"
+            } finally {
+                collecting = false
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        val pending = pendingEntropyGenerate
+        pendingEntropyGenerate = null
+        val required = entropySources.filter { it.id in selectedSourceIds }
+            .mapNotNull { it.permission }
+            .distinct()
+        val allGranted = required.all { PasswordEntropy.hasPermission(context, it) }
+        if (pending != null && allGranted) {
+            pending()
+        } else {
+            entropyNote = null
+            entropyError = "需要麦克风或摄像头权限才能使用所选熵源"
+        }
+    }
+
+    fun generateWithEntropy() {
+        if (collecting) return
+        if (entropyTab == PasswordEntropyTab.DRAW) {
+            startEntropyGeneration(emptyList())
+            return
+        }
+        val selected = entropySources.filter { it.id in selectedSourceIds }
+        val missing = selected.mapNotNull { it.permission }.distinct()
+            .filterNot { PasswordEntropy.hasPermission(context, it) }
+        if (missing.isEmpty()) {
+            startEntropyGeneration(selected)
+        } else {
+            pendingEntropyGenerate = { startEntropyGeneration(selected) }
+            permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    val drawReady = drawCount >= 500
+    val canGenerate = !collecting && (entropyTab != PasswordEntropyTab.DRAW || drawReady)
+    val generateLabel = when {
+        collecting -> "正在采集熵源…"
+        entropyTab == PasswordEntropyTab.DRAW && !drawReady -> "再画一些点（$drawCount/500）"
+        entropyTab == PasswordEntropyTab.DRAW -> "使用绘制熵源生成"
+        selectedSourceIds.isNotEmpty() -> "采集熵源并生成"
+        else -> "重新生成"
+    }
 
     ToolBody(padding) {
         SectionLabel("长度")
@@ -434,12 +560,51 @@ fun PasswordTool(padding: PaddingValues) {
         }
 
         Spacer(Modifier.height(4.dp))
+        SectionLabel("熵源选择")
+        PasswordEntropySection(
+            tab = entropyTab,
+            onTabChange = {
+                entropyTab = it
+                entropyError = null
+            },
+            sources = entropySources,
+            selectedIds = selectedSourceIds.toSet(),
+            onToggleSource = { id ->
+                selectedSourceIds = if (id in selectedSourceIds) {
+                    selectedSourceIds - id
+                } else {
+                    selectedSourceIds + id
+                }
+            },
+            drawPoints = drawPoints,
+            drawCount = drawCount,
+            collecting = collecting,
+            onStrokeStart = { offset ->
+                if (drawPoints.count { it != null } < 600) {
+                    drawPoints.add(null)
+                    drawPoints.add(PasswordDrawPoint(offset.x, offset.y, System.nanoTime()))
+                }
+            },
+            onStrokePoint = { offset ->
+                if (drawPoints.count { it != null } < 600) {
+                    drawPoints.add(PasswordDrawPoint(offset.x, offset.y, System.nanoTime()))
+                }
+            },
+            onClearDrawing = { drawPoints.clear() },
+        )
+
+        Spacer(Modifier.height(4.dp))
         PrimaryButton(
-            onClick = { output = genPassword(length, sets) },
+            onClick = { generateWithEntropy() },
+            enabled = canGenerate,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("重新生成")
+            Text(generateLabel)
         }
+        entropyError?.let {
+            Text(it, style = MiuixTheme.textStyles.footnote1, color = StrengthBad)
+        }
+        entropyNote?.let { HintText(it) }
         ResultBox(output, label = "密码", monospace = true, minHeight = 72.dp)
 
         SectionLabel("强度评估")
