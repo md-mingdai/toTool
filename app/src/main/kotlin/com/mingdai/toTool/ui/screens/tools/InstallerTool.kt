@@ -1,5 +1,6 @@
 package com.mingdai.toTool.ui.screens.tools
 
+import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -13,11 +14,12 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,6 +90,7 @@ import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -154,6 +157,7 @@ private sealed interface InstStage {
     data class Writing(val done: Long, val total: Long) : InstStage
     data object Confirming : InstStage
     data class CopyingObb(val done: Long, val total: Long) : InstStage
+    data object Deleting : InstStage
     data class Finished(
         val ok: Boolean,
         val title: String,
@@ -643,6 +647,79 @@ private fun instKindLabel(e: SplitEntry): String = when (e.kind) {
     SplitKind.LANGUAGE -> "语言 · ${e.token.replace('_', '-')}"
 }
 
+/* ───────────────────────── 安装完成后清理 ───────────────────────── */
+
+private data class InstDeleteResult(
+    val deleted: Int,
+    val failed: List<String>,
+) {
+    val text: String?
+        get() = when {
+            deleted == 0 && failed.isEmpty() -> null
+            failed.isEmpty() -> "已删除 $deleted 个安装包文件。"
+            else -> buildString {
+                if (deleted > 0) append("已删除 $deleted 个安装包文件，") else append("安装包删除失败：")
+                append(failed.joinToString("、"))
+                append("。安装已完成，可以手动删除这些文件。")
+            }
+        }
+}
+
+private fun instDeleteSources(context: Context, uris: List<Uri>): InstDeleteResult {
+    var deleted = 0
+    val failed = mutableListOf<String>()
+    uris.distinct().forEach { uri ->
+        if (instDeleteUri(context, uri)) {
+            deleted++
+        } else {
+            failed += (uri.lastPathSegment ?: uri.toString()).take(120)
+        }
+    }
+    return InstDeleteResult(deleted, failed)
+}
+
+private fun instDeleteUri(context: Context, uri: Uri): Boolean =
+    when (uri.scheme?.lowercase(Locale.ROOT)) {
+        "file" -> uri.path?.let { File(it).delete() } == true
+        "content" -> {
+            val viaDocuments = runCatching {
+                DocumentsContract.deleteDocument(context.contentResolver, uri)
+            }.getOrDefault(false)
+            if (viaDocuments) {
+                true
+            } else {
+                runCatching {
+                    context.contentResolver.delete(uri, null, null) > 0
+                }.getOrDefault(false)
+            }
+        }
+        else -> false
+    }
+
+/** 选安装包时同时请求写权限，供“安装完成后删除安装包”使用。 */
+private class OpenInstallDocuments : ActivityResultContract<Array<String>, List<Uri>>() {
+    override fun createIntent(context: Context, input: Array<String>): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            .putExtra(Intent.EXTRA_MIME_TYPES, input)
+            .setType("*/*")
+            .addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+
+    override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> {
+        if (resultCode != Activity.RESULT_OK || intent == null) return emptyList()
+        val clip = intent.clipData
+        if (clip != null) {
+            return (0 until clip.itemCount).mapNotNull { index -> clip.getItemAt(index).uri }
+        }
+        return listOfNotNull(intent.data)
+    }
+}
+
 /* ───────────────────────── 界面 ───────────────────────── */
 
 @Composable
@@ -657,6 +734,8 @@ fun SplitInstallerTool(padding: PaddingValues) {
     var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
     var withObb by remember { mutableStateOf(true) }
     var askAllowSource by remember { mutableStateOf(false) }
+    var sourceUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var deleteAfterInstall by rememberSaveable { mutableStateOf(false) }
 
     // 回到前台时刷新“所有文件访问权限”的状态（用户可能刚从系统设置页回来）
     var resumeTick by remember { mutableIntStateOf(0) }
@@ -673,7 +752,10 @@ fun SplitInstallerTool(padding: PaddingValues) {
     }
 
     // 读文件、写会话期间保持亮屏，免得大文件处理到一半息屏
-    KeepScreenOn(stage is InstStage.Loading || stage is InstStage.Writing || stage is InstStage.CopyingObb)
+    KeepScreenOn(
+        stage is InstStage.Loading || stage is InstStage.Writing ||
+            stage is InstStage.CopyingObb || stage is InstStage.Deleting,
+    )
 
     // 离开页面：关掉压缩包、清掉缓存
     val loadedNow by rememberUpdatedState(loaded)
@@ -689,8 +771,22 @@ fun SplitInstallerTool(padding: PaddingValues) {
         val pkg = loaded
         val items = if (withObb) pkg?.obb.orEmpty() else emptyList()
         val owner = installedPackage ?: pkg?.packageName
+        val shouldDelete = deleteAfterInstall && sourceUris.isNotEmpty()
+        val sources = sourceUris
         if (pkg == null || items.isEmpty()) {
-            stage = InstStage.Finished(true, "安装成功", null, owner, false)
+            if (!shouldDelete) {
+                stage = InstStage.Finished(true, "安装成功", null, owner, false)
+                return
+            }
+            stage = InstStage.Deleting
+            scope.launch {
+                val deleted = withContext(Dispatchers.IO) {
+                    runCatching { pkg?.close() }
+                    instDeleteSources(context, sources)
+                }
+                loaded = null
+                stage = InstStage.Finished(true, "安装成功", deleted.text, owner, false)
+            }
             return
         }
         stage = InstStage.CopyingObb(0, items.sumOf { it.size.coerceAtLeast(0L) })
@@ -698,7 +794,7 @@ fun SplitInstallerTool(padding: PaddingValues) {
             val result = withContext(Dispatchers.IO) {
                 instCopyObb(pkg, items) { d, t -> stage = InstStage.CopyingObb(d, t) }
             }
-            val detail = when {
+            val copyDetail = when {
                 result.failed.isEmpty() -> "已复制 ${result.copied} 个 OBB 数据文件。"
                 else -> buildString {
                     append("已复制 ${result.copied} 个，${result.failed.size} 个失败：\n")
@@ -706,6 +802,25 @@ fun SplitInstallerTool(padding: PaddingValues) {
                     append("\n\n可以手动把它们放进 Android/obb/${owner ?: "<包名>"}/ 目录。")
                 }
             }
+            // OBB 复制失败时可能还需要压缩包里的数据，保留安装包不删。
+            val deleted = if (shouldDelete && result.failed.isEmpty()) {
+                stage = InstStage.Deleting
+                withContext(Dispatchers.IO) {
+                    runCatching { pkg.close() }
+                    instDeleteSources(context, sources)
+                }
+            } else {
+                null
+            }
+            if (deleted != null) loaded = null
+            val detail = buildList {
+                add(copyDetail)
+                if (deleted != null) {
+                    deleted.text?.let { add(it) }
+                } else if (shouldDelete) {
+                    add("OBB 复制未完全成功，已保留安装包。")
+                }
+            }.filter { it.isNotBlank() }.joinToString("\n\n").ifBlank { null }
             stage = InstStage.Finished(true, "安装成功", detail, owner, false)
         }
     }
@@ -762,6 +877,8 @@ fun SplitInstallerTool(padding: PaddingValues) {
     // 读入所选文件：文件选择器和「打开方式」送来的文件走同一条路
     fun loadUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        sourceUris = uris.distinct()
+        deleteAfterInstall = false
         loaded?.close()
         loaded = null
         stage = InstStage.Loading
@@ -784,7 +901,7 @@ fun SplitInstallerTool(padding: PaddingValues) {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    val picker = rememberLauncherForActivityResult(OpenInstallDocuments()) { uris ->
         loadUris(uris)
     }
 
@@ -795,7 +912,8 @@ fun SplitInstallerTool(padding: PaddingValues) {
         val uri = incoming ?: return@LaunchedEffect
         IncomingPackage.uri = null
         val busy = stage is InstStage.Loading || stage is InstStage.Writing ||
-            stage is InstStage.Confirming || stage is InstStage.CopyingObb
+            stage is InstStage.Confirming || stage is InstStage.CopyingObb ||
+            stage is InstStage.Deleting
         if (busy) {
             Toast.makeText(context, "正在处理另一个安装包，已忽略新打开的文件", Toast.LENGTH_LONG).show()
         } else {
@@ -838,6 +956,8 @@ fun SplitInstallerTool(padding: PaddingValues) {
         loaded?.close()
         loaded = null
         chosen = emptySet()
+        sourceUris = emptyList()
+        deleteAfterInstall = false
         stage = InstStage.Idle
     }
 
@@ -863,6 +983,8 @@ fun SplitInstallerTool(padding: PaddingValues) {
                         onToggle = { path, on -> chosen = if (on) chosen + path else chosen - path },
                         withObb = withObb,
                         onWithObb = { withObb = it },
+                        deleteAfterInstall = deleteAfterInstall,
+                        onDeleteAfterInstall = { deleteAfterInstall = it },
                         allFilesGranted = allFilesGranted,
                         onGrantAllFiles = {
                             val page = Intent(
@@ -899,6 +1021,13 @@ fun SplitInstallerTool(padding: PaddingValues) {
                 note = "应用已经装好，正在把附带的数据文件放到 Android/obb 下。",
                 done = s.done,
                 total = s.total,
+            )
+
+            is InstStage.Deleting -> InstBusyCard(
+                title = "正在删除安装包…",
+                note = "安装已完成，正在删除所选的全部安装包文件。",
+                done = 0,
+                total = 0,
             )
 
             is InstStage.Finished -> InstFinishedContent(
@@ -1143,6 +1272,8 @@ private fun InstReadyContent(
     onToggle: (String, Boolean) -> Unit,
     withObb: Boolean,
     onWithObb: (Boolean) -> Unit,
+    deleteAfterInstall: Boolean,
+    onDeleteAfterInstall: (Boolean) -> Unit,
     allFilesGranted: Boolean,
     onGrantAllFiles: () -> Unit,
     onInstall: () -> Unit,
@@ -1228,6 +1359,38 @@ private fun InstReadyContent(
                         Text("去授权")
                     }
                 }
+            }
+        }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onDeleteAfterInstall(!deleteAfterInstall) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Switch(
+                    checked = deleteAfterInstall,
+                    onCheckedChange = onDeleteAfterInstall,
+                )
+                Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text("完成后删除安装包", style = MiuixTheme.textStyles.body2)
+                    Text(
+                        "安装成功并完成 OBB 复制后，删除所选的全部安装包文件；默认关闭",
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = colors.onSurfaceVariantSummary,
+                    )
+                }
+            }
+            if (deleteAfterInstall) {
+                Text(
+                    "删除后无法恢复；如果 OBB 复制失败会保留安装包。部分文件提供方可能不允许删除，届时会在结果里提示。",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = WarnColor,
+                )
             }
         }
     }
