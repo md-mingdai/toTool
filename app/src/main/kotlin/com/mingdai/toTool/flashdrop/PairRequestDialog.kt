@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.PrimaryButton
 import com.mingdai.toTool.ui.components.SecondaryButton
-import com.mingdai.toTool.ui.components.WarnColor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,7 +41,6 @@ internal fun FlashDropPairRequestDialog(
     onFinished: () -> Unit = {},
 ) {
     var selected by remember(request?.id) { mutableStateOf<Int?>(null) }
-    var error by remember(request?.id) { mutableStateOf<String?>(null) }
 
     AppDialog(
         show = request != null,
@@ -103,7 +101,6 @@ internal fun FlashDropPairRequestDialog(
                                 .background(container)
                                 .clickable {
                                     selected = option
-                                    error = null
                                 }
                                 .padding(vertical = 14.dp),
                             contentAlignment = Alignment.Center,
@@ -118,27 +115,23 @@ internal fun FlashDropPairRequestDialog(
                         }
                     }
                 }
-                error?.let { message ->
-                    Text(
-                        message,
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = WarnColor,
-                    )
-                }
                 PrimaryButton(
                     onClick = {
                         val choice = selected
-                        if (choice != null && controller.approvePairRequest(info.id, choice)) {
+                        if (choice == null) return@PrimaryButton
+                        if (controller.approvePairRequest(info.id, choice)) {
                             onFinished()
-                        } else if (choice != null) {
-                            error = "数字与网页不一致，请重新选择"
+                        } else {
+                            // 选错直接取消这次配对，不再提示重试。
+                            controller.denyPairRequest(info.id)
+                            onFinished()
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = selected != null,
                 ) { Text("确认配对") }
                 Text(
-                    "确认前可以随时改选；选错不会结束请求。也可以直接拒绝或暂时拉黑。",
+                    "确认前可以随时改选；选错会直接取消本次配对请求。也可以直接拒绝或暂时拉黑。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
