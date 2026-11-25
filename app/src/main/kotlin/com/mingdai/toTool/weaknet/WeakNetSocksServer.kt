@@ -60,6 +60,9 @@ internal class WeakNetSocksServer(
     @Volatile
     private var running = false
 
+    @Volatile
+    private var paused = false
+
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val workers = Collections.synchronizedList(mutableListOf<Thread>())
@@ -122,6 +125,12 @@ internal class WeakNetSocksServer(
         applyRates()
     }
 
+    /** 暂停只关闭弱网参数，VPN/TUN 和当前连接保持不动。 */
+    fun setPaused(value: Boolean) {
+        paused = value
+        applyRates()
+    }
+
     fun stop() {
         running = false
         try {
@@ -149,8 +158,13 @@ internal class WeakNetSocksServer(
     )
 
     private fun applyRates() {
-        downloadLimiter.setRate(config.downloadKBps)
-        uploadLimiter.setRate(config.uploadKBps)
+        if (paused) {
+            downloadLimiter.setRate(0)
+            uploadLimiter.setRate(0)
+        } else {
+            downloadLimiter.setRate(config.downloadKBps)
+            uploadLimiter.setRate(config.uploadKBps)
+        }
     }
 
     private fun handle(client: Socket) {
@@ -205,7 +219,7 @@ internal class WeakNetSocksServer(
         try {
             val target = address.resolved ?: InetAddress.getByName(address.host)
             val throttle = matchesHost(address.host, config.hostFilter, target)
-            if (throttle) {
+            if (throttle && !paused) {
                 var connectDelay = jitterDelay(config.latencyMs, config.jitterMs)
                 if (rollLoss(config.lossPercent)) connectDelay += TCP_RETRANSMIT_DELAY_MS
                 if (connectDelay > 0) Thread.sleep(connectDelay.toLong())
@@ -339,8 +353,8 @@ internal class WeakNetSocksServer(
                         break
                     }
                     val now = System.nanoTime()
-                    var delayMs = jitterDelay(latencyMs, jitterMs)
-                    if (rollLossForBytes(lossPercent, chunk.length)) {
+                    var delayMs = if (paused) 0 else jitterDelay(latencyMs, jitterMs)
+                    if (!paused && rollLossForBytes(lossPercent, chunk.length)) {
                         delayMs += TCP_RETRANSMIT_DELAY_MS
                         // 丢包会让 TCP 头部阻塞，后续数据一起等一个 RTO，而不是只推迟这一块。
                         stalledUntilNanos = maxOf(
@@ -348,10 +362,14 @@ internal class WeakNetSocksServer(
                             now + TCP_RETRANSMIT_DELAY_MS * 1_000_000L,
                         )
                     }
-                    val wait = maxOf(
-                        chunk.atNanos + delayMs * 1_000_000L,
-                        stalledUntilNanos,
-                    ) - now
+                    val wait = if (paused) {
+                        0L
+                    } else {
+                        maxOf(
+                            chunk.atNanos + delayMs * 1_000_000L,
+                            stalledUntilNanos,
+                        ) - now
+                    }
                     if (wait > 0) LockSupport.parkNanos(wait)
                     if (Thread.interrupted() || !running || pipeClosed.get()) break
                     limiter?.acquire(chunk.length)
@@ -571,7 +589,7 @@ internal class WeakNetSocksServer(
         jitterMs: Int,
         lossPercent: Int,
     ) {
-        if (rollLoss(lossPercent)) return
+        if (!paused && rollLoss(lossPercent)) return
         val send = Runnable {
             if (!running || closed.get()) return@Runnable
             limiter?.acquire(data.size)
@@ -581,7 +599,7 @@ internal class WeakNetSocksServer(
             }.isSuccess
             if (success) counter.addAndGet(data.size.toLong())
         }
-        if (limiter != null) {
+        if (limiter != null && !paused) {
             val delay = jitterDelay(latencyMs, jitterMs)
             runCatching {
                 scheduler.schedule(send, delay.toLong(), TimeUnit.MILLISECONDS)

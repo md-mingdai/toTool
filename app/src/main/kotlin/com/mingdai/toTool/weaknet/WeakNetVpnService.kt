@@ -143,11 +143,14 @@ class WeakNetVpnService : VpnService() {
                 return START_STICKY
             }
             ACTION_PAUSE -> {
-                if (running || starting) pauseWeakNet()
+                if (running) pauseWeakNet()
                 return START_STICKY
             }
             ACTION_RESUME -> {
-                if (!running && !starting) startWeakNet()
+                when {
+                    running -> resumeShaping()
+                    !starting -> startWeakNet()
+                }
                 return START_STICKY
             }
             ACTION_START -> if (!running) startWeakNet()
@@ -276,7 +279,7 @@ class WeakNetVpnService : VpnService() {
         if (overlay == null) {
             overlay = WeakNetOverlay(
                 this,
-                onTogglePause = { if (paused) startWeakNet() else pauseWeakNet() },
+                onTogglePause = { if (paused) resumeShaping() else pauseWeakNet() },
                 onStop = { stopEverything() },
             )
         }
@@ -289,42 +292,29 @@ class WeakNetVpnService : VpnService() {
         overlay = null
     }
 
-    /** 暂停限速：关闭 VPN / 代理资源，但保留前台服务与悬浮球，方便随时继续。 */
+    /** 暂停只停止弱网参数，VPN、TUN、SOCKS 转发和现有连接全部保持。 */
     private fun pauseWeakNet() {
-        var p: WeakNetSocksServer? = null
-        var t: ParcelFileDescriptor? = null
-        synchronized(stateLock) {
-            if (!running && !starting) {
-                paused = true
-                return
-            }
-            running = false
-            starting = false
-            paused = true
-            p = socks
-            t = tun
-            socks = null
-            tun = null
-        }
-        handler.removeCallbacks(statsTick)
-        WeakNetManager.update {
-            it.copy(
-                running = false,
-                paused = true,
-                port = null,
-                rxSpeed = 0,
-                txSpeed = 0,
-                connections = 0,
-            )
-        }
+        if (!running || paused) return
+        paused = true
+        socks?.setPaused(true)
+        WeakNetManager.update { it.copy(running = true, paused = true) }
         overlay?.refresh(WeakNetManager.state.value)
-        registerTask()
+        updateTaskDetail()
         updateNotification()
-        thread(name = "weaknet-pause", isDaemon = true) {
-            runCatching { WeakNetTunnel.stop() }
-            runCatching { p?.stop() }
-            runCatching { t?.close() }
+    }
+
+    /** 恢复弱网参数；VPN 一直没有断开，不需要重新建立 TUN。 */
+    private fun resumeShaping() {
+        if (!running) {
+            if (!starting) startWeakNet()
+            return
         }
+        paused = false
+        socks?.setPaused(false)
+        WeakNetManager.update { it.copy(running = true, paused = false) }
+        overlay?.refresh(WeakNetManager.state.value)
+        updateTaskDetail()
+        updateNotification()
     }
 
     private fun stopEverything() {
