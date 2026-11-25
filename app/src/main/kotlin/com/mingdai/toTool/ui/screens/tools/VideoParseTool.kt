@@ -484,7 +484,7 @@ private fun VideoWebPreview(
                             setBackgroundColor(android.graphics.Color.BLACK)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = false
-                            settings.mediaPlaybackRequiresUserGesture = true
+                            settings.mediaPlaybackRequiresUserGesture = false
                             settings.allowFileAccess = false
                             settings.allowContentAccess = false
                             media.headers["User-Agent"]
@@ -502,7 +502,7 @@ private fun VideoWebPreview(
 
                                     @android.webkit.JavascriptInterface
                                     fun onError() {
-                                        previewView.post { if (!ready) failed = true }
+                                        previewView.post { failed = true }
                                     }
                                 },
                                 "TtVideo",
@@ -577,16 +577,24 @@ private fun videoPreviewHtml(url: String): String {
           </style>
         </head>
         <body>
-          <video id="v" src="$escaped" controls playsinline preload="metadata"></video>
+          <video id="v" src="$escaped" controls playsinline autoplay preload="metadata"></video>
           <script>
             (function(){
               var v=document.getElementById('v');
               var done=false;
-              function ok(){if(done)return;done=true;try{TtVideo.onReady()}catch(e){}}
+              function start(){
+                var p=v.play();
+                if(p&&p.catch)p.catch(function(){
+                  v.muted=true;
+                  var q=v.play();
+                  if(q&&q.catch)q.catch(function(){});
+                });
+              }
+              function ok(){if(done)return;done=true;start();try{TtVideo.onReady()}catch(e){}}
               function bad(){if(done)return;done=true;try{TtVideo.onError()}catch(e){}}
               v.addEventListener('loadedmetadata',ok);
               v.addEventListener('canplay',ok);
-              v.addEventListener('error',bad);
+              v.addEventListener('error',function(){done=true;try{TtVideo.onError()}catch(e){}});
               setTimeout(function(){if(v.readyState===0)bad()},10000);
             })();
           </script>
