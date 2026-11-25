@@ -2,6 +2,7 @@ package com.mingdai.toTool.data
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
@@ -79,6 +80,7 @@ enum class ToolCategory(val title: String, val subtitle: String, val icon: Image
     DEVICE("设备工具", "System Tools", Icons.Filled.Devices),
     IMAGE("图片工具", "Image Tools", Icons.Filled.Photo),
     MEDIA("媒体工具", "Media Tools", Icons.Filled.VideoLibrary),
+    ADVANCED("高级功能", "Advanced Tools", Icons.Filled.AdminPanelSettings),
 }
 
 /** A single tool entry. */
@@ -123,23 +125,23 @@ object ToolRegistry {
         Tool("calc_equation", "方程求解", "输入含一个未知数的方程，数值扫描求实根", ToolCategory.CALC, Icons.Filled.Functions),
         Tool("calc_plot", "函数绘图", "多条曲线、缩放平移与点按取值", ToolCategory.CALC, Icons.Filled.ShowChart),
         // --- 设备工具 ---
-        Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.DEVICE, Icons.Filled.Devices),
-        Tool("dev_weaknet", "弱网助手", "用 TUN 转发限制应用的 TCP/UDP 带宽、延迟、抖动与丢包", ToolCategory.DEVICE, Icons.Filled.Speed),
-        Tool("dev_notif_hide", "通知管理", "查看、隐藏和导出系统通知", ToolCategory.DEVICE, Icons.Filled.NotificationsOff),
-        Tool("dev_gacha", "米游记录获取", "通过 Shizuku 从系统日志提取米游抽卡记录链接", ToolCategory.DEVICE, Icons.Filled.SportsEsports),
+        Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.ADVANCED, Icons.Filled.Devices),
+        Tool("dev_weaknet", "弱网助手", "用 TUN 转发限制应用的 TCP/UDP 带宽、延迟、抖动与丢包", ToolCategory.ADVANCED, Icons.Filled.Speed),
+        Tool("dev_notif_hide", "通知管理", "查看、隐藏和导出系统通知", ToolCategory.ADVANCED, Icons.Filled.NotificationsOff),
+        Tool("dev_gacha", "米游记录获取", "通过 Shizuku 从系统日志提取米游抽卡记录链接", ToolCategory.ADVANCED, Icons.Filled.SportsEsports),
         Tool("dev_device", "设备信息", "机型、系统与硬件信息", ToolCategory.DEVICE, Icons.Filled.PhoneAndroid),
         Tool("dev_battery", "电池信息", "电量、状态与温度", ToolCategory.DEVICE, Icons.Filled.BatteryFull),
         Tool("dev_network", "网络信息", "连接类型与本地 IP", ToolCategory.DEVICE, Icons.Filled.Wifi),
         Tool("dev_sensor", "传感器列表", "列出设备可用传感器", ToolCategory.DEVICE, Icons.Filled.Sensors),
         Tool("dev_level", "水平仪", "气泡水平仪与倾角", ToolCategory.DEVICE, Icons.Filled.LinearScale),
         Tool("dev_metal", "金属探测器", "用磁力计检测附近金属与磁场变化", ToolCategory.DEVICE, Icons.Filled.TrackChanges),
-        Tool("dev_apk", "提取 APK", "导出已安装应用安装包，AAB 应用导出为 APKS", ToolCategory.DEVICE, Icons.Filled.Android),
+        Tool("dev_apk", "提取 APK", "导出已安装应用安装包，AAB 应用导出为 APKS", ToolCategory.ADVANCED, Icons.Filled.Android),
         Tool("dev_vibrate", "振动器", "预设模式循环振动，可调强度，手动停止", ToolCategory.DEVICE, Icons.Filled.Vibration),
-        Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.DEVICE, Icons.Filled.Apps),
-        Tool("dev_fake_call", "模拟来电", "用系统电话界面模拟来电，支持定时、隐藏号码与接听语音", ToolCategory.DEVICE, Icons.Filled.PhoneInTalk),
+        Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.ADVANCED, Icons.Filled.Apps),
+        Tool("dev_fake_call", "模拟来电", "用系统电话界面模拟来电，支持定时、隐藏号码与接听语音", ToolCategory.ADVANCED, Icons.Filled.PhoneInTalk),
         Tool("dev_shortcut", "自定义快捷方式", "选择目标 Activity 与图标，创建桌面快捷方式", ToolCategory.DEVICE, Icons.Filled.AddToHomeScreen),
         Tool("dev_shell", "执行 Shell 指令", "通过 Shizuku 执行命令或 .sh 脚本，查看日志", ToolCategory.DEVICE, Icons.Filled.Terminal),
-        Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.DEVICE, Icons.Filled.Wallpaper),
+        Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.ADVANCED, Icons.Filled.Wallpaper),
         Tool("dev_wallpaper_video", "桌面视频壁纸", "将视频设为桌面动态壁纸", ToolCategory.DEVICE, Icons.Filled.VideoLibrary),
         Tool("dev_pixelcheck", "屏幕坏点检测", "纯色与点阵逐格排查", ToolCategory.DEVICE, Icons.Filled.GridView),
         Tool("dev_battery_spoof", "电量伪装", "通过 Shizuku / Root 修改系统上报的电量与充电状态", ToolCategory.DEVICE, Icons.Filled.BatteryChargingFull),
