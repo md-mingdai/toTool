@@ -675,6 +675,10 @@ private fun renderAsciiArt(
     }
     val metrics = paint.fontMetrics
     val baselineOffset = -(metrics.ascent + metrics.descent) / 2f
+    val backgroundLuminance = 0.299f * ((background shr 16) and 0xFF) +
+        0.587f * ((background shr 8) and 0xFF) +
+        0.114f * (background and 0xFF)
+    val lightBackground = backgroundLuminance >= 140f
     val glyphList = glyphs.ifBlank { DEFAULT_ASCII_GLYPHS }
     for (row in 0 until rows) {
         val y = ((row + 0.5f) * source.height / rows).toInt().coerceIn(0, source.height - 1)
@@ -689,10 +693,17 @@ private fun renderAsciiArt(
             val luminance = (0.299f * red + 0.587f * green + 0.114f * blue).toInt().coerceIn(0, 255)
             val glyph = glyphList[luminance * (glyphList.length - 1) / 255]
             if (glyph == ' ') continue
-            paint.color = (0xFF shl 24) or
-                (max(red, 56) shl 16) or
-                (max(green, 56) shl 8) or
-                max(blue, 56)
+            paint.color = if (lightBackground) {
+                (0xFF shl 24) or
+                    ((red * 0.45f).roundToInt().coerceIn(0, 200) shl 16) or
+                    ((green * 0.45f).roundToInt().coerceIn(0, 200) shl 8) or
+                    (blue * 0.45f).roundToInt().coerceIn(0, 200)
+            } else {
+                (0xFF shl 24) or
+                    (max(red, 56) shl 16) or
+                    (max(green, 56) shl 8) or
+                    max(blue, 56)
+            }
             canvas.drawText(
                 glyph.toString(),
                 (column + 0.5f) * cell,
