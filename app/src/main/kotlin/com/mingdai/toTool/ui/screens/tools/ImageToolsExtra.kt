@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +94,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -339,6 +341,7 @@ fun ImageGrid9Tool(padding: PaddingValues) {
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var cropSquare by rememberSaveable { mutableStateOf(false) }
     val pick = rememberBitmapPicker(2400) { bitmap = it; notice = null; error = null }
 
     if (bitmap == null) {
@@ -346,13 +349,50 @@ fun ImageGrid9Tool(padding: PaddingValues) {
         return
     }
     val source = bitmap!!
+    val cropped = remember(source, cropSquare) {
+        if (cropSquare) {
+            val side = min(source.width, source.height)
+            Bitmap.createBitmap(
+                source,
+                (source.width - side) / 2,
+                (source.height - side) / 2,
+                side,
+                side,
+            )
+        } else {
+            source
+        }
+    }
+    DisposableEffect(cropped) {
+        onDispose {
+            if (cropped !== source) cropped.recycle()
+        }
+    }
     ToolBody(padding) {
         PickImageButton(pick)
-        val gridImage = remember(source) { source.asImageBitmap() }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("先裁切为 1:1", style = MiuixTheme.textStyles.body1)
+                Text(
+                    "居中取最大正方形后再按 3×3 等分",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Switch(
+                checked = cropSquare,
+                onCheckedChange = { cropSquare = it },
+                enabled = !busy,
+            )
+        }
+        val gridImage = remember(cropped) { cropped.asImageBitmap() }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(source.width.toFloat() / source.height.coerceAtLeast(1))
+                .aspectRatio(cropped.width.toFloat() / cropped.height.coerceAtLeast(1))
                 .clip(RoundedCornerShape(12.dp))
                 .background(MiuixTheme.colorScheme.surfaceContainer),
         ) {
@@ -375,7 +415,7 @@ fun ImageGrid9Tool(padding: PaddingValues) {
                 }
             }
         }
-        HintText("按 3×3 等分；无法整除的像素会并入最后一格。输出保存到「相册/toTool」。")
+        HintText("按 3×3 等分；开启 1:1 会先居中裁切为正方形。无法整除的像素会并入最后一格，输出保存到「相册/toTool」。")
         PrimaryButton(
             onClick = {
                 if (busy) return@PrimaryButton
@@ -389,17 +429,17 @@ fun ImageGrid9Tool(padding: PaddingValues) {
                             var count = 0
                             for (row in 0 until 3) {
                                 for (column in 0 until 3) {
-                                    val left = column * source.width / 3
-                                    val right = (column + 1) * source.width / 3
-                                    val top = row * source.height / 3
-                                    val bottom = (row + 1) * source.height / 3
+                                    val left = column * cropped.width / 3
+                                    val right = (column + 1) * cropped.width / 3
+                                    val top = row * cropped.height / 3
+                                    val bottom = (row + 1) * cropped.height / 3
                                     if (right <= left || bottom <= top) continue
-                                    val cell = Bitmap.createBitmap(source, left, top, right - left, bottom - top)
+                                    val cell = Bitmap.createBitmap(cropped, left, top, right - left, bottom - top)
                                     try {
                                         val name = "toTool_grid_${stamp}_${row * 3 + column + 1}.png"
                                         if (ImageOps.savePngToGallery(context, cell, name) != null) count++
                                     } finally {
-                                        if (cell !== source) cell.recycle()
+                                        if (cell !== cropped) cell.recycle()
                                     }
                                 }
                             }
@@ -431,30 +471,44 @@ fun ImageGrid9Tool(padding: PaddingValues) {
 /* ─────────────────────────── 图片文字化 ─────────────────────────── */
 
 private const val DEFAULT_ASCII_GLYPHS = " .:-=+*#%@"
+private const val ASCII_GLYPH_PX = 12
+private const val ASCII_MAX_SIDE = 4096
 
 @Composable
 fun ImageAsciiTool(padding: PaddingValues) {
     var source by remember { mutableStateOf<Bitmap?>(null) }
-    var cellSize by rememberSaveable { mutableStateOf(10f) }
+    var density by rememberSaveable { mutableStateOf(80f) }
     var glyphText by rememberSaveable { mutableStateOf(DEFAULT_ASCII_GLYPHS) }
     var backgroundArgb by rememberSaveable { mutableStateOf(AndroidColor.BLACK) }
+    var backgroundFromImage by rememberSaveable { mutableStateOf(false) }
+    var imageColor by remember { mutableStateOf(AndroidColor.BLACK) }
     var showColorDialog by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberBitmapPicker(1600) { source = it; error = null }
 
+    val effectiveBackground = if (backgroundFromImage) imageColor else backgroundArgb
     val glyphs = remember(glyphText) { asciiGlyphs(glyphText) }
-    val background = remember(backgroundArgb) { Color(backgroundArgb) }
+    val background = remember(effectiveBackground) { Color(effectiveBackground) }
 
-    LaunchedEffect(source, cellSize, glyphs, backgroundArgb) {
+    LaunchedEffect(source) {
+        val input = source ?: return@LaunchedEffect
+        imageColor = withContext(Dispatchers.Default) {
+            runCatching { extractPalette(input, 1).firstOrNull() }
+                .getOrNull()
+                ?: AndroidColor.BLACK
+        }
+    }
+
+    LaunchedEffect(source, density, glyphs, effectiveBackground) {
         val input = source ?: return@LaunchedEffect
         busy = true
         error = null
         delay(100)
         result = withContext(Dispatchers.Default) {
             runCatching {
-                renderAsciiArt(input, cellSize.roundToInt(), glyphs, backgroundArgb)
+                renderAsciiArt(input, density.roundToInt(), glyphs, effectiveBackground)
             }.getOrNull()
         }
         busy = false
@@ -464,6 +518,9 @@ fun ImageAsciiTool(padding: PaddingValues) {
     if (source == null) {
         EmptyImageState(padding, "用不同密度和颜色的 ASCII 字符重新组成图片", pick)
         return
+    }
+    val layout = remember(source, density) {
+        asciiLayout(source.width, source.height, density.roundToInt())
     }
     ToolBody(padding) {
         PickImageButton(pick)
@@ -479,11 +536,17 @@ fun ImageAsciiTool(padding: PaddingValues) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     "背景颜色",
                     style = MiuixTheme.textStyles.body1,
                     modifier = Modifier.weight(1f),
+                )
+                SelectChip(
+                    selected = backgroundFromImage,
+                    onClick = { backgroundFromImage = !backgroundFromImage },
+                    label = "图片主色",
                 )
                 Box(
                     modifier = Modifier
@@ -495,11 +558,16 @@ fun ImageAsciiTool(padding: PaddingValues) {
                 )
             }
         }
-        Text("字符大小：${cellSize.roundToInt()} px", style = MiuixTheme.textStyles.body2)
+        HintText("「图片主色」取原图中出现频率最高的颜色；点右侧色块可自定义背景。")
+        Text(
+            "目标 ${density.roundToInt()} 列 · 实际 ${layout.first} 列 · 输出 " +
+                "${layout.first * ASCII_GLYPH_PX}×${layout.second * ASCII_GLYPH_PX}",
+            style = MiuixTheme.textStyles.body2,
+        )
         Slider(
-            value = cellSize,
-            onValueChange = { cellSize = it },
-            valueRange = 4f..24f,
+            value = density,
+            onValueChange = { density = it },
+            valueRange = 16f..240f,
         )
         BitmapPreviewCard(
             bitmap = result ?: source,
@@ -507,7 +575,7 @@ fun ImageAsciiTool(padding: PaddingValues) {
             placeholder = "正在生成…",
             busy = busy,
         )
-        HintText("每个字符格取原图中心像素的颜色与亮度；字符越密表示原图越亮。")
+        HintText("每个字符固定 12px；密度越高，字符越多，生成图片的分辨率也越大。")
         SavePngButton(result, busy, "ascii")
         error?.let {
             MessageCard("生成失败", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
@@ -520,6 +588,7 @@ fun ImageAsciiTool(padding: PaddingValues) {
             onDismiss = { showColorDialog = false },
             onConfirm = {
                 backgroundArgb = it.toArgb()
+                backgroundFromImage = false
                 showColorDialog = false
             },
         )
@@ -564,15 +633,30 @@ private fun asciiGlyphs(text: String): String {
     return if (filtered.any { it != ' ' }) filtered else DEFAULT_ASCII_GLYPHS
 }
 
+private fun asciiLayout(sourceWidth: Int, sourceHeight: Int, requestedColumns: Int): Pair<Int, Int> {
+    val aspect = sourceHeight.toFloat() / sourceWidth.coerceAtLeast(1)
+    val maxColumnsBySide = (ASCII_MAX_SIDE.toFloat() / ASCII_GLYPH_PX / aspect.coerceAtLeast(0.01f))
+        .toInt()
+        .coerceAtLeast(8)
+    val columns = minOf(
+        requestedColumns.coerceIn(8, 400),
+        minOf(maxColumnsBySide, ASCII_MAX_SIDE / ASCII_GLYPH_PX),
+    )
+    val rows = minOf(
+        (aspect * columns).roundToInt().coerceAtLeast(1),
+        ASCII_MAX_SIDE / ASCII_GLYPH_PX,
+    )
+    return columns to rows
+}
+
 private fun renderAsciiArt(
     source: Bitmap,
-    requestedCell: Int,
+    requestedColumns: Int,
     glyphs: String,
     background: Int,
 ): Bitmap {
-    val cell = requestedCell.coerceIn(4, 32)
-    val columns = (source.width / cell).coerceAtLeast(1)
-    val rows = (source.height / cell).coerceAtLeast(1)
+    val (columns, rows) = asciiLayout(source.width, source.height, requestedColumns)
+    val cell = ASCII_GLYPH_PX
     val out = Bitmap.createBitmap(columns * cell, rows * cell, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(out)
     canvas.drawColor(background)
@@ -585,9 +669,9 @@ private fun renderAsciiArt(
     val baselineOffset = -(metrics.ascent + metrics.descent) / 2f
     val glyphList = glyphs.ifBlank { DEFAULT_ASCII_GLYPHS }
     for (row in 0 until rows) {
+        val y = ((row + 0.5f) * source.height / rows).toInt().coerceIn(0, source.height - 1)
         for (column in 0 until columns) {
-            val x = (column * cell + cell / 2).coerceIn(0, source.width - 1)
-            val y = (row * cell + cell / 2).coerceIn(0, source.height - 1)
+            val x = ((column + 0.5f) * source.width / columns).toInt().coerceIn(0, source.width - 1)
             val pixel = source.getPixel(x, y)
             val alpha = (pixel ushr 24) and 0xFF
             if (alpha < 24) continue
@@ -603,8 +687,8 @@ private fun renderAsciiArt(
                 max(blue, 56)
             canvas.drawText(
                 glyph.toString(),
-                column * cell + cell / 2f,
-                row * cell + cell / 2f + baselineOffset,
+                (column + 0.5f) * cell,
+                (row + 0.5f) * cell + baselineOffset,
                 paint,
             )
         }
