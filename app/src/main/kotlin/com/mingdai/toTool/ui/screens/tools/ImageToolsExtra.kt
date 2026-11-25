@@ -86,6 +86,7 @@ import java.io.IOException
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -491,8 +492,16 @@ fun ImageAsciiTool(padding: PaddingValues) {
     val pick = rememberBitmapPicker(1600) { source = it; error = null }
     val context = LocalContext.current
     val asciiTypeface = remember(context) {
-        ResourcesCompat.getFont(context, R.font.onest_regular) ?: Typeface.MONOSPACE
+        listOf(
+            R.font.onest_regular,
+            R.font.onest_medium,
+            R.font.onest_semibold,
+            R.font.onest_bold,
+        ).firstNotNullOfOrNull { id ->
+            runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
+        } ?: Typeface.DEFAULT
     }
+    val asciiMaxPixels = remember(context) { MemoryBudget.maxPixels(context, 4.0) }
 
     val effectiveBackground = if (backgroundFromImage) imageColor else backgroundArgb
     val glyphs = remember(glyphText) { asciiGlyphs(glyphText) }
@@ -507,14 +516,22 @@ fun ImageAsciiTool(padding: PaddingValues) {
         }
     }
 
-    LaunchedEffect(source, density, glyphs, effectiveBackground, asciiTypeface) {
+    LaunchedEffect(source, density, glyphs, effectiveBackground, asciiTypeface, asciiMaxPixels) {
         val input = source ?: return@LaunchedEffect
+        val typeface = asciiTypeface
         busy = true
         error = null
         delay(100)
         result = withContext(Dispatchers.Default) {
             runCatching {
-                renderAsciiArt(input, density.roundToInt(), glyphs, effectiveBackground, asciiTypeface)
+                renderAsciiArt(
+                    input,
+                    density.roundToInt(),
+                    glyphs,
+                    effectiveBackground,
+                    typeface,
+                    asciiMaxPixels,
+                )
             }.getOrNull()
         }
         busy = false
@@ -526,8 +543,8 @@ fun ImageAsciiTool(padding: PaddingValues) {
         return
     }
     val readySource = source!!
-    val layout = remember(readySource, density) {
-        asciiLayout(readySource.width, readySource.height, density.roundToInt())
+    val layout = remember(readySource, density, asciiMaxPixels) {
+        asciiLayout(readySource.width, readySource.height, density.roundToInt(), asciiMaxPixels)
     }
     ToolBody(padding) {
         PickImageButton(pick)
@@ -640,7 +657,12 @@ private fun asciiGlyphs(text: String): String {
     return if (filtered.any { it != ' ' }) filtered else DEFAULT_ASCII_GLYPHS
 }
 
-private fun asciiLayout(sourceWidth: Int, sourceHeight: Int, requestedColumns: Int): Pair<Int, Int> {
+private fun asciiLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    requestedColumns: Int,
+    maxPixels: Long,
+): Pair<Int, Int> {
     val aspect = sourceHeight.toFloat() / sourceWidth.coerceAtLeast(1)
     val maxColumnsBySide = (ASCII_MAX_SIDE.toFloat() / ASCII_GLYPH_PX / aspect.coerceAtLeast(0.01f))
         .toInt()
@@ -653,6 +675,12 @@ private fun asciiLayout(sourceWidth: Int, sourceHeight: Int, requestedColumns: I
         (aspect * columns).roundToInt().coerceAtLeast(1),
         ASCII_MAX_SIDE / ASCII_GLYPH_PX,
     )
+    val totalPixels = columns.toLong() * rows
+    if (maxPixels > 0 && totalPixels > maxPixels) {
+        val scale = sqrt(maxPixels.toDouble() / totalPixels.toDouble())
+        return (columns * scale).toInt().coerceAtLeast(8) to
+            (rows * scale).toInt().coerceAtLeast(1)
+    }
     return columns to rows
 }
 
@@ -662,8 +690,9 @@ private fun renderAsciiArt(
     glyphs: String,
     background: Int,
     typeface: Typeface,
+    maxPixels: Long,
 ): Bitmap {
-    val (columns, rows) = asciiLayout(source.width, source.height, requestedColumns)
+    val (columns, rows) = asciiLayout(source.width, source.height, requestedColumns, maxPixels)
     val cell = ASCII_GLYPH_PX
     val out = Bitmap.createBitmap(columns * cell, rows * cell, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(out)
