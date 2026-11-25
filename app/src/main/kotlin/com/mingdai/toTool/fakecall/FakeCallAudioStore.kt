@@ -32,9 +32,19 @@ internal object FakeCallAudioStore {
             .ifBlank { "audio" }
         val directory = File(context.filesDir, DIR).apply { mkdirs() }
         val target = File(directory, "voice.$extension")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
-        } ?: throw IOException("无法读取所选音频")
+        val temp = File(directory, "voice.tmp")
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                temp.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
+            } ?: throw IOException("无法读取所选音频")
+            if (!temp.renameTo(target)) {
+                temp.copyTo(target, overwrite = true)
+                temp.delete()
+            }
+        } catch (e: Exception) {
+            temp.delete()
+            throw e
+        }
         directory.listFiles()?.filter { it != target }?.forEach { it.delete() }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_PATH, target.absolutePath)

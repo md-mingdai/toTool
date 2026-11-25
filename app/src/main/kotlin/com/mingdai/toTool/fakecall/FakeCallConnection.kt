@@ -104,7 +104,7 @@ class FakeCallConnection(
             val file = File(audioPath)
             if (file.isFile && playFile(file)) return
         }
-        speakDefault()
+        runCatching { speakDefault() }
     }
 
     private fun playFile(file: File): Boolean = runCatching {
