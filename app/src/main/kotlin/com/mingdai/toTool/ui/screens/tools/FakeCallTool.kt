@@ -133,6 +133,7 @@ fun FakeCallTool(padding: PaddingValues) {
             result[Manifest.permission.READ_PHONE_NUMBERS] == true
         phonePermission = granted
         if (granted) {
+            resumeTick++
             pendingAction?.invoke()
         } else {
             error = "需要电话状态和号码权限才能模拟来电；如果系统不再弹出授权框，请到系统权限设置中手动开启"
