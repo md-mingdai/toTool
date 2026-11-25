@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
+import android.view.View
 import android.text.TextUtils
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
@@ -47,13 +48,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import com.mingdai.toTool.ui.components.BitmapPreviewCard
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.MessageCard
@@ -445,6 +449,13 @@ private fun VideoWebPreview(
     var ready by remember(media.url) { mutableStateOf(false) }
     var failed by remember(media.url) { mutableStateOf(false) }
 
+    LaunchedEffect(media.url, ready, failed) {
+        if (!ready && !failed) {
+            delay(10_000)
+            if (!ready) failed = true
+        }
+    }
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -463,6 +474,29 @@ private fun VideoWebPreview(
         if (!failed) {
             key(media.url) {
                 var webView by remember { mutableStateOf<WebView?>(null) }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner, webView) {
+                    val view = webView
+                    if (view == null) {
+                        onDispose { }
+                    } else {
+                        val observer = LifecycleEventObserver { _, event ->
+                            when (event) {
+                                Lifecycle.Event.ON_STOP -> {
+                                    view.evaluateJavascript(
+                                        "(function(){var v=document.getElementById('v');if(v)v.pause();})();",
+                                        null,
+                                    )
+                                    view.onPause()
+                                }
+                                Lifecycle.Event.ON_START -> view.onResume()
+                                else -> Unit
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
+                }
                 DisposableEffect(media.url) {
                     onDispose {
                         webView?.let { view ->
@@ -474,9 +508,13 @@ private fun VideoWebPreview(
                     }
                 }
                 AndroidView(
-                    modifier = Modifier.fillMaxSize().alpha(if (ready) 1f else 0f),
+                    modifier = Modifier.fillMaxSize(),
+                    update = { view ->
+                        view.visibility = if (ready) View.VISIBLE else View.INVISIBLE
+                    },
                     factory = { context ->
                         WebView(context).apply {
+                            visibility = View.INVISIBLE
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -491,6 +529,7 @@ private fun VideoWebPreview(
                                 ?.takeIf { it.isNotBlank() }
                                 ?.let { settings.userAgentString = it }
                             CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             applyPreviewCookies(media)
                             val previewView = this
                             addJavascriptInterface(
@@ -513,7 +552,7 @@ private fun VideoWebPreview(
                                     request: WebResourceRequest,
                                     error: WebResourceError,
                                 ) {
-                                    if (!request.isForMainFrame && !ready) {
+                                    if (!ready) {
                                         view.post { failed = true }
                                     }
                                 }
@@ -523,7 +562,7 @@ private fun VideoWebPreview(
                                     request: WebResourceRequest,
                                     errorResponse: WebResourceResponse,
                                 ) {
-                                    if (!request.isForMainFrame && !ready) {
+                                    if (!ready) {
                                         view.post { failed = true }
                                     }
                                 }
