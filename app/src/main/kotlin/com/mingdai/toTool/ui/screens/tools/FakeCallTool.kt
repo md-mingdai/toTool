@@ -75,7 +75,7 @@ fun FakeCallTool(padding: PaddingValues) {
     var audioName by remember { mutableStateOf(FakeCallAudioStore.audioName(context)) }
     var audioPath by remember { mutableStateOf(FakeCallAudioStore.audioPath(context)) }
     var phonePermission by remember { mutableStateOf(hasPhonePermission(context)) }
-    var accountRegistered by remember { mutableStateOf(false) }
+    var accountRegistered by remember { mutableStateOf(true) }
     var accountEnabled by remember { mutableStateOf(false) }
     var exactAlarm by remember { mutableStateOf(FakeCallScheduler.canScheduleExact(context)) }
     var scheduledAt by remember { mutableStateOf(FakeCallScheduler.scheduledAt(context)) }
@@ -100,7 +100,14 @@ fun FakeCallTool(padding: PaddingValues) {
         exactAlarm = FakeCallScheduler.canScheduleExact(context)
         accountRegistered = FakeCallTelecom.register(context)
         accountEnabled = accountRegistered && FakeCallTelecom.isEnabled(context)
-        scheduledAt = FakeCallScheduler.scheduledAt(context)
+        val storedSchedule = FakeCallScheduler.scheduledAt(context)
+        if (storedSchedule > 0L && storedSchedule < System.currentTimeMillis() - 60_000L) {
+            // 设备重启或闹钟被系统清理后，避免界面一直显示一个已经过期的定时来电。
+            FakeCallScheduler.clearState(context)
+            scheduledAt = 0L
+        } else {
+            scheduledAt = storedSchedule
+        }
         audioName = FakeCallAudioStore.audioName(context)
         audioPath = FakeCallAudioStore.audioPath(context)
     }
