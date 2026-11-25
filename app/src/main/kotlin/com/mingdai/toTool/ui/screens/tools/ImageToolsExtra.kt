@@ -519,8 +519,9 @@ fun ImageAsciiTool(padding: PaddingValues) {
         EmptyImageState(padding, "用不同密度和颜色的 ASCII 字符重新组成图片", pick)
         return
     }
-    val layout = remember(source, density) {
-        asciiLayout(source.width, source.height, density.roundToInt())
+    val readySource = source!!
+    val layout = remember(readySource, density) {
+        asciiLayout(readySource.width, readySource.height, density.roundToInt())
     }
     ToolBody(padding) {
         PickImageButton(pick)
