@@ -68,7 +68,7 @@ fun FakeCallTool(padding: PaddingValues) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var callerName by rememberSaveable { mutableStateOf("来电测试") }
-    var callerNumber by rememberSaveable { mutableStateOf("13800138000") }
+    var callerNumber by rememberSaveable { mutableStateOf("18888888888") }
     var hideNumber by rememberSaveable { mutableStateOf(false) }
     var delayText by rememberSaveable { mutableStateOf("10") }
     var timeoutText by rememberSaveable { mutableStateOf("45") }
@@ -308,6 +308,39 @@ fun FakeCallTool(padding: PaddingValues) {
     }
 
     ToolBody(padding) {
+        SectionLabel("通话账户")
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    when {
+                        !accountRegistered -> "通话账户注册失败"
+                        accountEnabled -> "系统通话账户「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」已启用"
+                        else -> "系统通话账户「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」未启用"
+                    },
+                    style = MiuixTheme.textStyles.body2,
+                    color = if (accountEnabled) MiuixTheme.colorScheme.onSurface else WarnColor,
+                )
+                Text(
+                    if (accountEnabled) {
+                        "来电会出现在系统电话/拨号界面。"
+                    } else {
+                        "需要在系统通话账户设置中启用「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」，否则系统不会显示来电。"
+                    },
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                if (!accountEnabled) {
+                    SecondaryButton(
+                        onClick = ::openAccountSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("打开通话账户设置") }
+                }
+            }
+        }
+
         if (!phonePermission) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
@@ -498,39 +531,6 @@ fun FakeCallTool(padding: PaddingValues) {
                             modifier = Modifier.weight(1f),
                         ) { Text("默认语音", maxLines = 1) }
                     }
-                }
-            }
-        }
-
-        SectionLabel("通话账户")
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    when {
-                        !accountRegistered -> "通话账户注册失败"
-                        accountEnabled -> "系统通话账户「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」已启用"
-                        else -> "系统通话账户「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」未启用"
-                    },
-                    style = MiuixTheme.textStyles.body2,
-                    color = if (accountEnabled) MiuixTheme.colorScheme.onSurface else WarnColor,
-                )
-                Text(
-                    if (accountEnabled) {
-                        "来电会出现在系统电话/拨号界面。"
-                    } else {
-                        "需要在系统通话账户设置中启用「${FakeCallTelecom.DEFAULT_ACCOUNT_LABEL}」，否则系统不会显示来电。"
-                    },
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                if (!accountEnabled) {
-                    SecondaryButton(
-                        onClick = ::openAccountSettings,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("打开通话账户设置") }
                 }
             }
         }
