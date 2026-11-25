@@ -232,10 +232,11 @@ internal object PasswordEntropy {
         lifecycleOwner: LifecycleOwner,
     ): ByteArray? {
         if (!hasPermission(context, Manifest.permission.CAMERA)) return null
+        val future = withContext(Dispatchers.Main.immediate) {
+            runCatching { ProcessCameraProvider.getInstance(context) }.getOrNull()
+        } ?: return null
         val provider = withContext(Dispatchers.IO) {
-            runCatching {
-                ProcessCameraProvider.getInstance(context).get(6, TimeUnit.SECONDS)
-            }.getOrNull()
+            runCatching { future.get(6, TimeUnit.SECONDS) }.getOrNull()
         } ?: return null
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)

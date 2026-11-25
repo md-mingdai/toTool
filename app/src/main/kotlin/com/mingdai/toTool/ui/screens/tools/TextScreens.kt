@@ -451,8 +451,8 @@ fun PasswordTool(padding: PaddingValues) {
             entropyNote = "未选择传感器，使用系统安全随机数。"
             return
         }
+        collecting = true
         scope.launch {
-            collecting = true
             entropyError = null
             entropyNote = null
             try {
@@ -473,6 +473,8 @@ fun PasswordTool(padding: PaddingValues) {
                         append(collection.notes.joinToString("；"))
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 entropyError = "采集熵源失败：${e.message ?: "未知错误"}"
             } finally {
@@ -499,7 +501,7 @@ fun PasswordTool(padding: PaddingValues) {
     }
 
     fun generateWithEntropy() {
-        if (collecting) return
+        if (collecting || pendingEntropyGenerate != null) return
         if (entropyTab == PasswordEntropyTab.DRAW) {
             startEntropyGeneration(emptyList())
             return
