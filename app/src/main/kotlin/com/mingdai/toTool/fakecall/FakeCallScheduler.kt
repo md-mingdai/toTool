@@ -11,6 +11,11 @@ internal object FakeCallScheduler {
     private const val REQUEST_CODE = 7321
     private const val PREFS = "fake_call_schedule"
     private const val KEY_AT = "scheduled_at"
+    private const val KEY_NAME = "caller_name"
+    private const val KEY_NUMBER = "caller_number"
+    private const val KEY_HIDE = "hide_number"
+    private const val KEY_AUDIO = "audio_path"
+    private const val KEY_TIMEOUT = "ring_timeout"
 
     fun canScheduleExact(context: Context): Boolean {
         val manager = context.getSystemService(AlarmManager::class.java) ?: return false
@@ -52,6 +57,11 @@ internal object FakeCallScheduler {
             )
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putLong(KEY_AT, triggerAtMillis)
+                .putString(KEY_NAME, callerName)
+                .putString(KEY_NUMBER, callerNumber)
+                .putBoolean(KEY_HIDE, hideNumber)
+                .putString(KEY_AUDIO, audioPath.orEmpty())
+                .putInt(KEY_TIMEOUT, ringTimeoutSeconds)
                 .apply()
             true
         }.getOrDefault(false)
@@ -70,9 +80,29 @@ internal object FakeCallScheduler {
         clearState(context)
     }
 
+    /** 重启、更新或应用被强制停止后，按保存的参数重新挂上尚未触发的闹钟。 */
+    fun rescheduleSaved(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val at = prefs.getLong(KEY_AT, 0L)
+        if (at <= 0L) return false
+        if (at <= System.currentTimeMillis()) {
+            cancel(context)
+            return false
+        }
+        return schedule(
+            context = context,
+            triggerAtMillis = at,
+            callerName = prefs.getString(KEY_NAME, "").orEmpty(),
+            callerNumber = prefs.getString(KEY_NUMBER, "").orEmpty(),
+            hideNumber = prefs.getBoolean(KEY_HIDE, false),
+            audioPath = prefs.getString(KEY_AUDIO, "").orEmpty(),
+            ringTimeoutSeconds = prefs.getInt(KEY_TIMEOUT, 45),
+        )
+    }
+
     fun clearState(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .remove(KEY_AT)
+            .clear()
             .apply()
     }
 }

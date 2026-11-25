@@ -100,10 +100,12 @@ fun FakeCallTool(padding: PaddingValues) {
         exactAlarm = FakeCallScheduler.canScheduleExact(context)
         accountRegistered = FakeCallTelecom.register(context)
         accountEnabled = accountRegistered && FakeCallTelecom.isEnabled(context)
+        // 重启、应用更新或强制停止后，按保存的参数重新挂上未触发的闹钟。
+        FakeCallScheduler.rescheduleSaved(context)
         val storedSchedule = FakeCallScheduler.scheduledAt(context)
         if (storedSchedule > 0L && storedSchedule < System.currentTimeMillis() - 60_000L) {
-            // 设备重启或闹钟被系统清理后，避免界面一直显示一个已经过期的定时来电。
-            FakeCallScheduler.clearState(context)
+            // 过期的定时：连 PendingIntent 一起取消，避免卡片消失后闹钟仍然触发。
+            FakeCallScheduler.cancel(context)
             scheduledAt = 0L
         } else {
             scheduledAt = storedSchedule
@@ -125,13 +127,15 @@ fun FakeCallTool(padding: PaddingValues) {
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val granted = result[Manifest.permission.READ_PHONE_STATE] == true &&
+            result[Manifest.permission.READ_PHONE_NUMBERS] == true
         phonePermission = granted
         if (granted) {
             pendingAction?.invoke()
         } else {
-            error = "需要电话状态权限才能模拟来电"
+            error = "需要电话状态和号码权限才能模拟来电；如果系统不再弹出授权框，请到系统权限设置中手动开启"
         }
         pendingAction = null
     }
@@ -161,7 +165,12 @@ fun FakeCallTool(padding: PaddingValues) {
             action()
         } else {
             pendingAction = action
-            permissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_PHONE_STATE,
+                    Manifest.permission.READ_PHONE_NUMBERS,
+                ),
+            )
         }
     }
 
@@ -269,6 +278,19 @@ fun FakeCallTool(padding: PaddingValues) {
         }
     }
 
+    fun openAppSettings() {
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${context.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Exception) {
+            error = "无法打开系统权限设置"
+        }
+    }
+
     fun openExactAlarmSettings() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             try {
@@ -291,16 +313,32 @@ fun FakeCallTool(padding: PaddingValues) {
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("需要电话状态权限", style = MiuixTheme.textStyles.body1)
+                    Text("需要电话权限", style = MiuixTheme.textStyles.body1)
                     Text(
-                        "系统要求读取电话状态后才能把模拟来电交给电话应用显示。",
+                        "系统要求电话状态与号码权限后才能把模拟来电交给电话应用显示。",
                         style = MiuixTheme.textStyles.footnote2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
-                    SecondaryButton(
-                        onClick = { permissionLauncher.launch(Manifest.permission.READ_PHONE_STATE) },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("授予权限") }
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SecondaryButton(
+                            onClick = {
+                                permissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.READ_PHONE_STATE,
+                                        Manifest.permission.READ_PHONE_NUMBERS,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("授予权限", maxLines = 1) }
+                        SecondaryButton(
+                            onClick = ::openAppSettings,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("系统权限设置", maxLines = 1) }
+                    }
                 }
             }
         }
@@ -513,7 +551,7 @@ fun FakeCallTool(padding: PaddingValues) {
             )
         }
 
-        HintText("使用前请确认已允许本应用「安装未知应用」之外的电话账户权限；模拟来电只在本机展示，不会拨出真实号码。")
+        HintText("使用前请确认已授予电话权限，并在系统通话账户设置中启用「模拟来电」；模拟来电只在本机展示，不会拨出真实号码。")
         HintText("仅用于个人设备上的测试、演示或脱身场景，请勿用于欺骗、骚扰或冒充他人。")
     }
 
@@ -543,6 +581,8 @@ fun FakeCallTool(padding: PaddingValues) {
 
 private fun hasPhonePermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) ==
+        PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_NUMBERS) ==
         PackageManager.PERMISSION_GRANTED
 
 private fun formatCallTime(millis: Long): String =

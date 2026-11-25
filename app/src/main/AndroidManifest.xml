@@ -45,7 +45,9 @@
     <!-- 模拟来电：系统通话账户、电话状态、定时闹钟与通话音频。 -->
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
@@ -296,6 +298,15 @@
         <receiver
             android:name=".fakecall.FakeCallAlarmReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".fakecall.FakeCallBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Shizuku：「执行 Shell 指令」工具靠它拿到 shell 权限。
              Shizuku 服务启动后会通过这个 Provider 把 Binder 送进本应用。 -->

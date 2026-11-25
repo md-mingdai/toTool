@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
-import android.telecom.CallAudioState
 import android.telecom.Connection
 import android.telecom.DisconnectCause
 import android.telecom.TelecomManager
@@ -68,30 +67,17 @@ class FakeCallConnection(
         answered = true
         handler.removeCallbacks(timeoutRunnable)
         setActive()
-        runCatching {
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager.isSpeakerphoneOn = false
-        }
-        runCatching { setAudioRoute(CallAudioState.ROUTE_EARPIECE) }
         requestAudioFocus()
         startAudio()
     }
 
     override fun onReject() = disconnect(DisconnectCause.REJECTED)
 
+    override fun onReject(rejectReason: Int) = disconnect(DisconnectCause.REJECTED)
+
     override fun onDisconnect() = disconnect(DisconnectCause.LOCAL)
 
     override fun onAbort() = disconnect(DisconnectCause.CANCELED)
-
-    override fun onCallAudioStateChanged(state: CallAudioState) {
-        super.onCallAudioStateChanged(state)
-        if (!answered) return
-        runCatching {
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager.isSpeakerphoneOn = state.route and CallAudioState.ROUTE_SPEAKER != 0
-            audioManager.isMicrophoneMute = state.isMuted
-        }
-    }
 
     private fun scheduleTimeout() {
         val seconds = ringTimeoutSeconds.coerceAtLeast(0)
@@ -100,29 +86,39 @@ class FakeCallConnection(
     }
 
     private fun startAudio() {
-        if (audioPath.isNotBlank()) {
-            val file = File(audioPath)
-            if (file.isFile && playFile(file)) return
-        }
+        // 定时闹钟里保存的是计划时的路径；优先使用当前选择，避免之后换音频时播到旧文件。
+        val path = sequenceOf(
+            FakeCallAudioStore.audioPath(context).orEmpty(),
+            audioPath,
+        ).firstOrNull { it.isNotBlank() && File(it).isFile }
+        if (path != null && playFile(File(path))) return
         runCatching { speakDefault() }
     }
 
-    private fun playFile(file: File): Boolean = runCatching {
-        val player = MediaPlayer().apply {
-            setAudioAttributes(voiceAudioAttributes())
-            setDataSource(file.absolutePath)
-            isLooping = true
-            setOnErrorListener { _, _, _ ->
-                stopPlayer()
+    private fun playFile(file: File): Boolean {
+        val player = MediaPlayer()
+        return try {
+            player.setAudioAttributes(voiceAudioAttributes())
+            player.setDataSource(file.absolutePath)
+            player.isLooping = true
+            player.setOnErrorListener { _, _, _ ->
+                if (mediaPlayer === player) {
+                    stopPlayer()
+                    runCatching { speakDefault() }
+                }
                 true
             }
-            prepare()
-            start()
+            mediaPlayer = player
+            player.setOnPreparedListener { prepared ->
+                if (mediaPlayer === prepared) runCatching { prepared.start() }
+            }
+            player.prepareAsync()
+            true
+        } catch (e: Exception) {
+            if (mediaPlayer === player) mediaPlayer = null
+            runCatching { player.release() }
+            false
         }
-        mediaPlayer = player
-        true
-    }.getOrElse {
-        false
     }
 
     private fun speakDefault() {
@@ -185,7 +181,6 @@ class FakeCallConnection(
             @Suppress("DEPRECATION")
             runCatching { audioManager.abandonAudioFocus(null) }
         }
-        runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
         setDisconnected(DisconnectCause(cause))
         destroy()
     }
