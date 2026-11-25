@@ -219,6 +219,11 @@ private const val LOWERS = "abcdefghijklmnopqrstuvwxyz"
 private const val DIGITS = "0123456789"
 private const val SYMBOLS = "!@#\$%^&*()-_=+[]{};:,.?/"
 
+private fun systemPasswordRandom(): PasswordRandom {
+    val random = SecureRandom()
+    return PasswordRandom { random.nextInt(it) }
+}
+
 /**
  * 生成密码。采用“拒绝采样”：每一位都从整个字符池里等概率抽取，
  * 如果某个勾选的类别一个都没抽到，就整个重来。
@@ -227,18 +232,18 @@ private const val SYMBOLS = "!@#\$%^&*()-_=+[]{};:,.?/"
 private fun genPassword(
     length: Int,
     sets: List<String>,
-    rng: SecureRandom = SecureRandom(),
+    random: PasswordRandom = systemPasswordRandom(),
 ): String {
     val pool = sets.joinToString("")
     if (pool.isEmpty()) return ""
     val len = maxOf(length, sets.size)
     val chars = CharArray(len)
     repeat(10_000) {
-        for (i in 0 until len) chars[i] = pool[rng.nextInt(pool.length)]
+        for (i in 0 until len) chars[i] = pool[random.nextInt(pool.length)]
         if (sets.all { set -> chars.any { c -> set.indexOf(c) >= 0 } }) return String(chars)
     }
     // 概率上不可能走到这里（每一轮被接受的概率都不低于 7%）；兜底：直接给前几位指定类别
-    sets.forEachIndexed { i, set -> chars[i] = set[rng.nextInt(set.length)] }
+    sets.forEachIndexed { i, set -> chars[i] = set[random.nextInt(set.length)] }
     return String(chars)
 }
 
@@ -439,10 +444,10 @@ fun PasswordTool(padding: PaddingValues) {
                 entropyError = "还需要采集 ${500 - drawCount} 个绘制点"
                 return
             }
-            val rng = PasswordEntropy.mix(listOf(PasswordEntropy.hashDrawing(drawPoints)))
+            val rng = PasswordEntropy.drawingRandom(drawPoints)
             output = genPassword(length, sets, rng)
             entropyError = null
-            entropyNote = "已混入绘制坐标熵源；原始笔迹不会保存。"
+            entropyNote = "已使用绘制坐标熵源；原始笔迹不会保存。同一笔迹与相同设置会得到相同密码。"
             return
         }
         if (selected.isEmpty()) {

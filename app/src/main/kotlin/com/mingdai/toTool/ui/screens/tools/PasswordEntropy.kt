@@ -21,6 +21,8 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -28,6 +30,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 internal enum class PasswordEntropyTab { SENSORS, DRAW }
+
+/** 密码生成只依赖 nextInt(bound)，便于同时接入安全随机数和可复现的笔迹随机数。 */
+internal fun interface PasswordRandom {
+    fun nextInt(bound: Int): Int
+}
 
 internal data class PasswordEntropySource(
     val id: String,
@@ -132,16 +139,24 @@ internal object PasswordEntropy {
         return PasswordEntropyCollection(parts, notes)
     }
 
-    fun mix(parts: List<ByteArray>): SecureRandom {
+    fun mix(parts: List<ByteArray>): PasswordRandom {
         val digest = MessageDigest.getInstance("SHA-256")
         parts.forEach { digest.update(it) }
         digest.update(SecureRandom().generateSeed(32))
         val random = SecureRandom()
         random.setSeed(digest.digest())
-        return random
+        return PasswordRandom { random.nextInt(it) }
     }
 
-    fun hashDrawing(points: List<PasswordDrawPoint?>): ByteArray {
+    /** 笔迹只作为唯一种子：同一份笔迹与相同设置必然得到相同的密码。 */
+    fun drawingRandom(points: List<PasswordDrawPoint?>): PasswordRandom {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update("toTool/password/drawing/v1".toByteArray(Charsets.UTF_8))
+        digest.update(hashDrawing(points))
+        return HmacCounterRandom(digest.digest())
+    }
+
+    private fun hashDrawing(points: List<PasswordDrawPoint?>): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteBuffer.allocate(1 + 4 + 4 + 8)
         points.forEach { point ->
@@ -275,6 +290,51 @@ internal object PasswordEntropy {
         } finally {
             runCatching { provider.unbind(analysis) }
             executor.shutdownNow()
+        }
+    }
+}
+
+/**
+ * 笔迹熵源专用的确定性随机流：HMAC-SHA256 计数器模式。
+ * 同一份笔迹得到同一把种子，因此同一画板、同一字符设置会复现同一密码；
+ * 只要笔迹（含每个点的时间戳）变化，结果就完全不同。
+ */
+private class HmacCounterRandom(seed: ByteArray) : PasswordRandom {
+    private val mac = Mac.getInstance("HmacSHA256").apply {
+        init(SecretKeySpec(seed, "HmacSHA256"))
+    }
+    private val counterBytes = ByteBuffer.allocate(8)
+    private var counter = 0L
+    private var block = ByteArray(0)
+    private var blockPos = 0
+
+    private fun refill() {
+        counterBytes.clear()
+        counterBytes.putLong(counter)
+        counter++
+        block = mac.doFinal(counterBytes.array())
+        blockPos = 0
+    }
+
+    private fun nextByte(): Int {
+        if (blockPos >= block.size) refill()
+        return block[blockPos++].toInt() and 0xFF
+    }
+
+    override fun nextInt(bound: Int): Int {
+        require(bound > 0) { "bound must be positive" }
+        if (bound == 1) return 0
+        val bits = 32 - Integer.numberOfLeadingZeros(bound - 1)
+        val mask = if (bits >= 32) 0xFFFF_FFFFL else (1L shl bits) - 1
+        while (true) {
+            var value = 0L
+            var remaining = bits
+            while (remaining > 0) {
+                value = (value shl 8) or nextByte().toLong()
+                remaining -= 8
+            }
+            value = value and mask
+            if (value < bound) return value.toInt()
         }
     }
 }
