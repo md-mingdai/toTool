@@ -91,7 +91,9 @@ internal fun probeAudio(context: Context, uri: Uri): AudioProbeInfo? {
     }
 }
 
-internal fun probeImage(context: Context, uri: Uri): ImageProbeInfo? {
+internal fun probeImage(context: Context, uri: Uri, ext: String? = null): ImageProbeInfo? {
+    if (ext == "svg") return SvgCodec.probe(context, uri)
+    if (ext == "ico") return IcoCodec.probe(context, uri)?.let { ImageProbeInfo(it.width, it.height) }
     return try {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
@@ -218,6 +220,12 @@ internal fun detectMediaSignature(
 ): MediaSignature {
     val ext = normalizedExtension(name)
     val header = readHeader(context, uri)
+    if (ext == "svg" || mime == "image/svg+xml") {
+        return MediaSignature(MediaKind.IMAGE, "svg", false)
+    }
+    if (ext == "ico" || mime == "image/x-icon" || mime == "image/vnd.microsoft.icon") {
+        return MediaSignature(MediaKind.IMAGE, "ico", false)
+    }
     if (header.size >= 12) {
         when {
             header.startsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) -> {

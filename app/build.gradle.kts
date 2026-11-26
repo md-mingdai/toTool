@@ -147,6 +147,9 @@ dependencies {
 
     implementation("com.google.zxing:core:3.5.3")
 
+    // 格式转换：SVG 矢量图渲染为位图（Apache-2.0）
+    implementation("com.caverock:androidsvg-aar:1.4")
+
     // 弱网助手：把 VpnService 的 TUN 报文转成 SOCKS5 TCP/UDP 的 native 转发层
     // （Apache-2.0 AAR，内部为 MIT 的 hev-socks5-tunnel）
     implementation("com.zaneschepke:hevtunnel:1.0.1") {

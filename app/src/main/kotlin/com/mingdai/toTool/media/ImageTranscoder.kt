@@ -29,6 +29,7 @@ private fun peakBytesPerPixel(fmt: String): Double = when (fmt) {
     "PNG" -> 5.5
     "JPG" -> 5.0
     "BMP" -> 4.5
+    "ICO" -> 6.0
     else -> 6.0
 }
 
@@ -38,8 +39,21 @@ private fun decodeImage(
     context: Context,
     uri: Uri,
     fmt: String,
+    sourceExt: String,
+    svgWidth: Int,
+    svgHeight: Int,
     canceled: AtomicBoolean,
 ): DecodedImage {
+    if (sourceExt == "svg") {
+        val bitmap = SvgCodec.render(context, uri, svgWidth, svgHeight, canceled)
+            ?: throw ConvertException("无法渲染这个 SVG 文件（文件损坏或包含不支持的元素）")
+        return DecodedImage(bitmap, svgWidth, svgHeight, false)
+    }
+    if (sourceExt == "ico") {
+        val bitmap = IcoCodec.decode(context, uri)
+            ?: throw ConvertException("无法解码这个 ICO 文件（可能使用了不支持的位深或压缩方式）")
+        return DecodedImage(bitmap, bitmap.width, bitmap.height, false)
+    }
     var maxPixels = MemoryBudget.maxPixels(context, peakBytesPerPixel(fmt))
     var attempt = 0
     while (true) {
@@ -124,8 +138,18 @@ internal fun writeImage(bitmap: Bitmap, fmt: String, out: OutputStream, canceled
             }
             if (!bitmap.compress(format, 95, out)) throw IOException("编码 WEBP 失败")
         }
+        "ICO" -> IcoCodec.encode(bitmap, out, canceled)
         else -> throw IOException("不支持的格式：$fmt")
     }
+}
+
+private fun flattenOnWhiteCopy(source: Bitmap): Bitmap {
+    val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    Canvas(out).apply {
+        drawColor(android.graphics.Color.WHITE)
+        drawBitmap(source, 0f, 0f, null)
+    }
+    return out
 }
 
 private class CountingOutputStream(sink: OutputStream) : FilterOutputStream(sink) {
@@ -181,15 +205,22 @@ internal class ImageResult(val where: String, val notice: String?)
 internal fun convertImageToFormat(
     context: Context,
     uri: Uri,
+    sourceExt: String,
     fmt: String,
     baseName: String,
+    svgWidth: Int,
+    svgHeight: Int,
     canceled: AtomicBoolean,
 ): ImageResult {
-    val decoded = decodeImage(context, uri, fmt, canceled)
-    val bitmap = decoded.bitmap
+    val decoded = decodeImage(context, uri, fmt, sourceExt, svgWidth, svgHeight, canceled)
+    val source = decoded.bitmap
+    val bitmap = if ((fmt == "JPG" || fmt == "BMP") && source.hasAlpha()) {
+        flattenOnWhiteCopy(source)
+    } else {
+        source
+    }
     try {
         if (canceled.get()) throw ConvertCanceledException()
-        if (fmt == "JPG" || fmt == "BMP") flattenOnWhiteInPlace(bitmap)
         val displayName = "$baseName.${fmt.lowercase(Locale.ROOT)}"
         val (where, bytes) = saveImageToGallery(context, displayName, imageMime(fmt)) { out ->
             writeImage(bitmap, fmt, out, canceled)
@@ -201,7 +232,8 @@ internal fun convertImageToFormat(
         }
         return ImageResult("$where（${humanSize(bytes)}）", notice)
     } finally {
-        bitmap.recycle()
+        if (bitmap !== source) bitmap.recycle()
+        source.recycle()
     }
 }
 

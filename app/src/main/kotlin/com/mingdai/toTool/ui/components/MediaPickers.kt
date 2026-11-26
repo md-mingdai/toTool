@@ -106,6 +106,7 @@ internal fun TargetFormatDialog(
     selected: TargetOption?,
     onSelect: (TargetOption) -> Unit,
     onDismiss: () -> Unit,
+    unavailable: List<TargetOption> = emptyList(),
 ) {
     AppDialog(
         show = show,
@@ -114,7 +115,7 @@ internal fun TargetFormatDialog(
         confirmText = null,
         dismissText = "取消",
     ) {
-        if (groups.isEmpty()) {
+        if (groups.isEmpty() && unavailable.isEmpty()) {
             Text(
                 "当前没有可用的目标格式。",
                 style = MiuixTheme.textStyles.footnote1,
@@ -169,6 +170,35 @@ internal fun TargetFormatDialog(
                                 color = MiuixTheme.colorScheme.primary,
                             )
                         }
+                    }
+                }
+            }
+            if (unavailable.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "不可选",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                )
+                unavailable.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            option.label,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.55f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "仅支持作为源格式（需指定分辨率）",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f),
+                        )
                     }
                 }
             }

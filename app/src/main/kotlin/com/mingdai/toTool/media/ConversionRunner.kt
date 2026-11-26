@@ -43,8 +43,11 @@ internal fun runConversion(
             val result = convertImageToFormat(
                 context = context,
                 uri = plan.source.uri,
+                sourceExt = plan.source.extension,
                 fmt = plan.target.id,
                 baseName = plan.baseName,
+                svgWidth = plan.svgWidth,
+                svgHeight = plan.svgHeight,
                 canceled = control.flag,
             )
             return ConversionOutcome("已保存到：${result.where}", result.notice)

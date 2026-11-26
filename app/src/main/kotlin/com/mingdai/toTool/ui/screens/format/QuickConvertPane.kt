@@ -60,6 +60,7 @@ import com.mingdai.toTool.media.ImageProbeInfo
 import com.mingdai.toTool.media.MediaKind
 import com.mingdai.toTool.media.ResolutionPreset
 import com.mingdai.toTool.media.SourceMedia
+import com.mingdai.toTool.media.SVG_TARGET_OPTION
 import com.mingdai.toTool.media.TargetOption
 import com.mingdai.toTool.media.VideoFrameInfo
 import com.mingdai.toTool.media.VisualMode
@@ -91,6 +92,7 @@ import com.mingdai.toTool.ui.components.ResultBox
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.TargetFormatDialog
+import com.mingdai.toTool.ui.screens.tools.MemoryBudget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -158,6 +160,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
 
     var durationText by rememberSaveable { mutableStateOf("5") }
     var frameText by rememberSaveable { mutableStateOf("1") }
+    var svgWidthText by rememberSaveable { mutableStateOf("1024") }
+    var svgHeightText by rememberSaveable { mutableStateOf("1024") }
     var visualMode by rememberSaveable { mutableStateOf(VisualMode.COVER) }
     var resolution by rememberSaveable { mutableStateOf(ResolutionPreset.P720) }
     var solidColor by rememberSaveable { mutableStateOf(SOLID_COLORS.first()) }
@@ -245,6 +249,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             sourceExtension = ""
             sourceAnimated = false
             sourceKind = MediaKind.UNKNOWN
+            svgWidthText = "1024"
+            svgHeightText = "1024"
             videoInfo = null
             audioInfo = null
             imageInfo = null
@@ -271,6 +277,10 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                     sourceMime = mime
                     sourceExtension = signature.extension
                     sourceAnimated = signature.animated
+                    if (signature.extension == "svg") {
+                        svgWidthText = "1024"
+                        svgHeightText = "1024"
+                    }
                     videoInfo = null
                     audioInfo = null
                     imageInfo = null
@@ -345,7 +355,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         }
     }
 
-    LaunchedEffect(sourceUri, sourceKind) {
+    LaunchedEffect(sourceUri, sourceKind, sourceExt) {
         val uri = sourceUri ?: return@LaunchedEffect
         infoLoading = true
         when (sourceKind) {
@@ -364,8 +374,16 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 }
             }
             MediaKind.IMAGE -> {
-                val info = withContext(Dispatchers.IO) { probeImage(context, uri) }
-                if (sourceUri == uri) imageInfo = info
+                val info = withContext(Dispatchers.IO) { probeImage(context, uri, sourceExt) }
+                if (sourceUri == uri) {
+                    imageInfo = info
+                    if (sourceExt == "svg" && info != null &&
+                        svgWidthText == "1024" && svgHeightText == "1024"
+                    ) {
+                        svgWidthText = info.width.coerceIn(1, 8192).toString()
+                        svgHeightText = info.height.coerceIn(1, 8192).toString()
+                    }
+                }
             }
             MediaKind.UNKNOWN -> Unit
         }
@@ -411,6 +429,14 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
     val gifStaticFrames = gifItems.filter { !it.animated }.sumOf { it.holdFrames }
     val gifAnimatedCount = gifItems.count { it.animated }
     val gifHoldFramesValid = gifItems.filter { !it.animated }.all { it.holdFrames in 1..1000 }
+    val svgWidth = svgWidthText.toIntOrNull()
+    val svgHeight = svgHeightText.toIntOrNull()
+    val svgMaxPixels = remember(context) { MemoryBudget.maxPixels(context, 4.5) }
+    val svgSizeValid = sourceExt != "svg" || (
+        svgWidth != null && svgHeight != null &&
+            svgWidth in 1..8192 && svgHeight in 1..8192 &&
+            svgWidth.toLong() * svgHeight <= svgMaxPixels
+        )
 
     val selectedTarget = target
     val selectedBranch = branch
@@ -428,6 +454,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
         (selectedBranch != ConversionBranch.IMAGE_GIF || (gifItems.isNotEmpty() && gifHoldFramesValid && !gifAdding)) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.CUSTOM || customCoverUri != null) &&
         (selectedBranch != ConversionBranch.AUDIO_VIDEO || visualMode != VisualMode.WAVEFORM || waveformAvailable) &&
+        svgSizeValid &&
         videoHasAudio
 
     fun startConversion() {
@@ -465,6 +492,8 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             customImage = customCoverUri,
             music = musicUri.takeIf { conversionBranch == ConversionBranch.IMAGE_VIDEO },
             gifItems = gifItems.toList().takeIf { conversionBranch == ConversionBranch.IMAGE_GIF }.orEmpty(),
+            svgWidth = svgWidth ?: 1024,
+            svgHeight = svgHeight ?: 1024,
         )
         control.reset()
         isRunning = true
@@ -579,6 +608,56 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
+        }
+
+        if (sourceUri != null && sourceExt == "svg") {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("SVG 输出分辨率", style = MiuixTheme.textStyles.body2)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextField(
+                            value = svgWidthText,
+                            onValueChange = {
+                                svgWidthText = it.filter(Char::isDigit).take(5)
+                                clearResult()
+                            },
+                            label = "宽度 px",
+                            singleLine = true,
+                            enabled = !isRunning,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextField(
+                            value = svgHeightText,
+                            onValueChange = {
+                                svgHeightText = it.filter(Char::isDigit).take(5)
+                                clearResult()
+                            },
+                            label = "高度 px",
+                            singleLine = true,
+                            enabled = !isRunning,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Text(
+                        "SVG 只能作为源格式：按上面的像素尺寸渲染成位图后再转换。" +
+                            "输出越大，占用的内存越多；上限按当前设备可用内存计算。",
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    if (!svgSizeValid) {
+                        Text(
+                            "请输入 1–8192 之间的宽高，并确保总像素不超过当前设备可安全处理的量。",
+                            style = MiuixTheme.textStyles.footnote2,
+                            color = MiuixTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
         }
 
         when (branch) {
@@ -1082,6 +1161,7 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
             clearResult()
         },
         onDismiss = { targetDialog = false },
+        unavailable = listOf(SVG_TARGET_OPTION),
     )
 }
 

@@ -48,7 +48,10 @@ internal val FORMAT_SPECS: Map<String, FormatSpec> = mapOf(
     "WEBM" to FormatSpec(false, listOf("libvpx-vp9", "libvpx"), listOf("libopus", "libvorbis"), "video/webm"),
 )
 
-internal val IMAGE_FORMATS = listOf("JPG", "PNG", "WEBP", "BMP")
+internal val IMAGE_FORMATS = listOf("JPG", "PNG", "WEBP", "BMP", "ICO")
+
+/** SVG 只能作为源格式：选中 SVG 目标时在对话框里置灰并说明原因。 */
+internal val SVG_TARGET_OPTION = TargetOption("SVG", MediaKind.IMAGE, "svg", "image/svg+xml")
 
 /** 这些容器之间互转时，手机拍的 H.264/AAC 视频可以直接换壳。 */
 private val REMUX_FRIENDLY = setOf("mp4", "m4v", "mov", "mkv")
@@ -59,6 +62,8 @@ internal fun imageMime(fmt: String): String = when (fmt) {
     "WEBP" -> "image/webp"
     "BMP" -> "image/bmp"
     "GIF" -> "image/gif"
+    "ICO" -> "image/x-icon"
+    "SVG" -> "image/svg+xml"
     else -> "application/octet-stream"
 }
 
@@ -149,6 +154,12 @@ internal fun targetGroupsFor(
     sourceAnimated: Boolean = false,
 ): List<TargetGroup> {
     if (source == MediaKind.UNKNOWN) return emptyList()
+    // SVG / ICO 只做「源 → 位图」：SVG 需要指定输出分辨率，ICO 只保留一个最大帧。
+    // 这两种源不提供视频 / GIF 目标，避免再走 FFmpeg 的图片读取链路。
+    if (source == MediaKind.IMAGE && (sourceExt == "svg" || sourceExt == "ico")) {
+        val options = IMAGE_FORMATS.mapNotNull(::targetOption)
+        return listOf(TargetGroup(MediaKind.IMAGE, MediaKind.IMAGE.label, options))
+    }
     val encoders = capabilities?.encoders
     val order = TARGET_MEDIUM_ORDER[source].orEmpty()
     return order.mapNotNull { medium ->
@@ -211,7 +222,8 @@ internal fun detectMediaKind(name: String?, mime: String? = null): MediaKind {
     val byExt = when (ext) {
         "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m4v", "3gp" -> MediaKind.VIDEO
         "mp3", "wav", "aac", "m4a", "flac", "ogg", "wma", "opus", "aiff" -> MediaKind.AUDIO
-        "jpg", "jpeg", "jpe", "jfif", "png", "webp", "bmp", "gif", "heic", "heif", "avif" -> MediaKind.IMAGE
+        "jpg", "jpeg", "jpe", "jfif", "png", "webp", "bmp", "gif", "heic", "heif", "avif",
+        "svg", "ico" -> MediaKind.IMAGE
         else -> MediaKind.UNKNOWN
     }
     if (byExt != MediaKind.UNKNOWN) return byExt

@@ -68,6 +68,9 @@ internal data class ConversionPlan(
     val customImage: Uri? = null,
     val music: Uri? = null,
     val gifItems: List<GifComposeItem> = emptyList(),
+    /** SVG 源专用：用户指定的输出像素尺寸。 */
+    val svgWidth: Int = 1024,
+    val svgHeight: Int = 1024,
 ) {
     val baseName: String get() = baseNameOf(source.name)
 
