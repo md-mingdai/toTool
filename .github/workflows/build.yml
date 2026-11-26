@@ -221,12 +221,42 @@ jobs:
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "- \`${ABI}\`：$(du -h "dist/${NAME}.apk" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
-      # 确认只使用 APK Signature Scheme v2 + v3，且没有退回 v1 JAR 签名
-      - name: 验证 APK 签名（V2 + V3）
+      # Gradle 在 minSdk >= 28 时可能只写入 v3；这里用 apksigner 明确重签为 V2+V3。
+      - name: 重签并验证 APK（V2 + V3）
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           APK=$(find dist -name '*.apk' | head -n 1)
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           [ -n "$APKSIGNER" ] || { echo "::error::没有找到 apksigner"; exit 1; }
+
+          if [ -n "${KEYSTORE_PATH:-}" ] && [ -f "$KEYSTORE_PATH" ]; then
+            KS="$KEYSTORE_PATH"
+            KSP="${KEYSTORE_PASSWORD:-}"
+            ALIAS="${KEY_ALIAS:-}"
+            KP="${KEY_PASSWORD:-}"
+          else
+            KS="$HOME/.android/debug.keystore"
+            KSP="android"
+            ALIAS="androiddebugkey"
+            KP="android"
+          fi
+          [ -f "$KS" ] || { echo "::error::找不到签名密钥：$KS"; exit 1; }
+
+          "$APKSIGNER" sign \
+            --ks "$KS" \
+            --ks-pass "pass:$KSP" \
+            --ks-key-alias "$ALIAS" \
+            --key-pass "pass:$KP" \
+            --v1-signing-enabled false \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out "$APK.signed" "$APK"
+          mv "$APK.signed" "$APK"
+
           "$APKSIGNER" verify --verbose "$APK" | tee apksigner.txt
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apksigner.txt || {
             echo "::error::APK 没有 V2 签名"; exit 1;
