@@ -124,6 +124,7 @@ object ToolRegistry {
         Tool("calc_date", "日期计算", "作差求间隔，或推算目标日", ToolCategory.CALC, Icons.Filled.Event),
         Tool("calc_loan", "贷款计算", "等额本息月供与利息", ToolCategory.CALC, Icons.Filled.AttachMoney),
         Tool("calc_equation", "方程求解", "输入含一个未知数的方程，数值扫描求实根", ToolCategory.CALC, Icons.Filled.Functions),
+        Tool("calc_latex", "LaTeX 渲染", "粘贴 LaTeX 公式并实时排版", ToolCategory.CALC, Icons.Filled.Functions),
         Tool("calc_plot", "函数绘图", "多条曲线、缩放平移与点按取值", ToolCategory.CALC, Icons.Filled.ShowChart),
         // --- 设备工具 ---
         Tool("dev_flashdrop", "隔空闪传", "手机开网页服务，电脑浏览器直接管理手机文件", ToolCategory.ADVANCED, Icons.Filled.Devices),

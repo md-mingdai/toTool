@@ -75,6 +75,7 @@ import com.mingdai.toTool.ui.screens.tools.ProtractorTool
 import com.mingdai.toTool.ui.screens.tools.BarcodeTool
 import com.mingdai.toTool.ui.screens.tools.RulerTool
 import com.mingdai.toTool.ui.screens.tools.CountdownTool
+import com.mingdai.toTool.ui.screens.tools.LatexTool
 import com.mingdai.toTool.ui.screens.tools.ScoreboardTool
 import com.mingdai.toTool.ui.screens.tools.SensorListTool
 import com.mingdai.toTool.ui.screens.tools.ShellTool
@@ -238,6 +239,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "calc_date" -> DateTool(padding)
             "calc_loan" -> LoanTool(padding)
             "calc_equation" -> EquationSolverTool(padding)
+            "calc_latex" -> LatexTool(padding)
             "calc_plot" -> FunctionPlotTool(padding)
             // --- 设备工具 ---
             "dev_flashdrop" -> FlashDropTool(padding)

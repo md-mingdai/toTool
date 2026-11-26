@@ -1,5 +1,8 @@
 package com.mingdai.toTool.ui.screens.tools
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,10 +11,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.runtime.Composable
@@ -20,24 +25,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hrm.latex.renderer.editor.LatexEditor
+import com.hrm.latex.renderer.editor.rememberEditorState
+import com.hrm.latex.renderer.model.LatexConfig
+import com.hrm.latex.renderer.model.LatexTheme
+import com.hrm.latex.renderer.model.LatexThemeColors
 import com.mingdai.toTool.math.AngleMode
 import com.mingdai.toTool.math.EquationSolution
 import com.mingdai.toTool.math.ExactEquationResult
 import com.mingdai.toTool.math.ExactSolveException
 import com.mingdai.toTool.math.MathParseException
 import com.mingdai.toTool.math.NotPolynomialException
-import com.mingdai.toTool.math.equationToLatex
 import com.mingdai.toTool.math.exactResultLatex
 import com.mingdai.toTool.math.formatNumber
+import com.mingdai.toTool.math.latexToMathInput
 import com.mingdai.toTool.math.numericResultLatex
+import com.mingdai.toTool.math.sanitizeLatexSource
 import com.mingdai.toTool.math.solveEquation
 import com.mingdai.toTool.math.solvePolynomialEquation
 import com.mingdai.toTool.ui.components.HintText
@@ -49,19 +61,20 @@ import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ToolBody
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private const val INITIAL_EQUATION = "x^2 - 5x + 6 = 0"
+private const val INITIAL_EQUATION = "x^{2} - 5x + 6 = 0"
 
 private val equationExamples = listOf(
-    "x^2 = 4",
-    "x^2 = 2",
-    "x^2 + x + 1 = 0",
+    "x^{2} = 4",
+    "x^{2} = 2",
+    "x^{2} + x + 1 = 0",
     "(x-1)(x+2) = 0",
-    "1/(x-2) = 3",
-    "sin(x) = 0.5",
+    "\\frac{1}{x-2} = 3",
+    "\\sin(x) = 0.5",
 )
 
 private sealed interface SolveOutcome {
@@ -71,50 +84,52 @@ private sealed interface SolveOutcome {
     data class Error(val message: String) : SolveOutcome
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun EquationSolverTool(padding: PaddingValues) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    var input by remember {
-        mutableStateOf(TextFieldValue(INITIAL_EQUATION, TextRange(INITIAL_EQUATION.length)))
-    }
+    val context = LocalContext.current
+    val editorState = rememberEditorState(initialText = INITIAL_EQUATION)
+    val inputText = editorState.text
     var fromText by remember { mutableStateOf("-10") }
     var toText by remember { mutableStateOf("10") }
     var angleMode by remember { mutableStateOf(AngleMode.RADIAN) }
     var showNumericOptions by remember { mutableStateOf(false) }
 
-    val outcome = remember(input.text, fromText, toText, angleMode) {
-        solveSmart(input.text, fromText, toText, angleMode)
+    val colors = MiuixTheme.colorScheme
+    val latexConfig = remember(colors.onSurface) {
+        LatexConfig(
+            fontSize = 22.sp,
+            theme = LatexTheme.auto(
+                light = LatexThemeColors(color = colors.onSurface, backgroundColor = Color.Transparent),
+                dark = LatexThemeColors(color = colors.onSurface, backgroundColor = Color.Transparent),
+            ),
+        )
+    }
+
+    val mathInput = remember(inputText) { latexToMathInput(inputText) }
+    val outcome = remember(mathInput, fromText, toText, angleMode) {
+        solveSmart(mathInput, fromText, toText, angleMode)
     }
 
     fun insert(text: String) {
-        val start = minOf(input.selection.start, input.selection.end)
-        val end = maxOf(input.selection.start, input.selection.end)
-        val newText = input.text.replaceRange(start, end, text)
-        input = TextFieldValue(newText, TextRange(start + text.length))
+        if (editorState.selection != null) editorState.delete()
+        editorState.insert(text)
     }
 
-    fun backspace() {
-        val start = minOf(input.selection.start, input.selection.end)
-        val end = maxOf(input.selection.start, input.selection.end)
-        input = when {
-            start != end -> TextFieldValue(
-                input.text.removeRange(start, end),
-                TextRange(start),
-            )
-
-            start > 0 -> TextFieldValue(
-                input.text.removeRange(start - 1, start),
-                TextRange(start - 1),
-            )
-
-            else -> input
+    fun pasteLatex() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipboard?.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(context)
+            ?.toString()
+        if (clip.isNullOrBlank()) {
+            Toast.makeText(context, "剪贴板里没有文本", Toast.LENGTH_SHORT).show()
+            return
         }
-    }
-
-    fun moveCaret(delta: Int) {
-        val position = (input.selection.end + delta).coerceIn(0, input.text.length)
-        input = input.copy(selection = TextRange(position))
+        insert(sanitizeLatexSource(clip))
     }
 
     ToolBody(padding) {
@@ -127,56 +142,59 @@ fun EquationSolverTool(padding: PaddingValues) {
                     Text(
                         text = "方程",
                         style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.primary,
+                        color = colors.primary,
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        text = "点按公式可移动光标",
+                        text = "可粘贴 LaTeX · 点按定位光标",
                         style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = colors.onSurfaceVariantSummary,
                     )
+                    IconButton(
+                        onClick = { pasteLatex() },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ContentPaste,
+                            contentDescription = "粘贴 LaTeX",
+                            tint = colors.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
-                BasicTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    readOnly = true,
-                    textStyle = MiuixTheme.textStyles.title3.copy(
-                        color = MiuixTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
-                    singleLine = false,
-                    maxLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { innerTextField ->
-                        Box {
-                            if (input.text.isEmpty()) {
-                                Text(
-                                    text = "例如 x^2 - 5x + 6 = 0",
-                                    style = MiuixTheme.textStyles.title3,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                                )
-                            }
-                            innerTextField()
-                        }
-                    },
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp),
+                ) {
+                    LatexEditor(
+                        editorState = editorState,
+                        modifier = Modifier.fillMaxWidth(),
+                        config = latexConfig,
+                        cursorColor = colors.primary,
+                        selectionColor = colors.primary.copy(alpha = 0.25f),
+                        showSourceText = false,
+                    )
+                    if (inputText.isBlank()) {
+                        Text(
+                            text = "点按输入或粘贴 LaTeX",
+                            style = MiuixTheme.textStyles.title3,
+                            color = colors.onSurfaceVariantActions,
+                        )
+                    }
+                }
             }
         }
 
         MathKeypad(
             onInsert = { insert(it) },
-            onBackspace = { backspace() },
-            onClear = { input = TextFieldValue("", TextRange(0)) },
-            onMoveCaret = { moveCaret(it) },
+            onBackspace = { editorState.backspace() },
+            onClear = { editorState.updateText("") },
+            onMoveCaret = { editorState.moveCursorTo(editorState.cursorOffset + it) },
             onSubmit = {
                 focusManager.clearFocus(force = true)
                 keyboardController?.hide()
             },
-        )
-
-        LatexFormulaCard(
-            latex = remember(input.text) { equationToLatex(input.text) },
-            title = "公式 LaTeX 预览",
         )
 
         when (val result = outcome) {
@@ -264,7 +282,7 @@ fun EquationSolverTool(padding: PaddingValues) {
                 SelectChip(
                     selected = false,
                     onClick = {
-                        input = TextFieldValue(example, TextRange(example.length))
+                        editorState.updateText(example)
                     },
                     label = example,
                 )

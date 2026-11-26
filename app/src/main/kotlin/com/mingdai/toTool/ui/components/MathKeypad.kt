@@ -30,7 +30,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 计算器式数学键盘：函数键、数字键、运算符和底部操作键。
- * 只负责回调，插入位置和光标由调用方维护。
+ * 插入的片段是 LaTeX 数学模式源码（`\sin(`、`^{2}` 等），配合 LaTeX 编辑器使用；
+ * 插入位置和光标由调用方维护。
  *
  * @param onSubmit 底部「计算 / 完成」键；各工具按自己的语义处理。
  * @param submitLabel 底部主操作键的文字。
@@ -62,19 +63,19 @@ fun MathKeypad(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 listOf(
-                    "ln(" to "ln(",
-                    "log(" to "log(",
-                    "asin(" to "asin(",
-                    "acos(" to "acos(",
-                    "atan(" to "atan(",
-                    "sinh(" to "sinh(",
-                    "cosh(" to "cosh(",
-                    "tanh(" to "tanh(",
-                    "cbrt(" to "cbrt(",
-                    "π" to "π",
+                    "ln" to "\\ln(",
+                    "log" to "\\log(",
+                    "arcsin" to "\\arcsin(",
+                    "arccos" to "\\arccos(",
+                    "arctan" to "\\arctan(",
+                    "sinh" to "\\sinh(",
+                    "cosh" to "\\cosh(",
+                    "tanh" to "\\tanh(",
+                    "cbrt" to "\\sqrt[3]{}",
+                    "π" to "\\pi ",
                     "e" to "e",
-                    "^" to "^",
-                    "°" to "°",
+                    "^" to "^{}",
+                    "°" to "^{\\circ}",
                     "," to ",",
                 ).forEach { (label, insert) ->
                     SelectChip(
@@ -88,40 +89,40 @@ fun MathKeypad(
 
         val rows = listOf(
             listOf(
-                KeySpec("x²", KeyAction.Insert("^2"), KeyTone.Function),
-                KeySpec("√", KeyAction.Insert("√("), KeyTone.Function),
-                KeySpec("|x|", KeyAction.Insert("abs("), KeyTone.Function),
+                KeySpec("x²", KeyAction.Insert("^{2}"), KeyTone.Function),
+                KeySpec("√", KeyAction.Insert("\\sqrt{}"), KeyTone.Function),
+                KeySpec("|x|", KeyAction.Insert("\\left|\\right|"), KeyTone.Function),
                 KeySpec("(", KeyAction.Insert("("), KeyTone.Function),
                 KeySpec(")", KeyAction.Insert(")"), KeyTone.Function),
                 KeySpec("⌫", KeyAction.Backspace, KeyTone.Function, repeat = true),
             ),
             listOf(
-                KeySpec("sin", KeyAction.Insert("sin("), KeyTone.Function),
+                KeySpec("sin", KeyAction.Insert("\\sin("), KeyTone.Function),
                 KeySpec("x", KeyAction.Insert("x"), KeyTone.Variable),
                 KeySpec("7", KeyAction.Insert("7"), KeyTone.Digit),
                 KeySpec("8", KeyAction.Insert("8"), KeyTone.Digit),
                 KeySpec("9", KeyAction.Insert("9"), KeyTone.Digit),
-                KeySpec("÷", KeyAction.Insert("÷"), KeyTone.Operator),
+                KeySpec("÷", KeyAction.Insert("\\div "), KeyTone.Operator),
             ),
             listOf(
-                KeySpec("cos", KeyAction.Insert("cos("), KeyTone.Function),
-                KeySpec("30°", KeyAction.Insert("30°"), KeyTone.Function),
+                KeySpec("cos", KeyAction.Insert("\\cos("), KeyTone.Function),
+                KeySpec("30°", KeyAction.Insert("30^{\\circ}"), KeyTone.Function),
                 KeySpec("4", KeyAction.Insert("4"), KeyTone.Digit),
                 KeySpec("5", KeyAction.Insert("5"), KeyTone.Digit),
                 KeySpec("6", KeyAction.Insert("6"), KeyTone.Digit),
-                KeySpec("×", KeyAction.Insert("×"), KeyTone.Operator),
+                KeySpec("×", KeyAction.Insert("\\times "), KeyTone.Operator),
             ),
             listOf(
-                KeySpec("tan", KeyAction.Insert("tan("), KeyTone.Function),
-                KeySpec("45°", KeyAction.Insert("45°"), KeyTone.Function),
+                KeySpec("tan", KeyAction.Insert("\\tan("), KeyTone.Function),
+                KeySpec("45°", KeyAction.Insert("45^{\\circ}"), KeyTone.Function),
                 KeySpec("1", KeyAction.Insert("1"), KeyTone.Digit),
                 KeySpec("2", KeyAction.Insert("2"), KeyTone.Digit),
                 KeySpec("3", KeyAction.Insert("3"), KeyTone.Digit),
-                KeySpec("−", KeyAction.Insert("−"), KeyTone.Operator),
+                KeySpec("−", KeyAction.Insert("-"), KeyTone.Operator),
             ),
             listOf(
-                KeySpec("cot", KeyAction.Insert("cot("), KeyTone.Function),
-                KeySpec("60°", KeyAction.Insert("60°"), KeyTone.Function),
+                KeySpec("cot", KeyAction.Insert("\\cot("), KeyTone.Function),
+                KeySpec("60°", KeyAction.Insert("60^{\\circ}"), KeyTone.Function),
                 KeySpec("0", KeyAction.Insert("0"), KeyTone.Digit),
                 KeySpec(".", KeyAction.Insert("."), KeyTone.Digit),
                 KeySpec("=", KeyAction.Insert("="), KeyTone.Operator),
