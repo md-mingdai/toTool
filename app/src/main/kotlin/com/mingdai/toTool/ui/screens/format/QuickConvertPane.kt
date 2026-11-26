@@ -100,10 +100,12 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 private enum class CapabilityState { LOADING, READY, MISSING }
 
@@ -740,6 +742,30 @@ fun FormatQuickConvertPane(modifier: Modifier, onBusyChange: (Boolean) -> Unit) 
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        if (videoInfo != null && maxFrame > 1) {
+                            Slider(
+                                value = (frameIndex ?: 1).coerceIn(1, maxFrame).toFloat(),
+                                onValueChange = { value ->
+                                    frameText = value.roundToInt().coerceIn(1, maxFrame).toString()
+                                    clearResult()
+                                },
+                                valueRange = 1f..maxFrame.toFloat(),
+                                enabled = !isRunning,
+                            )
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    "1",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    "$maxFrame",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
                         val info = videoInfo
                         if (infoLoading) {
                             Text("正在读取视频信息…", style = MiuixTheme.textStyles.footnote2)
