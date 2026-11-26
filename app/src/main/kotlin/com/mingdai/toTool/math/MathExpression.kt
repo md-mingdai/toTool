@@ -61,6 +61,9 @@ class MathExpression private constructor(
     /** 代入未知数的值求值；无定义时返回 NaN。 */
     fun eval(x: Double): Double = root.eval(x, angle)
 
+    /** 把表达式转成可直接交给 LaTeX 渲染器的数学模式字符串。 */
+    fun toLatex(): String = root.toLatex()
+
     companion object {
         fun parse(source: String, angle: AngleMode = AngleMode.RADIAN): MathExpression {
             val normalized = normalize(source)
@@ -87,11 +90,17 @@ class MathExpression private constructor(
 private sealed interface Node {
     fun eval(x: Double, angle: AngleMode): Double
     fun collectVariables(out: MutableSet<String>)
+    fun toLatex(parentPrecedence: Int = 0): String
 }
 
-private class NumNode(private val value: Double) : Node {
+private class NumNode(
+    private val value: Double,
+    private val latexLabel: String? = null,
+) : Node {
     override fun eval(x: Double, angle: AngleMode): Double = value
     override fun collectVariables(out: MutableSet<String>) = Unit
+    override fun toLatex(parentPrecedence: Int): String =
+        latexWrap(latexLabel ?: latexNumber(value), LatexAtom, parentPrecedence)
 }
 
 private class VarNode(private val name: String) : Node {
@@ -100,6 +109,9 @@ private class VarNode(private val name: String) : Node {
     override fun collectVariables(out: MutableSet<String>) {
         out.add(name)
     }
+
+    override fun toLatex(parentPrecedence: Int): String =
+        latexWrap(name, LatexAtom, parentPrecedence)
 }
 
 private class UnaryNode(private val negative: Boolean, private val operand: Node) : Node {
@@ -109,6 +121,12 @@ private class UnaryNode(private val negative: Boolean, private val operand: Node
     }
 
     override fun collectVariables(out: MutableSet<String>) = operand.collectVariables(out)
+
+    override fun toLatex(parentPrecedence: Int): String {
+        val inner = operand.toLatex(LatexPower)
+        val text = (if (negative) "-" else "") + inner
+        return latexWrap(text, LatexUnary, parentPrecedence)
+    }
 }
 
 private class BinaryNode(
@@ -133,6 +151,19 @@ private class BinaryNode(
     override fun collectVariables(out: MutableSet<String>) {
         left.collectVariables(out)
         right.collectVariables(out)
+    }
+
+    override fun toLatex(parentPrecedence: Int): String {
+        val (text, precedence) = when (op) {
+            '+' -> (left.toLatex(LatexAdd) + " + " + right.toLatex(LatexAdd)) to LatexAdd
+            '-' -> (left.toLatex(LatexAdd) + " - " + right.toLatex(LatexMul)) to LatexAdd
+            '*' -> (left.toLatex(LatexMul) + " \\cdot " + right.toLatex(LatexMul)) to LatexMul
+            '/' -> "\\frac{${left.toLatex()}}{${right.toLatex()}}" to LatexAtom
+            '%' -> (left.toLatex(LatexMul) + " \\bmod " + right.toLatex(LatexMul)) to LatexMul
+            '^' -> (left.toLatex(LatexAtom) + "^{${right.toLatex()}}") to LatexPower
+            else -> ("${left.toLatex(LatexMul)} $op ${right.toLatex(LatexMul)}") to LatexMul
+        }
+        return latexWrap(text, precedence, parentPrecedence)
     }
 }
 
@@ -179,6 +210,39 @@ private class CallNode(private val name: String, private val args: List<Node>) :
 
     override fun collectVariables(out: MutableSet<String>) {
         args.forEach { it.collectVariables(out) }
+    }
+
+    override fun toLatex(parentPrecedence: Int): String {
+        val argLatex = { index: Int -> args[index].toLatex() }
+        val joined = args.joinToString(", ") { it.toLatex() }
+        val text = when (name) {
+            "sqrt" -> "\\sqrt{${argLatex(0)}}"
+            "cbrt" -> "\\sqrt[3]{${argLatex(0)}}"
+            "abs" -> "\\left|${argLatex(0)}\\right|"
+            "floor" -> "\\left\\lfloor ${argLatex(0)} \\right\\rfloor"
+            "ceil" -> "\\left\\lceil ${argLatex(0)} \\right\\rceil"
+            "exp" -> "e^{${argLatex(0)}}"
+            "ln" -> "\\ln\\left(${argLatex(0)}\\right)"
+            "log" -> if (args.size == 1) {
+                "\\log_{10}\\left(${argLatex(0)}\\right)"
+            } else {
+                "\\log_{${argLatex(1)}}\\left(${argLatex(0)}\\right)"
+            }
+            "log2" -> "\\log_{2}\\left(${argLatex(0)}\\right)"
+            "log10" -> "\\log_{10}\\left(${argLatex(0)}\\right)"
+            "pow" -> "\\left(${argLatex(0)}\\right)^{${argLatex(1)}}"
+            "min" -> "\\min\\left($joined\\right)"
+            "max" -> "\\max\\left($joined\\right)"
+            "asin" -> "\\arcsin\\left(${argLatex(0)}\\right)"
+            "acos" -> "\\arccos\\left(${argLatex(0)}\\right)"
+            "atan" -> "\\arctan\\left(${argLatex(0)}\\right)"
+            "sin", "cos", "tan", "cot", "sec", "csc",
+            "sinh", "cosh", "tanh", "asinh", "acosh", "atanh"
+            -> "\\$name\\left(${argLatex(0)}\\right)"
+            "sign" -> "\\operatorname{sgn}\\left(${argLatex(0)}\\right)"
+            else -> "\\operatorname{$name}\\left($joined\\right)"
+        }
+        return latexWrap(text, LatexAtom, parentPrecedence)
     }
 }
 
@@ -246,6 +310,7 @@ private fun normalize(source: String): String {
                 '，' -> append(',')
                 'π' -> append("pi")
                 '√' -> append("sqrt")
+                '°' -> append("*pi/180")
                 '²' -> append("^2")
                 '³' -> append("^3")
                 '⁴' -> append("^4")
@@ -416,7 +481,15 @@ private class Parser(private val tokens: List<Tok>) {
                 } else {
                     val constant = constantValues[raw]
                     when {
-                        constant != null -> NumNode(constant)
+                        constant != null -> NumNode(
+                            constant,
+                            when (raw) {
+                                "pi" -> "\\pi"
+                                "tau" -> "2\\pi"
+                                "e" -> "e"
+                                else -> null
+                            },
+                        )
                         peek() === Tok.LParen && raw.length > 1 ->
                             throw MathParseException("未知函数：$raw")
                         else -> VarNode(raw)

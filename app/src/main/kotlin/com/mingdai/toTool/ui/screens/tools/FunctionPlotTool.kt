@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -43,15 +43,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,6 +62,8 @@ import com.mingdai.toTool.math.AngleMode
 import com.mingdai.toTool.math.MathExpression
 import com.mingdai.toTool.math.formatNumber
 import com.mingdai.toTool.ui.components.AppDialog
+import com.mingdai.toTool.ui.components.LatexFormulaCard
+import com.mingdai.toTool.ui.components.MathKeypad
 import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SelectChip
 import java.util.Locale
@@ -74,7 +78,6 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 曲线配色：亮色和暗色主题下都能看清，按添加顺序循环使用。 */
@@ -135,8 +138,9 @@ fun FunctionPlotTool(padding: PaddingValues) {
 
     var editorOpen by remember { mutableStateOf(false) }
     var editingId by remember { mutableStateOf<Int?>(null) }
-    var editorText by remember { mutableStateOf("") }
+    var editorField by remember { mutableStateOf(TextFieldValue("")) }
     var editorError by remember { mutableStateOf<String?>(null) }
+    val editorText = editorField.text
 
     val parsedEditor = remember(editorText, angleMode) {
         if (editorText.isBlank()) null
@@ -153,9 +157,81 @@ fun FunctionPlotTool(padding: PaddingValues) {
 
     fun openEditor(function: PlotFunction?) {
         editingId = function?.id
-        editorText = function?.text ?: ""
+        val text = function?.text ?: ""
+        editorField = TextFieldValue(text, TextRange(text.length))
         editorError = null
         editorOpen = true
+    }
+
+    fun insertEditor(text: String) {
+        val start = minOf(editorField.selection.start, editorField.selection.end)
+        val end = maxOf(editorField.selection.start, editorField.selection.end)
+        val newText = editorField.text.replaceRange(start, end, text)
+        editorField = TextFieldValue(newText, TextRange(start + text.length))
+        editorError = null
+    }
+
+    fun backspaceEditor() {
+        val start = minOf(editorField.selection.start, editorField.selection.end)
+        val end = maxOf(editorField.selection.start, editorField.selection.end)
+        editorField = when {
+            start != end -> TextFieldValue(
+                editorField.text.removeRange(start, end),
+                TextRange(start),
+            )
+
+            start > 0 -> TextFieldValue(
+                editorField.text.removeRange(start - 1, start),
+                TextRange(start - 1),
+            )
+
+            else -> editorField
+        }
+        editorError = null
+    }
+
+    fun moveEditorCaret(delta: Int) {
+        val position = (editorField.selection.end + delta).coerceIn(0, editorField.text.length)
+        editorField = editorField.copy(selection = TextRange(position))
+    }
+
+    fun confirmEditor() {
+        val expression = parsedEditor
+        val normalized = MathExpression.normalizeFunctionInput(editorText).trim()
+        when {
+            normalized.isEmpty() -> editorError = "请输入表达式"
+            expression == null -> editorError = parseEditorError ?: "表达式有误"
+            expression.variables.any { it != "x" } -> editorError = "只支持变量 x"
+            else -> {
+                val id = editingId
+                if (id == null) {
+                    val usedNames = functions.mapTo(mutableSetOf()) { it.name }
+                    val name = FUNCTION_NAME_CHARS.map { it.toString() }
+                        .firstOrNull { it !in usedNames } ?: "f${functions.size + 1}"
+                    functions.add(
+                        PlotFunction(
+                            id = nextId,
+                            name = name,
+                            text = normalized,
+                            expression = expression,
+                            color = plotColors[functions.size % plotColors.size],
+                            visible = true,
+                        )
+                    )
+                    nextId += 1
+                } else {
+                    val index = functions.indexOfFirst { it.id == id }
+                    if (index >= 0) {
+                        functions[index] = functions[index].copy(
+                            text = normalized,
+                            expression = expression,
+                        )
+                    }
+                }
+                editorError = null
+                editorOpen = false
+            }
+        }
     }
 
     fun changeAngle(mode: AngleMode) {
@@ -194,6 +270,14 @@ fun FunctionPlotTool(padding: PaddingValues) {
             }
         }
     }
+    val formulaLatex = functions.filter { it.visible }
+        .mapNotNull { function ->
+            runCatching { function.expression.toLatex() }.getOrNull()
+                ?.let { latex -> "${function.name}(x) = $latex" }
+        }
+        .let { parts ->
+            parts.take(4).joinToString(",\\quad ") + if (parts.size > 4) ",\\ldots" else ""
+        }
 
     Column(
         modifier = Modifier
@@ -335,6 +419,13 @@ fun FunctionPlotTool(padding: PaddingValues) {
             )
         }
 
+        LatexFormulaCard(
+            latex = formulaLatex.takeIf { it.isNotBlank() },
+            title = "公式 LaTeX",
+            fontSize = 16.sp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -425,70 +516,84 @@ fun FunctionPlotTool(padding: PaddingValues) {
         title = if (editingId == null) "添加函数" else "编辑函数",
         onDismiss = { editorOpen = false },
         confirmText = "确定",
-        onConfirm = {
-            val expression = parsedEditor
-            val normalized = MathExpression.normalizeFunctionInput(editorText).trim()
-            when {
-                normalized.isEmpty() -> editorError = "请输入表达式"
-                expression == null -> editorError = parseEditorError ?: "表达式有误"
-                expression.variables.any { it != "x" } -> editorError = "只支持变量 x"
-                else -> {
-                    val id = editingId
-                    if (id == null) {
-                        val usedNames = functions.mapTo(mutableSetOf()) { it.name }
-                        val name = FUNCTION_NAME_CHARS.map { it.toString() }
-                            .firstOrNull { it !in usedNames } ?: "f${functions.size + 1}"
-                        functions.add(
-                            PlotFunction(
-                                id = nextId,
-                                name = name,
-                                text = normalized,
-                                expression = expression,
-                                color = plotColors[functions.size % plotColors.size],
-                                visible = true,
-                            )
-                        )
-                        nextId += 1
-                    } else {
-                        val index = functions.indexOfFirst { it.id == id }
-                        if (index >= 0) {
-                            functions[index] = functions[index].copy(
-                                text = normalized,
-                                expression = expression,
+        onConfirm = { confirmEditor() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 540.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Text(
+                "函数表达式",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(6.dp))
+            BasicTextField(
+                value = editorField,
+                onValueChange = {
+                    editorField = it
+                    editorError = null
+                },
+                readOnly = true,
+                textStyle = MiuixTheme.textStyles.title3.copy(
+                    color = MiuixTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MiuixTheme.colorScheme.surfaceContainer)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (editorField.text.isEmpty()) {
+                            Text(
+                                text = "例如 sin(x)",
+                                style = MiuixTheme.textStyles.title3,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantActions,
                             )
                         }
+                        innerTextField()
                     }
-                    editorError = null
-                    editorOpen = false
-                }
-            }
-        },
-    ) {
-        TextField(
-            value = editorText,
-            onValueChange = {
-                editorText = it
-                editorError = null
-            },
-            label = "y =",
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "支持 + − × ÷ ^ √，sin、cos、tan、ln、log、sqrt、abs 等函数，π 和 e 是常数；" +
-                "乘法可以省略（2x、x(x+1)）。三角函数按上方选择的角度单位计算。",
-            style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        val error = editorError
-        if (error != null) {
-            Spacer(Modifier.height(6.dp))
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            LatexFormulaCard(
+                latex = parsedEditor?.toLatex(),
+                title = "公式 LaTeX 预览",
+                fontSize = 18.sp,
+            )
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = error,
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.error,
+                text = "支持 + − × ÷ ^ √，sin、cos、tan、ln、log、sqrt、abs 等函数，π 和 e 是常数；" +
+                    "乘法可以省略（2x、x(x+1)）。三角函数按上方选择的角度单位计算。",
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            val error = editorError
+            if (error != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = error,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.error,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            MathKeypad(
+                onInsert = { insertEditor(it) },
+                onBackspace = { backspaceEditor() },
+                onClear = {
+                    editorField = TextFieldValue("")
+                    editorError = null
+                },
+                onMoveCaret = { moveEditorCaret(it) },
+                onSubmit = { confirmEditor() },
+                submitLabel = "完成",
+                compact = true,
             )
         }
     }

@@ -22,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -32,10 +34,14 @@ import com.mingdai.toTool.math.ExactEquationResult
 import com.mingdai.toTool.math.ExactSolveException
 import com.mingdai.toTool.math.MathParseException
 import com.mingdai.toTool.math.NotPolynomialException
+import com.mingdai.toTool.math.equationToLatex
+import com.mingdai.toTool.math.exactResultLatex
 import com.mingdai.toTool.math.formatNumber
+import com.mingdai.toTool.math.numericResultLatex
 import com.mingdai.toTool.math.solveEquation
 import com.mingdai.toTool.math.solvePolynomialEquation
 import com.mingdai.toTool.ui.components.HintText
+import com.mingdai.toTool.ui.components.LatexFormulaCard
 import com.mingdai.toTool.ui.components.MathKeypad
 import com.mingdai.toTool.ui.components.ResultBox
 import com.mingdai.toTool.ui.components.SectionLabel
@@ -67,6 +73,8 @@ private sealed interface SolveOutcome {
 
 @Composable
 fun EquationSolverTool(padding: PaddingValues) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var input by remember {
         mutableStateOf(TextFieldValue(INITIAL_EQUATION, TextRange(INITIAL_EQUATION.length)))
     }
@@ -160,6 +168,15 @@ fun EquationSolverTool(padding: PaddingValues) {
             onBackspace = { backspace() },
             onClear = { input = TextFieldValue("", TextRange(0)) },
             onMoveCaret = { moveCaret(it) },
+            onSubmit = {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            },
+        )
+
+        LatexFormulaCard(
+            latex = remember(input.text) { equationToLatex(input.text) },
+            title = "公式 LaTeX 预览",
         )
 
         when (val result = outcome) {
@@ -285,6 +302,10 @@ private fun ExactResultView(result: ExactEquationResult) {
     if (result.extraneous.isNotEmpty()) {
         HintText("增根（已舍去）：" + result.extraneous.joinToString("、") { it.format() })
     }
+    LatexFormulaCard(
+        latex = exactResultLatex(result),
+        title = "解的 LaTeX 预览",
+    )
     HintText("精确解使用有理数运算化简；根号保留最简形式。")
 }
 
@@ -309,6 +330,10 @@ private fun NumericResultView(solution: EquationSolution) {
                 text = text,
                 label = "数值解（${solution.roots.size} 个实根）",
                 monospace = true,
+            )
+            LatexFormulaCard(
+                latex = numericResultLatex(solution),
+                title = "解的 LaTeX 预览",
             )
             HintText(
                 "非多项式方程在 [${formatNumber(solution.from)}, ${formatNumber(solution.to)}] 内数值扫描，" +
