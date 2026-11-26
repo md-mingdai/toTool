@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
@@ -144,6 +145,7 @@ object ToolRegistry {
         Tool("dev_shortcut", "自定义快捷方式", "选择目标 Activity 与图标，创建桌面快捷方式", ToolCategory.DEVICE, Icons.Filled.AddToHomeScreen),
         Tool("dev_shell", "执行 Shell 指令", "通过 Shizuku 执行命令或 .sh 脚本，查看日志", ToolCategory.DEVICE, Icons.Filled.Terminal),
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.ADVANCED, Icons.Filled.Wallpaper),
+        Tool("dev_database", "数据库管理", "管理远程 MySQL / MariaDB 与 SQLite 单文件数据库", ToolCategory.ADVANCED, Icons.Filled.Storage),
         Tool("dev_wallpaper_video", "桌面视频壁纸", "将视频设为桌面动态壁纸", ToolCategory.DEVICE, Icons.Filled.VideoLibrary),
         Tool("dev_pixelcheck", "屏幕坏点检测", "纯色与点阵逐格排查", ToolCategory.DEVICE, Icons.Filled.GridView),
         Tool("dev_battery_spoof", "电量伪装", "通过 Shizuku / Root 修改系统上报的电量与充电状态", ToolCategory.DEVICE, Icons.Filled.BatteryChargingFull),

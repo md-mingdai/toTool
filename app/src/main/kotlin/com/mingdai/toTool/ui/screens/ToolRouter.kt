@@ -47,6 +47,7 @@ import com.mingdai.toTool.ui.screens.tools.ColorTool
 import com.mingdai.toTool.ui.screens.tools.CompassTool
 import com.mingdai.toTool.ui.screens.tools.DateTool
 import com.mingdai.toTool.ui.screens.tools.DecibelTool
+import com.mingdai.toTool.ui.screens.tools.DatabaseTool
 import com.mingdai.toTool.ui.screens.tools.DeviceInfoTool
 import com.mingdai.toTool.ui.screens.tools.EquationSolverTool
 import com.mingdai.toTool.ui.screens.tools.FakeCallTool
@@ -259,6 +260,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_shortcut" -> CustomShortcutTool(padding)
             "dev_shell" -> ShellTool(padding)
             "dev_wallpaper_get" -> WallpaperExtractorTool(padding)
+            "dev_database" -> DatabaseTool(padding)
             "dev_wallpaper_video" -> VideoWallpaperTool(padding)
             "dev_battery_spoof" -> BatterySpoofTool(padding)
             "dev_dpi" -> DpiTool(padding)

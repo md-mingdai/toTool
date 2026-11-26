@@ -4,7 +4,7 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：75 个日常、文本、计算、设备、图片、媒体与高级工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：76 个日常、文本、计算、设备、图片、媒体与高级工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.2-blue)](https://github.com/md-mingdai/toTool/actions)
 
@@ -72,6 +72,12 @@
 - 支持立即来电或按秒定时;定时使用系统精确闹钟。接听后可选循环播放本地音频,未选择时用系统 TTS 朗读默认语句。
 - 需要电话状态与号码权限;首次使用需在系统通话账户设置中启用「模拟来电」;Android 12+ 的定时功能需要精确闹钟权限,定时状态会在重启或应用更新后恢复。仅供个人设备上的测试、演示或脱身场景,请勿用于欺骗、骚扰或冒充他人。
 
+### 数据库管理
+
+- 远程 MySQL / MariaDB：填写主机、端口、用户名、密码和可选数据库，支持 SSL；连接后可切换数据库、浏览表和视图、分页查看数据，并通过 SQL 编辑器执行查询和写操作。
+- SQLite：打开 `.db` / `.sqlite` / `.sqlite3` 单文件数据库，或新建数据库；可在手机上浏览表、执行 SQL。修改写入应用私有工作副本，点「保存」后再覆盖回原文件，也可以导出副本。
+- 远程密码只在本次会话内使用，不持久化；SQL 结果最多预览 200 行，表数据每页 50 行。执行 DROP / TRUNCATE 前会二次确认。
+
 ### 后台任务
 
 - 隔空闪传、弱网助手、全局方向、格式转换、FFmpeg 命令和媒体工具在执行后不会随页面关闭而停止。
@@ -109,7 +115,7 @@
 | 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、振动器、自定义快捷方式、Shizuku Shell、视频壁纸、屏幕坏点检测、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片、纯色图制作、九宫格切图、图片文字化、图片转素描、图片取色、图片 Base64 互转 |
 | 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速、视频链接解析 |
-| 高级功能 | 隔空闪传、弱网助手、通知管理、米游记录获取、提取 APK、安装 APKS / XAPK / APKM、模拟来电、提取当前壁纸 |
+| 高级功能 | 隔空闪传、弱网助手、通知管理、米游记录获取、提取 APK、安装 APKS / XAPK / APKM、模拟来电、提取当前壁纸、数据库管理 |
 
 - 安装特殊应用支持 APKS / XAPK / APKM / 多 APK,可选在安装成功后删除所选安装包文件(默认关闭,文件提供方不允许删除时会提示)。
 - 倒数日支持每年重复，并可作为主屏幕小组件添加，组件显示最近的一条倒数日，点按直接打开工具。
@@ -134,11 +140,12 @@
 - 格式转换中的 SVG 由 AndroidSVG 渲染，ICO 由项目内的轻量编解码器读写（支持 PNG 条目和常见 BI_RGB 位深）；SVG 分辨率在转换前由用户指定。
 - 方程与函数输入框本身就是渲染后的公式，可直接粘贴 LaTeX；独立的 LaTeX 渲染工具支持实时查看任意数学公式。KaTeX 字体作为资源模块打进 APK，不依赖网络或 WebView。
 - 倒数日使用 SharedPreferences 保存，主屏幕组件由 AppWidgetProvider + RemoteViews 绘制；日期变化、时区变化和定时刷新都会更新最近一条。
+- 数据库管理使用轻量的 MariaDB Connector/J（约 0.6 MB）连接 MySQL / MariaDB；SQLite 直接使用 Android 自带的 SQLiteDatabase，不额外引入 ORM 或数据库引擎，以控制 APK 体积。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 
 ## 隐私与权限
 
-所有功能都在本机完成，不包含统计、广告或账号系统。隔空闪传只在同一局域网内提供网页服务，文件不经过云端。密码熵源的传感器、麦克风、摄像头采样和绘制笔迹只在该次生成时使用，原始数据不保存。
+所有功能都在本机完成，不包含统计、广告或账号系统。隔空闪传只在同一局域网内提供网页服务，文件不经过云端。密码熵源的传感器、麦克风、摄像头采样和绘制笔迹只在该次生成时使用，原始数据不保存。数据库管理会从本机直接连接用户填写的 MySQL / MariaDB 服务器，凭据不经过第三方，远程密码不会持久化。
 
 | 权限 | 用途 |
 | --- | --- |
@@ -169,6 +176,7 @@
 - [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel)：TUN 报文与 SOCKS5 TCP / UDP 的转换（MIT），通过 `com.zaneschepke:hevtunnel` AAR（Apache-2.0）引入。
 - [AndroidSVG](https://github.com/BigBadaboom/androidsvg)：格式转换中的 SVG 渲染（Apache-2.0）。
 - [latex](https://github.com/huarangmeng/latex)：数学公式的 LaTeX 渲染（MIT）；配套 KaTeX 字体（SIL OFL 1.1）。
+- [MariaDB Connector/J](https://github.com/mariadb-corporation/mariadb-connector-j)：MySQL / MariaDB JDBC 驱动（LGPL-2.1-or-later）。
 
 ## 许可证
 

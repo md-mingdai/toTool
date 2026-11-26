@@ -91,6 +91,7 @@ private val Licenses = listOf(
     LicenseItem("AndroidSVG", "格式转换中的 SVG 渲染", "Apache License 2.0"),
     LicenseItem("latex-renderer", "数学公式 LaTeX 渲染", "MIT License"),
     LicenseItem("KaTeX 字体", "LaTeX 公式字体", "SIL Open Font License 1.1"),
+    LicenseItem("MariaDB Connector/J", "MySQL / MariaDB 数据库连接", "LGPL 2.1-or-later"),
     LicenseItem("Ktor", "隔空闪传的局域网 HTTP 服务", "Apache License 2.0"),
     LicenseItem("React / Vite / Phosphor / noble", "隔空闪传网页前端", "MIT / ISC"),
     LicenseItem("Space Grotesk / JetBrains Mono", "隔空闪传网页字体", "SIL Open Font License 1.1"),

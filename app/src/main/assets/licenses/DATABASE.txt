@@ -1,0 +1,11 @@
+Database management
+===================
+
+MariaDB Connector/J
+  https://github.com/mariadb-corporation/mariadb-connector-j
+  Copyright (c) MariaDB plc and contributors
+  Licensed under the GNU Lesser General Public License, version 2.1 or later:
+  https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+The library is included as the Maven artifact org.mariadb.jdbc:mariadb-java-client:2.7.13.
+SQLite support uses Android's built-in android.database.sqlite, not a bundled SQLite engine.
