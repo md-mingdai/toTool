@@ -15,6 +15,13 @@ import java.util.Locale
  * 这样不需要把整个数据库读进内存，也不会受 SAF 不支持按路径打开的限制。
  */
 internal class SqliteRepository(private val context: Context) {
+    init {
+        // 工作副本只用于当前会话；上次进程异常退出留下的副本不应长期保留。
+        File(context.noBackupFilesDir, "database_manager")
+            .listFiles()
+            ?.forEach { it.delete() }
+    }
+
     private var database: SQLiteDatabase? = null
     private var workingFile: File? = null
 
@@ -246,7 +253,7 @@ internal class SqliteRepository(private val context: Context) {
         "\"" + name.replace("\"", "\"\"") + "\""
 
     private fun prepareWorkingFile(uri: Uri, name: String): File {
-        val dir = File(context.filesDir, "database_manager").apply { mkdirs() }
+        val dir = File(context.noBackupFilesDir, "database_manager").apply { mkdirs() }
         val base = name.substringAfterLast('/')
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
             .ifBlank { "database" }
