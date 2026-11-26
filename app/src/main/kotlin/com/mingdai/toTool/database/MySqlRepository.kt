@@ -34,7 +34,6 @@ internal class MySqlRepository {
         val options = buildList {
             add("connectTimeout=8000")
             add("socketTimeout=30000")
-            add("tcpKeepAlive=true")
             add("allowPublicKeyRetrieval=true")
             add("useSsl=${profile.useSsl}")
         }.joinToString("&")

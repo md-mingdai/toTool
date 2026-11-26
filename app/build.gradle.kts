@@ -173,7 +173,7 @@ dependencies {
     implementation("io.github.huarangmeng:latex-fonts-katex:1.8.0")
 
     // 数据库管理：轻量 MariaDB/MySQL JDBC 驱动（2.7.x 含 Android 兼容性修复）
-    implementation("org.mariadb.jdbc:mariadb-java-client:2.7.13")
+    implementation("org.mariadb.jdbc:mariadb-java-client:2.7.15")
 
     // 弱网助手：把 VpnService 的 TUN 报文转成 SOCKS5 TCP/UDP 的 native 转发层
     // （Apache-2.0 AAR，内部为 MIT 的 hev-socks5-tunnel）
