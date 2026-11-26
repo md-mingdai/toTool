@@ -143,8 +143,12 @@ internal object PasswordEntropy {
         val digest = MessageDigest.getInstance("SHA-256")
         parts.forEach { digest.update(it) }
         digest.update(SecureRandom().generateSeed(32))
+        val seed = digest.digest()
+        // 摘要已经混入种子，原始采样（传感器摘要 / 音频 / 摄像头帧）用完立即清零。
+        parts.forEach { it.fill(0.toByte()) }
         val random = SecureRandom()
-        random.setSeed(digest.digest())
+        random.setSeed(seed)
+        seed.fill(0.toByte())
         return PasswordRandom { random.nextInt(it) }
     }
 
@@ -228,10 +232,14 @@ internal object PasswordEntropy {
             val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(2_048)
             val deadline = System.nanoTime() + 300_000_000L
-            record.startRecording()
-            while (System.nanoTime() < deadline) {
-                val read = record.read(buffer, 0, buffer.size)
-                if (read > 0) digest.update(buffer, 0, read)
+            try {
+                record.startRecording()
+                while (System.nanoTime() < deadline) {
+                    val read = record.read(buffer, 0, buffer.size)
+                    if (read > 0) digest.update(buffer, 0, read)
+                }
+            } finally {
+                buffer.fill(0.toByte())
             }
             digest.digest()
         } catch (e: Exception) {
