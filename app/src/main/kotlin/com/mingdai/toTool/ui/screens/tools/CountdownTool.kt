@@ -139,7 +139,10 @@ fun CountdownTool(padding: PaddingValues) {
     AppDialog(
         show = editorOpen,
         title = if (editingId == null) "添加倒数日" else "编辑倒数日",
-        onDismiss = { editorOpen = false },
+        onDismiss = {
+            editorOpen = false
+            showDatePicker = false
+        },
         confirmText = "保存",
         onConfirm = { saveEvent() },
     ) {
@@ -156,7 +159,10 @@ fun CountdownTool(padding: PaddingValues) {
         Spacer(Modifier.height(8.dp))
         Card(
             modifier = Modifier.fillMaxWidth(),
-            onClick = { showDatePicker = true },
+            onClick = {
+                editorOpen = false
+                showDatePicker = true
+            },
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
@@ -201,10 +207,14 @@ fun CountdownTool(padding: PaddingValues) {
         show = showDatePicker,
         initial = date,
         title = "选择日期",
-        onDismiss = { showDatePicker = false },
+        onDismiss = {
+            showDatePicker = false
+            editorOpen = true
+        },
         onConfirm = {
             date = it
             showDatePicker = false
+            editorOpen = true
         },
     )
 

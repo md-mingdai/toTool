@@ -69,10 +69,12 @@ internal fun exactResultLatex(result: ExactEquationResult): String? {
 internal fun numericResultLatex(solution: EquationSolution): String? {
     if (solution.identity || solution.contradiction || solution.roots.isEmpty()) return null
     val variable = solution.variable ?: "x"
-    return solution.roots.mapIndexed { index, value ->
+    val shown = solution.roots.take(6)
+    val body = shown.mapIndexed { index, value ->
         val name = if (solution.roots.size == 1) variable else "${variable}_{${index + 1}}"
         "$name = ${latexNumber(value)}"
     }.joinToString(",\\quad ")
+    return if (solution.roots.size > shown.size) "$body,\\ldots" else body
 }
 
 private fun splitTopLevelEquals(text: String): Pair<String, String>? {
@@ -128,7 +130,8 @@ private fun surdLatex(surd: Surd): String {
 private fun complexLatex(real: Rational, imaginary: Surd): String {
     val negative = imaginary.toDouble() < 0
     val absImaginary = if (negative) imaginary.negate() else imaginary
-    val imaginaryText = "${surdLatex(absImaginary)}i"
+    val coefficient = surdLatex(absImaginary)
+    val imaginaryText = (if (coefficient == "1") "" else coefficient) + "i"
     return when {
         real.isZero() -> if (negative) "-$imaginaryText" else imaginaryText
         negative -> "${rationalLatex(real)} - $imaginaryText"
