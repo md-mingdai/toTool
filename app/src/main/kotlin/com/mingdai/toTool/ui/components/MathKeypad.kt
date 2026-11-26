@@ -74,6 +74,7 @@ fun MathKeypad(
                     "π" to "π",
                     "e" to "e",
                     "^" to "^",
+                    "°" to "°",
                     "," to ",",
                 ).forEach { (label, insert) ->
                     SelectChip(
@@ -82,11 +83,6 @@ fun MathKeypad(
                         label = label,
                     )
                 }
-                SelectChip(
-                    selected = false,
-                    onClick = onClear,
-                    label = "AC",
-                )
             }
         }
 
@@ -101,7 +97,7 @@ fun MathKeypad(
             ),
             listOf(
                 KeySpec("sin", KeyAction.Insert("sin("), KeyTone.Function),
-                KeySpec("x°", KeyAction.Insert("°"), KeyTone.Function),
+                KeySpec("x", KeyAction.Insert("x"), KeyTone.Variable),
                 KeySpec("7", KeyAction.Insert("7"), KeyTone.Digit),
                 KeySpec("8", KeyAction.Insert("8"), KeyTone.Digit),
                 KeySpec("9", KeyAction.Insert("9"), KeyTone.Digit),
@@ -152,20 +148,20 @@ fun MathKeypad(
             horizontalArrangement = Arrangement.spacedBy(rowGap),
         ) {
             MathKey(
+                label = "AC",
+                tone = KeyTone.Utility,
+                height = keyHeight,
+                compact = compact,
+                modifier = Modifier.weight(1f),
+                onClick = onClear,
+            )
+            MathKey(
                 label = if (expanded) "收起" else "更多",
                 tone = KeyTone.Utility,
                 height = keyHeight,
                 compact = compact,
                 modifier = Modifier.weight(1f),
                 onClick = { expanded = !expanded },
-            )
-            MathKey(
-                label = "换行",
-                tone = KeyTone.Utility,
-                height = keyHeight,
-                compact = compact,
-                modifier = Modifier.weight(1f),
-                onClick = { onInsert("\n") },
             )
             MathKey(
                 label = "←",
@@ -201,7 +197,7 @@ private sealed interface KeyAction {
     class Move(val delta: Int) : KeyAction
 }
 
-private enum class KeyTone { Function, Digit, Operator, Utility, Accent }
+private enum class KeyTone { Function, Variable, Digit, Operator, Utility, Accent }
 
 private class KeySpec(
     val label: String,
@@ -247,13 +243,14 @@ private fun MathKey(
 ) {
     val colors = MiuixTheme.colorScheme
     val background = when (tone) {
+        KeyTone.Variable -> colors.primary.copy(alpha = 0.18f)
         KeyTone.Digit -> colors.primary.copy(alpha = 0.10f)
         KeyTone.Accent -> colors.primary
         KeyTone.Utility -> colors.secondaryContainer
         else -> colors.surfaceContainer
     }
     val content = when (tone) {
-        KeyTone.Digit, KeyTone.Operator -> colors.primary
+        KeyTone.Variable, KeyTone.Digit, KeyTone.Operator -> colors.primary
         KeyTone.Accent -> colors.onPrimary
         else -> colors.onSurface
     }
