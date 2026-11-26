@@ -210,6 +210,19 @@ private fun instFormatSize(bytes: Long): String = when {
     else -> String.format(Locale.US, "%.2f GB", bytes / 1073741824.0)
 }
 
+/**
+ * 只选了主包时不提交安装会话：拆分应用缺 split 会被系统拒绝（INSTALL_FAILED_MISSING_SPLIT）。
+ * 单独一个名为 base.apk / base-master.apk 的文件也按拆分包主包处理。
+ */
+private fun instMissingSplits(entries: List<SplitEntry>, selected: List<SplitEntry>): Boolean {
+    val base = entries.firstOrNull { it.kind == SplitKind.BASE } ?: return false
+    val hasSplits = entries.any { it.kind != SplitKind.BASE }
+    if (hasSplits && selected.none { it.kind != SplitKind.BASE }) return true
+    if (entries.size != 1) return false
+    val name = base.path.substringAfterLast('/').lowercase(Locale.ROOT)
+    return name == "base.apk" || name == "base-master.apk" || name.startsWith("split_base")
+}
+
 private fun instBitmapFromDrawable(drawable: Drawable): Bitmap? {
     val w = drawable.intrinsicWidth
     val h = drawable.intrinsicHeight
@@ -924,12 +937,23 @@ fun SplitInstallerTool(padding: PaddingValues) {
 
     fun startInstall() {
         val pkg = loaded ?: return
+        val toInstall = pkg.plan.entries.filter { it.path in chosen }
+        if (toInstall.isEmpty()) return
+        if (instMissingSplits(pkg.plan.entries, toInstall)) {
+            stage = InstStage.Finished(
+                ok = false,
+                title = "不能只安装 base.apk",
+                detail = "这套安装包包含拆分包，必须同时选择需要的 split APK；" +
+                    "只装主包会被系统拒绝（INSTALL_FAILED_MISSING_SPLIT）。",
+                launchPackage = null,
+                canRetry = true,
+            )
+            return
+        }
         if (!context.packageManager.canRequestPackageInstalls()) {
             askAllowSource = true
             return
         }
-        val toInstall = pkg.plan.entries.filter { it.path in chosen }
-        if (toInstall.isEmpty()) return
         stage = InstStage.Writing(0, toInstall.sumOf { it.size.coerceAtLeast(0L) })
         scope.launch {
             try {
@@ -1284,7 +1308,9 @@ private fun InstReadyContent(
     val entries = pkg.plan.entries
     val selectedEntries = entries.filter { it.path in chosen }
     val selectedBytes = selectedEntries.sumOf { it.size.coerceAtLeast(0L) }
-    val hasBase = selectedEntries.any { it.kind == SplitKind.BASE }
+    val baseEntry = entries.firstOrNull { it.kind == SplitKind.BASE }
+    val hasBase = baseEntry != null
+    val missingSplits = instMissingSplits(entries, selectedEntries)
 
     InstPackageHeader(pkg)
 
@@ -1310,6 +1336,14 @@ private fun InstReadyContent(
         }
     }
     HintText("已按本机配置勾选推荐项，一般无需改动")
+    if (missingSplits) {
+        Text(
+            "不能只安装 base.apk：这套安装包包含拆分包，至少还要选择一个 split APK，" +
+                "否则系统会报 INSTALL_FAILED_MISSING_SPLIT。",
+            style = MiuixTheme.textStyles.footnote1,
+            color = WarnColor,
+        )
+    }
 
     pkg.plan.warnings.forEach { warning ->
         Row(verticalAlignment = Alignment.Top) {
@@ -1396,7 +1430,7 @@ private fun InstReadyContent(
         }
     }
 
-    PrimaryButton(onClick = onInstall, enabled = hasBase, modifier = Modifier.fillMaxWidth()) {
+    PrimaryButton(onClick = onInstall, enabled = hasBase && !missingSplits, modifier = Modifier.fillMaxWidth()) {
         Text("开始安装")
     }
     SecondaryButton(onClick = onReselect, modifier = Modifier.fillMaxWidth()) { Text("重新选择") }
