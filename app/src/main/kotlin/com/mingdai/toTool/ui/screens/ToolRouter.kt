@@ -74,6 +74,7 @@ import com.mingdai.toTool.ui.screens.tools.PixelCheckFullscreen
 import com.mingdai.toTool.ui.screens.tools.ProtractorTool
 import com.mingdai.toTool.ui.screens.tools.BarcodeTool
 import com.mingdai.toTool.ui.screens.tools.RulerTool
+import com.mingdai.toTool.ui.screens.tools.CountdownTool
 import com.mingdai.toTool.ui.screens.tools.ScoreboardTool
 import com.mingdai.toTool.ui.screens.tools.SensorListTool
 import com.mingdai.toTool.ui.screens.tools.ShellTool
@@ -271,6 +272,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "daily_compass" -> CompassTool(padding)
             "daily_protractor" -> ProtractorTool(padding)
             "daily_scoreboard" -> ScoreboardTool(padding)
+            "daily_countdown" -> CountdownTool(padding)
             // --- 图片工具 ---
             "img_compress" -> ImageCompressTool(padding)
             "img_grayscale" -> ImageGrayscaleTool(padding)

@@ -308,6 +308,22 @@
             </intent-filter>
         </receiver>
 
+        <!-- 倒数日主屏幕小组件。 -->
+        <receiver
+            android:name=".countdown.CountdownWidgetProvider"
+            android:exported="true"
+            android:label="@string/countdown_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/countdown_widget_info" />
+        </receiver>
+
         <!-- Shizuku：「执行 Shell 指令」工具靠它拿到 shell 权限。
              Shizuku 服务启动后会通过这个 Provider 把 Binder 送进本应用。 -->
         <provider

@@ -107,6 +107,7 @@ object ToolRegistry {
         Tool("daily_whiteboard", "简易画板", "手指绘画与橡皮擦", ToolCategory.DAILY, Icons.Filled.Create),
         Tool("daily_clock", "时间屏幕", "全屏大字时钟与日期", ToolCategory.DAILY, Icons.Filled.ScreenShare),
         Tool("daily_scoreboard", "比赛记分牌", "双方比分与计时", ToolCategory.DAILY, Icons.Filled.SportsScore),
+        Tool("daily_countdown", "倒数日", "记录生日、纪念日和倒计时，可添加桌面小组件", ToolCategory.DAILY, Icons.Filled.Event),
         // --- 文本工具 ---
         Tool("text_charcount", "字符统计", "统计字符、单词、行数与字节数", ToolCategory.TEXT, Icons.Filled.Numbers),
         Tool("text_case", "大小写转换", "大写/小写/标题/句子/反转", ToolCategory.TEXT, Icons.Filled.TextFields),

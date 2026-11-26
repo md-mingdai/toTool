@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="window_background">#FF000000</color>
+    <color name="countdown_widget_background">#FF1C1B1F</color>
+    <color name="countdown_widget_text">#FFF5F1F7</color>
+    <color name="countdown_widget_muted">#FFB0AEB3</color>
+    <color name="countdown_widget_accent">#FF4DD0C4</color>
 </resources>

@@ -3,4 +3,8 @@
     <!-- 窗口背景：与 Miuix 亮色 surface (#F7F7F7) 一致；values-night 中改为纯黑，避免暗色模式白屏闪烁。 -->
     <color name="window_background">#FFF7F7F7</color>
     <color name="ic_launcher_background">#FF00897B</color>
+    <color name="countdown_widget_background">#FFF7F4FA</color>
+    <color name="countdown_widget_text">#FF1C1B1F</color>
+    <color name="countdown_widget_muted">#FF6B6B6B</color>
+    <color name="countdown_widget_accent">#FF00897B</color>
 </resources>
