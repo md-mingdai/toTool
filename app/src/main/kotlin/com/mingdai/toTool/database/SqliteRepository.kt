@@ -101,7 +101,7 @@ internal class SqliteRepository(private val context: Context) {
         val db = requireDatabase()
         val started = System.nanoTime()
         val firstWord = sql.trimStart()
-            .substringBefore(Regex("\\s+"))
+            .takeWhile { !it.isWhitespace() }
             .uppercase(Locale.ROOT)
         val returnsRows = firstWord in setOf("SELECT", "PRAGMA", "EXPLAIN", "WITH", "VALUES") ||
             Regex("\\bRETURNING\\b", RegexOption.IGNORE_CASE).containsMatchIn(sql)
@@ -229,7 +229,7 @@ internal class SqliteRepository(private val context: Context) {
         Cursor.FIELD_TYPE_NULL -> "NULL"
         Cursor.FIELD_TYPE_INTEGER -> "INTEGER"
         Cursor.FIELD_TYPE_FLOAT -> "REAL"
-        Cursor.FIELD_TYPE_TEXT -> "TEXT"
+        Cursor.FIELD_TYPE_STRING -> "TEXT"
         Cursor.FIELD_TYPE_BLOB -> "BLOB"
         else -> ""
     }
