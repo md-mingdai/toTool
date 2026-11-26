@@ -221,6 +221,24 @@ jobs:
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "- \`${ABI}\`：$(du -h "dist/${NAME}.apk" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
+      # 确认只使用 APK Signature Scheme v2 + v3，且没有退回 v1 JAR 签名
+      - name: 验证 APK 签名（V2 + V3）
+        run: |
+          APK=$(find dist -name '*.apk' | head -n 1)
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          [ -n "$APKSIGNER" ] || { echo "::error::没有找到 apksigner"; exit 1; }
+          "$APKSIGNER" verify --verbose "$APK" | tee apksigner.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apksigner.txt || {
+            echo "::error::APK 没有 V2 签名"; exit 1;
+          }
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apksigner.txt || {
+            echo "::error::APK 没有 V3 签名"; exit 1;
+          }
+          if grep -q "Verified using v1 scheme (JAR signing): true" apksigner.txt; then
+            echo "::error::APK 仍包含 V1 签名，应只使用 V2+V3"
+            exit 1
+          fi
+
       # 确认 APK 里带着这个架构的 libffmpeg.so，并且没有混进其它架构的原生库
       - name: 检查 APK 里的原生库与网页资源
         run: |
@@ -236,6 +254,12 @@ jobs:
           echo "$ASSETS" | grep -qx 'assets/flashdrop/index.html' || { echo "::error::APK 里没有 assets/flashdrop/index.html"; exit 1; }
           if echo "$ASSETS" | grep -Eq '^assets/flashdrop/(src|node_modules|package\.json|package-lock\.json)'; then
             echo "::error::APK 的 assets/flashdrop 里混入了前端源码或依赖"
+            exit 1
+          fi
+          # DEX 必须使用 deflate 压缩（packaging.dex.useLegacyPackaging），否则安装包会非常大
+          DEX_METHOD=$(unzip -v "$APK" | awk '$NF ~ /^classes[0-9]*\.dex$/ {print $2; exit}')
+          if [ "$DEX_METHOD" != "Defl:N" ]; then
+            echo "::error::APK 里的 DEX 没有被压缩（当前：$DEX_METHOD）"
             exit 1
           fi
 

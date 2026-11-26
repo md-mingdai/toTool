@@ -39,7 +39,16 @@ android {
     // 签名：CI（GitHub Actions）通过环境变量传入固定的 release 密钥，
     // 这样每次构建的签名一致，新版 APK 才能直接覆盖安装旧版。
     // 没有配置时回退到 debug 签名，保证本地/未配置 Secrets 时 APK 也能安装。
+    // 只使用 APK Signature Scheme v2 + v3（minSdk 28 已覆盖）；不再生成 v1/v4 签名。
     val ciKeystore = System.getenv("KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = false
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = false
+        }
+    }
     if (ciKeystore != null) {
         signingConfigs {
             create("ci") {
@@ -47,6 +56,10 @@ android {
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")
                 keyPassword = System.getenv("KEY_PASSWORD")
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = false
             }
         }
     }
@@ -73,6 +86,11 @@ android {
     }
 
     packaging {
+        // DEX 在 minSdk >= 28 时默认不压缩；这里强制使用传统压缩，显著减小 APK 体积，
+        // 代价是安装时由系统解压。签名不受影响。
+        dex {
+            useLegacyPackaging = true
+        }
         // ffmpeg 可执行文件以 libffmpeg.so 的形式放在 jniLibs/<abi>/ 里（由 ffmpeg/build.sh 从源码编译，
         // 不提交进仓库），必须在安装时解压到 nativeLibraryDir 才能被 exec（Android 10+ 禁止执行 filesDir 里的文件）。
         jniLibs {
@@ -153,6 +171,9 @@ dependencies {
     // 数学公式 LaTeX 渲染：原生 Compose 实现，配套 KaTeX 字体资源
     implementation("io.github.huarangmeng:latex-renderer:1.8.0")
     implementation("io.github.huarangmeng:latex-fonts-katex:1.8.0")
+
+    // 数据库管理：轻量 MariaDB/MySQL JDBC 驱动（2.7.x 含 Android 兼容性修复）
+    implementation("org.mariadb.jdbc:mariadb-java-client:2.7.13")
 
     // 弱网助手：把 VpnService 的 TUN 报文转成 SOCKS5 TCP/UDP 的 native 转发层
     // （Apache-2.0 AAR，内部为 MIT 的 hev-socks5-tunnel）
