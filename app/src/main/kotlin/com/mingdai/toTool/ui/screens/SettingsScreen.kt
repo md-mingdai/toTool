@@ -1,5 +1,7 @@
 package com.mingdai.toTool.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -86,6 +88,9 @@ private val Licenses = listOf(
     LicenseItem("Jetpack Compose / AndroidX", "界面框架与基础库", "Apache License 2.0"),
     LicenseItem("Miuix", "小米风格的界面组件", "Apache License 2.0"),
     LicenseItem("ZXing", "二维码生成", "Apache License 2.0"),
+    LicenseItem("AndroidSVG", "格式转换中的 SVG 渲染", "Apache License 2.0"),
+    LicenseItem("latex-renderer", "数学公式 LaTeX 渲染", "MIT License"),
+    LicenseItem("KaTeX 字体", "LaTeX 公式字体", "SIL Open Font License 1.1"),
     LicenseItem("Ktor", "隔空闪传的局域网 HTTP 服务", "Apache License 2.0"),
     LicenseItem("React / Vite / Phosphor / noble", "隔空闪传网页前端", "MIT / ISC"),
     LicenseItem("Space Grotesk / JetBrains Mono", "隔空闪传网页字体", "SIL Open Font License 1.1"),
@@ -304,6 +309,18 @@ fun SettingsScreen(navController: NavHostController) {
                 AboutRow(stringResource(R.string.about_developer), "mingdai")
                 AboutRow(stringResource(R.string.about_version), "$versionName（$versionCode）")
                 AboutRow("工具数量", "${ToolRegistry.all.size} 个")
+                ArrowPreference(
+                    title = "源代码",
+                    summary = "github.com/md-mingdai/toTool",
+                    onClick = {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/md-mingdai/toTool"),
+                        )
+                        runCatching { context.startActivity(intent) }
+                            .onFailure { Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show() }
+                    },
+                )
                 ArrowPreference(
                     title = "开源许可",
                     summary = "本应用使用的开源组件",
