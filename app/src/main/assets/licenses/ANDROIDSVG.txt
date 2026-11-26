@@ -1,0 +1,10 @@
+SVG rendering
+=============
+
+AndroidSVG
+  https://github.com/BigBadaboom/androidsvg
+  Copyright (c) 2013-2019 Mark McKay
+  Licensed under the Apache License, Version 2.0:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+The library is included as the Maven artifact com.caverock:androidsvg-aar:1.4.
