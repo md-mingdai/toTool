@@ -209,7 +209,7 @@ fun WeakNetTool(padding: PaddingValues) {
                     Text(
                         when {
                             state.error != null -> "启动失败"
-                            state.paused -> "已暂停限速"
+                            state.paused -> "已暂停（直连）"
                             running -> "运行中"
                             else -> "未运行"
                         },
@@ -249,25 +249,15 @@ fun WeakNetTool(padding: PaddingValues) {
                             color = colors.onSurfaceVariantSummary,
                         )
                     }
-                    if (state.paused) {
-                        Text(
-                            "VPN 保持连接，仅暂停带宽、延迟、抖动与丢包；停止服务才会断开 VPN。",
-                            style = MiuixTheme.textStyles.footnote2,
-                            color = colors.onSurfaceVariantSummary,
-                        )
-                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         SecondaryButton(
-                            onClick = {
-                                if (state.paused) WeakNetVpnService.resume(context)
-                                else WeakNetVpnService.pause(context)
-                            },
+                            onClick = { WeakNetVpnService.pause(context) },
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(if (state.paused) "继续限制" else "暂停限制", maxLines = 1)
+                            Text("暂停限制", maxLines = 1)
                         }
                         SecondaryButton(
                             onClick = { WeakNetVpnService.stop(context) },
@@ -282,13 +272,21 @@ fun WeakNetTool(padding: PaddingValues) {
                             Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ->
                                 "弱网助手需要 Android 10 及以上系统"
                             state.paused ->
-                                "弱网参数已暂停，VPN 保持连接。"
+                                "已暂停：当前为直连网络，服务和悬浮窗保留；点击下方「继续限制」会重新建立 VPN。"
                             else ->
                                 "配置目标应用或主机后启动，VPN 会保持运行并可通过悬浮窗控制。"
                         },
                         style = MiuixTheme.textStyles.footnote1,
                         color = colors.onSurfaceVariantSummary,
                     )
+                    if (state.paused) {
+                        SecondaryButton(
+                            onClick = { WeakNetVpnService.stop(context) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("停止服务")
+                        }
+                    }
                 }
             }
         }
@@ -426,7 +424,7 @@ fun WeakNetTool(padding: PaddingValues) {
                         onCheckedChange = {
                             showOverlay = it
                             save()
-                            if (running) WeakNetVpnService.update(context)
+                            if (running || state.paused) WeakNetVpnService.update(context)
                         },
                     )
                 }
@@ -448,7 +446,7 @@ fun WeakNetTool(padding: PaddingValues) {
             }
         }
 
-        HintText("弱网助手通过 VpnService 的 TUN 接管所选应用的 TCP/UDP 流量（含 DNS、QUIC 等 UDP），按带宽、附加延迟、抖动与丢包限速。TCP 的丢包以重传停顿模拟，UDP 则直接丢弃数据报；暂停只关闭弱网参数，VPN 会保持连接，停止服务才断开。目标主机留空时限制该应用的全部流量。")
+        HintText("弱网助手通过 VpnService 的 TUN 接管所选应用的 TCP/UDP 流量（含 DNS、QUIC 等 UDP），按带宽、附加延迟、抖动与丢包限速。TCP 的丢包以重传停顿模拟，UDP 则直接丢弃数据报；暂停会暂时关闭 VPN/TUN 切回直连网络，服务和悬浮窗保留，继续限制时重新建立 VPN；停止服务才结束任务。目标主机留空时限制该应用的全部流量。")
     }
 
     if (showWarning) {

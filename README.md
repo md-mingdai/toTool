@@ -129,7 +129,7 @@
 - FFmpeg 以 `libffmpeg.so` 形式按 CPU 架构打包，由 CI 从源码交叉编译；启用 GPL 构建，带 x264（H.264）与 libvpx（VP8/VP9），并保留 mpeg4 兜底。媒体工具的字幕、水印先由 Canvas 渲染成透明 PNG，再交给 FFmpeg overlay，避免依赖 libass / drawtext。
 - 隔空闪传网页位于 `web/`，使用 Vite + React + TypeScript；CI 只把 `web/dist` 放进 APK。
 - 手机端内嵌 Ktor 服务器，提供静态页面和同源 API；文件通过「所有文件访问权限」读写，上传默认保存到 `Download/toTool/FlashDrop/`。
-- 弱网助手用 VpnService 的 TUN 接管所选应用的 TCP 与 UDP 流量，交给本地 SOCKS5 转发层（hev-socks5-tunnel）直连目标，可按 KB/s、附加延迟、抖动与丢包限速，支持 UDP 会话、DNS、IPv4 / IPv6、目标主机过滤与悬浮窗监控；UDP 丢包直接丢弃数据报，TCP 丢包以重传停顿模拟，避免破坏字节流；暂停只停止弱网参数，VPN/TUN 与悬浮球保持，只有停止服务才断开 VPN。
+- 弱网助手用 VpnService 的 TUN 接管所选应用的 TCP 与 UDP 流量，交给本地 SOCKS5 转发层（hev-socks5-tunnel）直连目标，可按 KB/s、附加延迟、抖动与丢包限速，支持 UDP 会话、DNS、IPv4 / IPv6、目标主机过滤与悬浮窗监控；UDP 丢包直接丢弃数据报，TCP 丢包以重传停顿模拟，避免破坏字节流；暂停会关闭 VPN/TUN 切回直连网络，前台服务、通知和悬浮球保留，继续限制时重新建立 VPN，停止服务才结束任务。
 - 密码生成使用拒绝采样保证字符池内等概率；可选采样传感器、麦克风、摄像头，将采样数据与系统随机种子混合。绘制笔迹则作为唯一种子，同一笔迹与相同设置会复现同一密码；所有原始采样都不落盘。
 - 格式转换中的 SVG 由 AndroidSVG 渲染，ICO 由项目内的轻量编解码器读写（支持 PNG 条目和常见 BI_RGB 位深）；SVG 分辨率在转换前由用户指定。
 - 方程与函数输入框本身就是渲染后的公式，可直接粘贴 LaTeX；独立的 LaTeX 渲染工具支持实时查看任意数学公式。KaTeX 字体作为资源模块打进 APK，不依赖网络或 WebView。

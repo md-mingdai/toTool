@@ -184,7 +184,7 @@ internal class WeakNetOverlay(
         current.alpha = 1f
         statusText?.text = when {
             state.error != null -> "异常：${state.error}"
-            state.paused -> "已暂停限速"
+            state.paused -> "已暂停（直连）"
             state.running -> "运行中"
             else -> "已停止"
         }

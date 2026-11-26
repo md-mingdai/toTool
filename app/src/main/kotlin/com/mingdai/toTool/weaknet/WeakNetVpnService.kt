@@ -85,6 +85,10 @@ class WeakNetVpnService : VpnService() {
     @Volatile
     private var starting = false
 
+    /** 暂停时关闭旧 TUN/SOCKS 的后台线程；重新启动前要等它结束，避免 Stop 误杀新隧道。 */
+    @Volatile
+    private var pauseCleanup: Thread? = null
+
     private val statsTick = object : Runnable {
         private var lastRx = 0L
         private var lastTx = 0L
@@ -144,19 +148,19 @@ class WeakNetVpnService : VpnService() {
             }
             ACTION_PAUSE -> {
                 if (running) pauseWeakNet()
-                return START_STICKY
+                return START_NOT_STICKY
             }
             ACTION_RESUME -> {
                 when {
-                    running -> resumeShaping()
+                    running -> resumeWeakNet()
                     !starting -> startWeakNet()
                 }
-                return START_STICKY
+                return if (paused) START_NOT_STICKY else START_STICKY
             }
             ACTION_START -> if (!running) startWeakNet()
             else -> if (!running) startWeakNet()
         }
-        return START_STICKY
+        return if (paused) START_NOT_STICKY else START_STICKY
     }
 
     private fun startWeakNet() {
@@ -174,6 +178,9 @@ class WeakNetVpnService : VpnService() {
             var server: WeakNetSocksServer? = null
             var descriptor: ParcelFileDescriptor? = null
             try {
+                pauseCleanup?.join(3_000)
+                pauseCleanup = null
+                if (!starting) return@thread
                 val startedServer = WeakNetSocksServer(this, startConfig)
                 server = startedServer
                 val port = startedServer.start()
@@ -189,11 +196,16 @@ class WeakNetVpnService : VpnService() {
                 // 应用连接映射 IP 时,hev 把原始域名交给本地 SOCKS5,域名过滤和远端解析都能生效。
                 builder.addDnsServer("10.66.0.1")
                 val targetPackage = startConfig.packageName
-                if (targetPackage != null) {
-                    builder.addAllowedApplication(targetPackage)
+                if (targetPackage == packageName) {
+                    throw IllegalStateException("不能把 toTool 本身设为目标应用")
                 }
-                if (targetPackage != packageName) {
-                    // 工具自身的 DNS 解析和 SOCKS 转发必须绕过 VPN，避免回环。
+                if (targetPackage != null) {
+                    // 指定应用时只能使用 allowed 列表；toTool 不在其中，天然绕过 VPN。
+                    // 注意：Android 不允许 allowed 与 disallowed 混用，否则会抛
+                    // “addAllowedApplication already called”。
+                    builder.addAllowedApplication(targetPackage)
+                } else {
+                    // 限制全部应用时，工具自身的 DNS 解析和 SOCKS 转发必须绕过 VPN，避免回环。
                     builder.addDisallowedApplication(packageName)
                 }
                 val established = builder.establish()
@@ -279,7 +291,7 @@ class WeakNetVpnService : VpnService() {
         if (overlay == null) {
             overlay = WeakNetOverlay(
                 this,
-                onTogglePause = { if (paused) resumeShaping() else pauseWeakNet() },
+                onTogglePause = { if (paused) resumeWeakNet() else pauseWeakNet() },
                 onStop = { stopEverything() },
             )
         }
@@ -292,29 +304,59 @@ class WeakNetVpnService : VpnService() {
         overlay = null
     }
 
-    /** 暂停只停止弱网参数，VPN、TUN、SOCKS 转发和现有连接全部保持。 */
+    /**
+     * 暂停时关闭 VPN/TUN 和本地转发，让系统回到直连网络：
+     * 继续保留前台服务、通知、悬浮窗和任务抽屉，避免整个工具被停掉。
+     * 继续限制时再重新建立 VPN。暂停期间不再经过用户态转发，避免偶发丢连接。
+     */
     private fun pauseWeakNet() {
         if (!running || paused) return
-        paused = true
-        socks?.setPaused(true)
-        WeakNetManager.update { it.copy(running = true, paused = true) }
+        var server: WeakNetSocksServer? = null
+        var descriptor: ParcelFileDescriptor? = null
+        synchronized(stateLock) {
+            paused = true
+            running = false
+            starting = false
+            server = socks
+            descriptor = tun
+            socks = null
+            tun = null
+        }
+        handler.removeCallbacks(statsTick)
+        WeakNetManager.update {
+            it.copy(
+                running = false,
+                paused = true,
+                port = null,
+                rxSpeed = 0,
+                txSpeed = 0,
+                connections = 0,
+            )
+        }
         overlay?.refresh(WeakNetManager.state.value)
         updateTaskDetail()
         updateNotification()
+        val cleanup = thread(start = false, name = "weaknet-pause", isDaemon = true) {
+            runCatching { WeakNetTunnel.stop() }
+            runCatching { server?.stop() }
+            runCatching { descriptor?.close() }
+        }
+        pauseCleanup = cleanup
+        cleanup.start()
     }
 
-    /** 恢复弱网参数；VPN 一直没有断开，不需要重新建立 TUN。 */
-    private fun resumeShaping() {
-        if (!running) {
-            if (!starting) startWeakNet()
+    /** 继续限制：暂停时 VPN 已被拆除，需要重新建立 TUN 和转发层。 */
+    private fun resumeWeakNet() {
+        if (running) {
+            paused = false
+            socks?.setPaused(false)
+            WeakNetManager.update { it.copy(running = true, paused = false) }
+            overlay?.refresh(WeakNetManager.state.value)
+            updateTaskDetail()
+            updateNotification()
             return
         }
-        paused = false
-        socks?.setPaused(false)
-        WeakNetManager.update { it.copy(running = true, paused = false) }
-        overlay?.refresh(WeakNetManager.state.value)
-        updateTaskDetail()
-        updateNotification()
+        if (!starting) startWeakNet()
     }
 
     private fun stopEverything() {
@@ -374,7 +416,7 @@ class WeakNetVpnService : VpnService() {
 
     private fun taskDetail(state: WeakNetState): String =
         if (state.paused) {
-            "已暂停限速 · ${state.config.targetLabel}"
+            "已暂停（直连） · ${state.config.targetLabel}"
         } else {
             "↓${formatRate(state.rxSpeed)} ↑${formatRate(state.txSpeed)} · " +
                 "${state.connections} 连接 · ${state.config.targetLabel}"
@@ -436,6 +478,12 @@ class WeakNetVpnService : VpnService() {
         super.onDestroy()
     }
 
+    override fun onRevoke() {
+        // VPN 权限被系统/用户撤销：不要把服务留在没有 VPN 的假运行状态。
+        stopEverything()
+        super.onRevoke()
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // WindowManager 的配置更新也在主线程排队，延后到当前转屏消息处理完再 reposition。
@@ -477,13 +525,13 @@ class WeakNetVpnService : VpnService() {
         )
         val target = config.targetLabel
         val detail = if (paused) {
-            "已暂停限速 · $target"
+            "已暂停（直连） · $target"
         } else {
             "↓${config.downloadKBps}KB/s ↑${config.uploadKBps}KB/s · $target"
         }
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(if (paused) "弱网助手已暂停" else "弱网助手运行中")
+            .setContentTitle(if (paused) "弱网助手已暂停（直连）" else "弱网助手运行中")
             .setContentText(detail)
             .setContentIntent(openIntent)
             .setOngoing(true)

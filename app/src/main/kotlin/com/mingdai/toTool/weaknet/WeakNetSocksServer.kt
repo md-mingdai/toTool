@@ -125,7 +125,7 @@ internal class WeakNetSocksServer(
         applyRates()
     }
 
-    /** 暂停只关闭弱网参数，VPN/TUN 和当前连接保持不动。 */
+    /** 底层限速开关；服务暂停时现在会直接拆除 VPN/TUN，不再走这条路径。 */
     fun setPaused(value: Boolean) {
         paused = value
         applyRates()
