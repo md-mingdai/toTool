@@ -487,10 +487,35 @@ fun ImageAsciiTool(padding: PaddingValues) {
     var imageColor by remember { mutableStateOf(AndroidColor.BLACK) }
     var showColorDialog by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Bitmap?>(null) }
+    var asciiText by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportNotice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberBitmapPicker(1600) { source = it; error = null }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { target ->
+        val text = asciiText
+        if (target != null && text.isNotEmpty()) {
+            scope.launch {
+                exporting = true
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val out = context.contentResolver.openOutputStream(target)
+                            ?: throw IOException("无法写入文件")
+                        out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                    }.isSuccess
+                }
+                exporting = false
+                if (ok) {
+                    exportNotice = "纯文本已导出。"
+                } else {
+                    Toast.makeText(context, "导出纯文本失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
     val asciiTypeface = remember(context) {
         listOf(
             R.font.onest_regular,
@@ -521,6 +546,7 @@ fun ImageAsciiTool(padding: PaddingValues) {
         val typeface = asciiTypeface
         busy = true
         error = null
+        exportNotice = null
         delay(100)
         result = withContext(Dispatchers.Default) {
             runCatching {
@@ -533,6 +559,11 @@ fun ImageAsciiTool(padding: PaddingValues) {
                     asciiMaxPixels,
                 )
             }.getOrNull()
+        }
+        asciiText = withContext(Dispatchers.Default) {
+            runCatching {
+                renderAsciiText(input, density.roundToInt(), glyphs, asciiMaxPixels)
+            }.getOrNull().orEmpty()
         }
         busy = false
         if (result == null) error = "生成文字化图片失败。"
@@ -601,6 +632,15 @@ fun ImageAsciiTool(padding: PaddingValues) {
         )
         HintText("每个字符固定 12px；密度越高，字符越多，生成图片的分辨率也越大。")
         SavePngButton(result, busy, "ascii")
+        SecondaryButton(
+            onClick = { exportPicker.launch("ascii.txt") },
+            enabled = asciiText.isNotEmpty() && !busy && !exporting,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (exporting) "正在导出…" else "导出纯文本")
+        }
+        HintText("纯文本只保留字符画本身，不包含彩色着色和背景色。")
+        exportNotice?.let { HintText(it) }
         error?.let {
             MessageCard("生成失败", it, MiuixTheme.colorScheme.errorContainer, MiuixTheme.colorScheme.onErrorContainer)
         }
@@ -742,6 +782,37 @@ private fun renderAsciiArt(
         }
     }
     return out
+}
+
+/** 与 [renderAsciiArt] 使用同一套布局和亮度映射，只输出字符矩阵。 */
+private fun renderAsciiText(
+    source: Bitmap,
+    requestedColumns: Int,
+    glyphs: String,
+    maxPixels: Long,
+): String {
+    val (columns, rows) = asciiLayout(source.width, source.height, requestedColumns, maxPixels)
+    val glyphList = glyphs.ifBlank { DEFAULT_ASCII_GLYPHS }
+    val text = StringBuilder((columns + 1) * rows)
+    for (row in 0 until rows) {
+        val y = ((row + 0.5f) * source.height / rows).toInt().coerceIn(0, source.height - 1)
+        for (column in 0 until columns) {
+            val x = ((column + 0.5f) * source.width / columns).toInt().coerceIn(0, source.width - 1)
+            val pixel = source.getPixel(x, y)
+            val alpha = (pixel ushr 24) and 0xFF
+            if (alpha < 24) {
+                text.append(' ')
+                continue
+            }
+            val red = (pixel shr 16) and 0xFF
+            val green = (pixel shr 8) and 0xFF
+            val blue = pixel and 0xFF
+            val luminance = (0.299f * red + 0.587f * green + 0.114f * blue).toInt().coerceIn(0, 255)
+            text.append(glyphList[luminance * (glyphList.length - 1) / 255])
+        }
+        text.append('\n')
+    }
+    return text.toString()
 }
 
 /* ─────────────────────────── 图片转素描 ─────────────────────────── */
