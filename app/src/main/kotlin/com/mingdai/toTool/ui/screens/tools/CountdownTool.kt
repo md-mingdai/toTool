@@ -1,5 +1,8 @@
 package com.mingdai.toTool.ui.screens.tools
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +37,7 @@ import com.mingdai.toTool.ui.components.AppDatePickerDialog
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.PrimaryButton
+import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SectionLabel
 import com.mingdai.toTool.ui.components.ToolBody
 import com.mingdai.toTool.ui.components.displayStyle
@@ -56,6 +60,11 @@ fun CountdownTool(padding: PaddingValues) {
     var events by remember { mutableStateOf(CountdownStore.load(context)) }
     val today = LocalDate.now()
     val displays = remember(events, today) { CountdownStore.sorted(events, today) }
+    val canPinWidget = remember(context) {
+        runCatching {
+            AppWidgetManager.getInstance(context).isRequestPinAppWidgetSupported
+        }.getOrDefault(false)
+    }
 
     var editorOpen by remember { mutableStateOf(false) }
     var editingId by remember { mutableStateOf<Long?>(null) }
@@ -111,6 +120,29 @@ fun CountdownTool(padding: PaddingValues) {
             Spacer(Modifier.width(6.dp))
             Text("添加倒数日")
         }
+        if (canPinWidget) {
+            SecondaryButton(
+                onClick = {
+                    val ok = runCatching {
+                        AppWidgetManager.getInstance(context).requestPinAppWidget(
+                            ComponentName(context, CountdownWidgetProvider::class.java),
+                            null,
+                            null,
+                        )
+                    }.getOrDefault(false)
+                    if (!ok) {
+                        Toast.makeText(
+                            context,
+                            "桌面不支持直接固定小组件，请长按桌面空白处手动添加",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("添加桌面小组件")
+            }
+        }
 
         if (displays.isEmpty()) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -133,7 +165,14 @@ fun CountdownTool(padding: PaddingValues) {
             }
         }
 
-        HintText("小组件会显示最近的一条倒数日；长按桌面空白处，从「小部件」里添加「倒数日」。")
+        HintText(
+            if (canPinWidget) {
+                "小组件会显示最近的一条倒数日；点「添加桌面小组件」固定到桌面，" +
+                    "也可以长按桌面空白处从小部件列表手动添加。"
+            } else {
+                "小组件会显示最近的一条倒数日；长按桌面空白处，从「小部件」里添加「倒数日」。"
+            },
+        )
     }
 
     AppDialog(
