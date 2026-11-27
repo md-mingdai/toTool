@@ -83,6 +83,7 @@ import com.mingdai.toTool.ui.screens.tools.ShellTool
 import com.mingdai.toTool.ui.screens.tools.SpiritLevelTool
 import com.mingdai.toTool.ui.screens.tools.SplitInstallerTool
 import com.mingdai.toTool.ui.screens.tools.StopwatchTool
+import com.mingdai.toTool.ui.screens.tools.UnicodeTool
 import com.mingdai.toTool.ui.screens.tools.UnitConverterTool
 import com.mingdai.toTool.ui.screens.tools.UrlTool
 import com.mingdai.toTool.ui.screens.tools.UuidTool
@@ -233,6 +234,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "text_hash" -> HashTool(padding)
             "text_json" -> JsonTool(padding)
             "text_url" -> UrlTool(padding)
+            "text_unicode" -> UnicodeTool(padding)
             // --- 计算工具 ---
             "calc_unit" -> UnitConverterTool(padding)
             "calc_base" -> BaseConverterTool(padding)

@@ -4,7 +4,7 @@
 
 # toTool
 
-一款面向 Android 的本地工具箱：76 个日常、文本、计算、设备、图片、媒体与高级工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
+一款面向 Android 的本地工具箱：77 个日常、文本、计算、设备、图片、媒体与高级工具，加上格式转换、条码处理、方程求解、函数绘图和隔空闪传。界面采用 Miuix（HyperOS 风格），所有处理都在本机完成，不收集数据、不需要账号。
 
 [![Author](https://img.shields.io/badge/Author-mingdai-green)](https://github.com/md-mingdai) [![Repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/md-mingdai/toTool) [![License](https://img.shields.io/badge/License-GPL--3.0-red)](./LICENSE) [![Version](https://img.shields.io/badge/Version-1.3.2-blue)](https://github.com/md-mingdai/toTool/actions)
 
@@ -110,7 +110,7 @@
 | 分类 | 工具 |
 | --- | --- |
 | 日常工具 | 条码处理、颜色选择器、秒表、手电筒 / SOS、分贝仪、尺子、指南针、量角器、简易画板、时间屏幕、比赛记分牌、倒数日 |
-| 文本工具 | 字符统计、大小写转换、密码生成（传感器 / 绘制熵源）、UUID、Base64、哈希、JSON 格式化、URL 编解码 |
+| 文本工具 | 字符统计、大小写转换、密码生成（传感器 / 绘制熵源）、UUID、Base64、Unicode 编解码、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图、LaTeX 渲染 |
 | 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、振动器、自定义快捷方式、Shizuku Shell、视频壁纸、屏幕坏点检测、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片、纯色图制作、九宫格切图、图片文字化、图片转素描、图片取色、图片 Base64 互转 |
@@ -141,6 +141,7 @@
 - 方程与函数输入框本身就是渲染后的公式，可直接粘贴 LaTeX；独立的 LaTeX 渲染工具支持实时查看任意数学公式。KaTeX 字体作为资源模块打进 APK，不依赖网络或 WebView。
 - 倒数日使用 SharedPreferences 保存，主屏幕组件由 AppWidgetProvider + RemoteViews 绘制；日期变化、时区变化和定时刷新都会更新最近一条。
 - 数据库管理使用轻量的 MariaDB Connector/J（约 0.6 MB）连接 MySQL / MariaDB；SQLite 直接使用 Android 自带的 SQLiteDatabase，不额外引入 ORM 或数据库引擎，以控制 APK 体积。
+- Unicode 编解码支持 UTF-16 `\uXXXX`（含代理对）、码点 `U+XXXX`、`\u{...}`、`\UXXXXXXXX` 与 HTML 数字实体；解码自动识别这些写法、处理 `\\` 转义并保留其余原文，默认编码会保护原文里类似转义的字样，保证往返一致。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 
 ## 隐私与权限

@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TrackChanges
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Wallpaper
@@ -118,6 +119,7 @@ object ToolRegistry {
         Tool("text_hash", "哈希计算", "MD5 / SHA-1 / SHA-256 / SHA-512", ToolCategory.TEXT, Icons.Filled.DataObject),
         Tool("text_json", "JSON 格式化", "美化或压缩 JSON", ToolCategory.TEXT, Icons.Filled.DataArray),
         Tool("text_url", "URL 编解码", "编码或解码 URL", ToolCategory.TEXT, Icons.Filled.Link),
+        Tool("text_unicode", "Unicode 编解码", "文本与 \\uXXXX / U+XXXX / HTML 数字实体互转", ToolCategory.TEXT, Icons.Filled.Translate),
         // --- 计算工具 ---
         Tool("calc_unit", "单位换算", "长度/重量/温度/面积/体积/速度/数据", ToolCategory.CALC, Icons.Filled.Straighten),
         Tool("calc_base", "进制转换", "二/八/十/十六进制互转", ToolCategory.CALC, Icons.Filled.DataArray),
