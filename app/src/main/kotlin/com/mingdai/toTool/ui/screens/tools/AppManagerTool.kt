@@ -11,7 +11,6 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.app.ActivityManager
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
@@ -202,7 +201,7 @@ fun AppManagerTool(padding: PaddingValues) {
     var activityNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var activitiesLoading by remember { mutableStateOf(false) }
     var highStatus by remember { mutableStateOf(HighPermissionManager.status(context)) }
-    val currentUserId = remember { ActivityManager.getCurrentUser() }
+    val currentUserId = remember { currentAndroidUserId() }
 
     fun refreshApps() {
         scope.launch {
@@ -911,6 +910,23 @@ private fun AppIcon(bitmap: Bitmap?, label: String) {
 }
 
 /* ------------------------------ 扫描与命令 ------------------------------ */
+
+/** 当前用户的 userId：不同 Android 版本对公开 API 的暴露不一致，优先走反射，失败时退回 0。 */
+private fun currentAndroidUserId(): Int {
+    runCatching {
+        val processClass = Class.forName("android.os.Process")
+        val handle = processClass.getMethod("myUserHandle").invoke(null)
+        val id = handle?.javaClass?.getMethod("getIdentifier")?.invoke(handle) as? Int
+        if (id != null) return id
+    }
+    runCatching {
+        val userHandleClass = Class.forName("android.os.UserHandle")
+        return userHandleClass
+            .getMethod("getUserId", Int::class.javaPrimitiveType!!)
+            .invoke(null, android.os.Process.myUid()) as Int
+    }
+    return 0
+}
 
 private fun loadManagedApps(context: Context, pm: PackageManager): List<ManagedApp> {
     @Suppress("DEPRECATION")
