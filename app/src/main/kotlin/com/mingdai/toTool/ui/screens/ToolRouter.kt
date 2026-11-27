@@ -35,7 +35,7 @@ import com.mingdai.toTool.ui.screens.tools.ImageColorPickerTool
 import com.mingdai.toTool.ui.screens.tools.ImageGrid9Tool
 import com.mingdai.toTool.ui.screens.tools.ImageSketchTool
 import com.mingdai.toTool.ui.screens.tools.SolidColorImageTool
-import com.mingdai.toTool.ui.screens.tools.ApkExtractorTool
+import com.mingdai.toTool.ui.screens.tools.AppManagerTool
 import com.mingdai.toTool.ui.screens.tools.CustomShortcutTool
 import com.mingdai.toTool.ui.screens.tools.Base64Tool
 import com.mingdai.toTool.ui.screens.tools.BaseConverterTool
@@ -257,7 +257,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "dev_sensor" -> SensorListTool(padding)
             "dev_level" -> SpiritLevelTool(padding)
             "dev_metal" -> MetalDetectorTool(padding)
-            "dev_apk" -> ApkExtractorTool(padding)
+            "dev_apps" -> AppManagerTool(padding)
             "dev_vibrate" -> VibratorTool(padding)
             "dev_installer" -> SplitInstallerTool(padding)
             "dev_fake_call" -> FakeCallTool(padding)
