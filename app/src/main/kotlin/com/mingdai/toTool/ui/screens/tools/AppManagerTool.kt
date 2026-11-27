@@ -202,6 +202,7 @@ fun AppManagerTool(padding: PaddingValues) {
     var activityNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var activitiesLoading by remember { mutableStateOf(false) }
     var highStatus by remember { mutableStateOf(HighPermissionManager.status(context)) }
+    val currentUserId = remember { UserHandle.getUserId(android.os.Process.myUid()) }
 
     fun refreshApps() {
         scope.launch {
@@ -527,7 +528,7 @@ fun AppManagerTool(padding: PaddingValues) {
                         }
                         PrimaryButton(
                             onClick = {
-                                val user = if (onlyCurrentUser) UserHandle.myUserId().toString() else "all"
+                                val user = if (onlyCurrentUser) currentUserId.toString() else "all"
                                 runOperation("pm clear --user $user ${app.packageName}")
                             },
                             enabled = !busy,
@@ -548,7 +549,7 @@ fun AppManagerTool(padding: PaddingValues) {
                         }
                         PrimaryButton(
                             onClick = {
-                                val userPart = if (uninstallCurrentUser) "--user ${UserHandle.myUserId()} " else ""
+                                val userPart = if (uninstallCurrentUser) "--user ${currentUserId} " else ""
                                 val keepPart = if (keepData) "--keep-data " else ""
                                 runOperation(
                                     "pm uninstall $userPart$keepPart${app.packageName}",
@@ -586,14 +587,14 @@ fun AppManagerTool(padding: PaddingValues) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             PrimaryButton(
                                 onClick = {
-                                    runOperation(freezeMode.freeze(app.packageName, UserHandle.myUserId()))
+                                    runOperation(freezeMode.freeze(app.packageName, currentUserId))
                                 },
                                 enabled = !busy,
                                 modifier = Modifier.weight(1f),
                             ) { Text("冻结", maxLines = 1) }
                             SecondaryButton(
                                 onClick = {
-                                    runOperation(freezeMode.unfreeze(app.packageName, UserHandle.myUserId()))
+                                    runOperation(freezeMode.unfreeze(app.packageName, currentUserId))
                                 },
                                 enabled = !busy,
                                 modifier = Modifier.weight(1f),
@@ -626,7 +627,7 @@ fun AppManagerTool(padding: PaddingValues) {
                         )
                         PrimaryButton(
                             onClick = {
-                                runOperation(dexMode.command(app.packageName, UserHandle.myUserId()))
+                                runOperation(dexMode.command(app.packageName, currentUserId))
                             },
                             enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
