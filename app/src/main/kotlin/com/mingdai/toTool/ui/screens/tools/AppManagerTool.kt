@@ -11,7 +11,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.UserHandle
+import android.app.ActivityManager
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
@@ -202,7 +202,7 @@ fun AppManagerTool(padding: PaddingValues) {
     var activityNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var activitiesLoading by remember { mutableStateOf(false) }
     var highStatus by remember { mutableStateOf(HighPermissionManager.status(context)) }
-    val currentUserId = remember { UserHandle.getUserId(android.os.Process.myUid()) }
+    val currentUserId = remember { ActivityManager.getCurrentUser() }
 
     fun refreshApps() {
         scope.launch {
