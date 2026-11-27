@@ -168,6 +168,14 @@ dependencies {
     // 格式转换：SVG 矢量图渲染成位图（Apache-2.0）
     implementation("com.caverock:androidsvg-aar:1.4")
 
+    // Markdown 渲染：CommonMark + GFM 表格 / 删除线 / 任务列表 / 自动链接
+    // 0.22.x 仍兼容 Android 8 的 Java API 范围，不使用 Set.of 等 Java 9 集合工厂。
+    implementation("org.commonmark:commonmark:0.22.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.22.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.22.0")
+    implementation("org.commonmark:commonmark-ext-task-list-items:0.22.0")
+    implementation("org.commonmark:commonmark-ext-autolink:0.22.0")
+
     // 数学公式 LaTeX 渲染：原生 Compose 实现，配套 KaTeX 字体资源
     implementation("io.github.huarangmeng:latex-renderer:1.8.0")
     implementation("io.github.huarangmeng:latex-fonts-katex:1.8.0")

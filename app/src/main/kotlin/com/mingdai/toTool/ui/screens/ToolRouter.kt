@@ -67,6 +67,7 @@ import com.mingdai.toTool.ui.screens.tools.JsonTool
 import com.mingdai.toTool.ui.screens.tools.LoanTool
 import com.mingdai.toTool.ui.screens.tools.MediaToolScreen
 import com.mingdai.toTool.ui.screens.tools.MetalDetectorTool
+import com.mingdai.toTool.ui.screens.tools.MarkdownTool
 import com.mingdai.toTool.ui.screens.tools.NetworkTool
 import com.mingdai.toTool.ui.screens.tools.NotificationCenterTool
 import com.mingdai.toTool.ui.screens.tools.PasswordTool
@@ -235,6 +236,7 @@ fun ToolRouter(navController: NavHostController, toolId: String) {
             "text_json" -> JsonTool(padding)
             "text_url" -> UrlTool(padding)
             "text_unicode" -> UnicodeTool(padding)
+            "text_markdown" -> MarkdownTool(padding)
             // --- 计算工具 ---
             "calc_unit" -> UnitConverterTool(padding)
             "calc_base" -> BaseConverterTool(padding)
