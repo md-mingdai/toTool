@@ -146,7 +146,7 @@ object ToolRegistry {
         Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.ADVANCED, Icons.Filled.Apps),
         Tool("dev_fake_call", "模拟来电", "用系统电话界面模拟来电，支持定时、隐藏号码与接听语音", ToolCategory.ADVANCED, Icons.Filled.PhoneInTalk),
         Tool("dev_shortcut", "自定义快捷方式", "选择目标 Activity 与图标，创建桌面快捷方式", ToolCategory.DEVICE, Icons.Filled.AddToHomeScreen),
-        Tool("dev_shell", "执行 Shell 指令", "通过 Shizuku 执行命令或 .sh 脚本，查看日志", ToolCategory.DEVICE, Icons.Filled.Terminal),
+        Tool("dev_shell", "执行 Shell 指令", "执行命令或 .sh 脚本，保存脚本库与运行历史", ToolCategory.DEVICE, Icons.Filled.Terminal),
         Tool("dev_wallpaper_get", "提取当前壁纸", "读取系统静态壁纸并导出", ToolCategory.ADVANCED, Icons.Filled.Wallpaper),
         Tool("dev_database", "数据库管理", "管理远程 MySQL / MariaDB 与 SQLite 单文件数据库", ToolCategory.ADVANCED, Icons.Filled.Storage),
         Tool("dev_wallpaper_video", "桌面视频壁纸", "将视频设为桌面动态壁纸", ToolCategory.DEVICE, Icons.Filled.VideoLibrary),
