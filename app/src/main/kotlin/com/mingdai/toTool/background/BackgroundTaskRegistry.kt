@@ -78,6 +78,18 @@ object BackgroundTaskRegistry {
         remove(id)
     }
 
+    /** 结束全部后台任务；通知栏的「结束全部」和任务抽屉共用这里。 */
+    fun cancelAll() {
+        val snapshot = synchronized(this) {
+            val all = _tasks.value
+            _tasks.value = emptyList()
+            all
+        }
+        snapshot.forEach { task ->
+            runCatching { task.cancel?.invoke() }
+        }
+    }
+
     fun isToolRunning(toolId: String): Boolean =
         _tasks.value.any { it.toolId == toolId }
 }

@@ -24,6 +24,7 @@ class BackgroundTaskService : Service() {
     companion object {
         private const val CHANNEL_ID = "background_tasks"
         private const val NOTIFICATION_ID = 4401
+        private const val ACTION_CANCEL_ALL = "com.mingdai.toTool.action.CANCEL_ALL_BACKGROUND_TASKS"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
@@ -53,6 +54,12 @@ class BackgroundTaskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CANCEL_ALL) {
+            BackgroundTaskRegistry.cancelAll()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForeground(NOTIFICATION_ID, buildNotification(BackgroundTaskRegistry.tasks.value))
         return START_STICKY
     }
@@ -90,6 +97,12 @@ class BackgroundTaskService : Service() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val cancelAllIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, BackgroundTaskService::class.java).setAction(ACTION_CANCEL_ALL),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -102,6 +115,9 @@ class BackgroundTaskService : Service() {
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .apply {
+                if (tasks.isNotEmpty()) addAction(0, "结束全部", cancelAllIntent)
+            }
             .build()
     }
 }
