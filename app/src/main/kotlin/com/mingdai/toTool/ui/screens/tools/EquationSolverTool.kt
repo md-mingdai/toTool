@@ -34,7 +34,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hrm.latex.renderer.editor.LatexEditor
 import com.hrm.latex.renderer.editor.rememberEditorState
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.latex.renderer.model.LatexTheme
@@ -52,6 +51,7 @@ import com.mingdai.toTool.math.numericResultLatex
 import com.mingdai.toTool.math.sanitizeLatexSource
 import com.mingdai.toTool.math.solveEquation
 import com.mingdai.toTool.math.solvePolynomialEquation
+import com.mingdai.toTool.ui.components.BlinkingLatexEditor
 import com.mingdai.toTool.ui.components.HintText
 import com.mingdai.toTool.ui.components.LatexFormulaCard
 import com.mingdai.toTool.ui.components.MathKeypad
@@ -167,19 +167,19 @@ fun EquationSolverTool(padding: PaddingValues) {
                         .fillMaxWidth()
                         .heightIn(min = 56.dp),
                 ) {
-                    LatexEditor(
+                    BlinkingLatexEditor(
                         editorState = editorState,
                         modifier = Modifier.fillMaxWidth(),
                         config = latexConfig,
                         cursorColor = colors.primary,
                         selectionColor = colors.primary.copy(alpha = 0.25f),
-                        showSourceText = false,
                     )
                     if (inputText.isBlank()) {
                         Text(
                             text = "点按输入或粘贴 LaTeX",
                             style = MiuixTheme.textStyles.title3,
                             color = colors.onSurfaceVariantActions,
+                            modifier = Modifier.padding(start = 6.dp),
                         )
                     }
                 }

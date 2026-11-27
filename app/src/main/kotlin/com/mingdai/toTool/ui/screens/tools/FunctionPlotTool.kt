@@ -63,7 +63,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hrm.latex.renderer.LatexAutoWrap
-import com.hrm.latex.renderer.editor.LatexEditor
 import com.hrm.latex.renderer.editor.rememberEditorState
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.latex.renderer.model.LatexTheme
@@ -74,6 +73,7 @@ import com.mingdai.toTool.math.formatNumber
 import com.mingdai.toTool.math.latexToMathInput
 import com.mingdai.toTool.math.normalizeLatexFunctionInput
 import com.mingdai.toTool.math.sanitizeLatexSource
+import com.mingdai.toTool.ui.components.BlinkingLatexEditor
 import com.mingdai.toTool.ui.components.AppDialog
 import com.mingdai.toTool.ui.components.MathKeypad
 import com.mingdai.toTool.ui.components.SecondaryButton
@@ -567,19 +567,19 @@ fun FunctionPlotTool(padding: PaddingValues) {
                     .padding(horizontal = 14.dp, vertical = 12.dp)
                     .heightIn(min = 48.dp),
             ) {
-                LatexEditor(
+                BlinkingLatexEditor(
                     editorState = editorState,
                     modifier = Modifier.fillMaxWidth(),
                     config = editorLatexConfig,
                     cursorColor = MiuixTheme.colorScheme.primary,
                     selectionColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.25f),
-                    showSourceText = false,
                 )
                 if (editorText.isBlank()) {
                     Text(
                         text = "例如 \\sin(x)",
                         style = MiuixTheme.textStyles.title3,
                         color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                        modifier = Modifier.padding(start = 6.dp),
                     )
                 }
             }
