@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -72,6 +74,7 @@ import com.mingdai.toTool.permission.HighPermissionStrategy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -171,6 +174,21 @@ fun ShellTool(padding: PaddingValues) {
     var stdinText by rememberSaveable { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var currentRun by remember { mutableStateOf<HighPermissionRun?>(null) }
+    var savedScripts by remember { mutableStateOf<List<SavedShellScript>>(emptyList()) }
+    var history by remember { mutableStateOf<List<ShellHistoryEntry>>(emptyList()) }
+    val colors = MiuixTheme.colorScheme
+
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) {
+            ShellLibrary.loadScripts(context) to ShellLibrary.loadHistory(context)
+        }
+        savedScripts = loaded.first
+        history = loaded.second
+        // 重开工具时恢复最近导入的脚本，脚本库仍然可以切换到其它条目。
+        if (script == null) {
+            script = loaded.first.firstOrNull()?.toShellScript()
+        }
+    }
 
     val log = remember { ShellLog() }
     var lines by remember { mutableStateOf<List<ShellLine>>(emptyList()) }
@@ -217,6 +235,7 @@ fun ShellTool(padding: PaddingValues) {
         text: String,
         arguments: List<String> = emptyList(),
         stdinValue: String? = null,
+        historyKind: String = "command",
     ) {
         if (running) return
         if (!highStatus.ready) {
@@ -227,6 +246,7 @@ fun ShellTool(padding: PaddingValues) {
         val run = HighPermissionRun()
         currentRun = run
         running = true
+        val startedEpoch = System.currentTimeMillis()
         log.add(ShellLineKind.INFO, "[${clockNow()}] $ $shown")
         scope.launch {
             // 等日志窗口排好版，再把页面滚到底，让用户看得到输出
@@ -248,7 +268,8 @@ fun ShellTool(padding: PaddingValues) {
             } catch (e: Throwable) {
                 failure = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
             }
-            val seconds = String.format(Locale.US, "%.2f", (SystemClock.elapsedRealtime() - started) / 1000.0)
+            val elapsedMs = SystemClock.elapsedRealtime() - started
+            val seconds = String.format(Locale.US, "%.2f", elapsedMs / 1000.0)
             val problem = failure
             when {
                 problem != null -> log.add(ShellLineKind.FAIL, "[失败] $problem")
@@ -260,6 +281,23 @@ fun ShellTool(padding: PaddingValues) {
             running = false
             // 启动失败往往是授权被撤销、服务已经停止：重新读一遍状态
             if (problem != null) refresh()
+            val entry = ShellHistoryEntry(
+                id = UUID.randomUUID().toString(),
+                title = shown.take(500),
+                kind = historyKind,
+                startedAt = startedEpoch,
+                durationMs = elapsedMs,
+                exitCode = if (problem != null || run.stopped) null else exitCode,
+                stopped = run.stopped,
+                failed = problem != null,
+            )
+            try {
+                history = withContext(Dispatchers.IO) {
+                    ShellLibrary.appendHistory(context, entry)
+                }
+            } catch (e: Exception) {
+                // 历史写入失败不影响本次执行结果
+            }
         }
     }
 
@@ -267,7 +305,17 @@ fun ShellTool(padding: PaddingValues) {
         if (uri != null) {
             scope.launch {
                 try {
-                    script = withContext(Dispatchers.IO) { readShellScript(context, uri) }
+                    val imported = withContext(Dispatchers.IO) { readShellScript(context, uri) }
+                    script = imported
+                    val savedOk = withContext(Dispatchers.IO) {
+                        runCatching { ShellLibrary.saveScript(context, imported) }.isSuccess
+                    }
+                    savedScripts = withContext(Dispatchers.IO) { ShellLibrary.loadScripts(context) }
+                    Toast.makeText(
+                        context,
+                        if (savedOk) "脚本已导入并保存到脚本库" else "脚本已导入，但保存到脚本库失败",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -394,11 +442,87 @@ fun ShellTool(padding: PaddingValues) {
                         importedScript.text,
                         arguments,
                         if (fixedStdin) stdinText else null,
+                        historyKind = "script",
                     )
                 },
                 onReplace = { scriptPicker.launch(arrayOf("*/*")) },
                 onRemove = { script = null },
             )
+        }
+
+        SectionLabel("脚本库")
+        if (savedScripts.isEmpty()) {
+            Text(
+                "导入的 .sh 脚本会保存在这里，重启后仍可载入。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = colors.onSurfaceVariantSummary,
+            )
+        } else {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    savedScripts.forEachIndexed { index, saved ->
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(colors.secondaryContainer),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !running) {
+                                    script = saved.toShellScript()
+                                    Toast.makeText(context, "已载入 ${saved.name}", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    saved.name,
+                                    style = MiuixTheme.textStyles.body2,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    "${saved.lineCount} 行 · ${historyTime(saved.savedAt)}",
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = colors.onSurfaceVariantSummary,
+                                )
+                            }
+                            Text(
+                                "载入",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = colors.primary,
+                            )
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            ShellLibrary.deleteScript(context, saved.id)
+                                        }
+                                        savedScripts = withContext(Dispatchers.IO) {
+                                            ShellLibrary.loadScripts(context)
+                                        }
+                                        if (script?.text == saved.text) script = null
+                                    }
+                                },
+                                enabled = !running,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = "删除脚本",
+                                    tint = colors.error,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Row(
@@ -448,6 +572,89 @@ fun ShellTool(padding: PaddingValues) {
             }
         }
         LogPane(lines = lines, dropped = dropped, listState = logState)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.weight(1f)) { SectionLabel("运行历史") }
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { ShellLibrary.clearHistory(context) }
+                        history = emptyList()
+                    }
+                },
+                enabled = history.isNotEmpty() && !running,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "清空运行历史",
+                    tint = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        if (history.isEmpty()) {
+            Text(
+                "还没有运行记录。命令和脚本的退出状态会保存在这里。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = colors.onSurfaceVariantSummary,
+            )
+        } else {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    history.forEachIndexed { index, entry ->
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(colors.secondaryContainer),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    entry.title,
+                                    style = MiuixTheme.textStyles.body2,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                val status = when {
+                                    entry.failed -> "失败"
+                                    entry.stopped -> "已停止"
+                                    entry.exitCode == 0 -> "成功"
+                                    entry.exitCode != null -> "退出码 ${entry.exitCode}"
+                                    else -> "未知"
+                                }
+                                Text(
+                                    status,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = when {
+                                        entry.failed -> colors.error
+                                        entry.stopped -> colors.onSurfaceVariantSummary
+                                        entry.exitCode == 0 -> OkColor
+                                        else -> WarnColor
+                                    },
+                                )
+                            }
+                            Text(
+                                "${if (entry.kind == "script") "脚本" else "命令"} · " +
+                                    "${historyTime(entry.startedAt)} · ${historyDuration(entry.durationMs)}",
+                                style = MiuixTheme.textStyles.footnote2,
+                                color = colors.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         HintText("命令以设置页选择的高级权限来源（Shizuku 或 Root）执行，能改系统设置、卸载应用、删除文件，确认后再运行。「停止」只结束 Shell 进程，它留下的后台子进程不一定会退出。")
     }
@@ -768,3 +975,9 @@ private fun scriptPreview(script: ShellScript): String {
 
 private fun shellFormatBytes(bytes: Int): String =
     if (bytes < 1024) "$bytes 字节" else String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+
+private fun historyTime(epochMs: Long): String =
+    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(epochMs))
+
+private fun historyDuration(ms: Long): String =
+    if (ms < 1000L) "$ms ms" else String.format(Locale.US, "%.2f 秒", ms / 1000.0)
