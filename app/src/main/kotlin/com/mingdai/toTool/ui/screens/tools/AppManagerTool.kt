@@ -206,7 +206,11 @@ fun AppManagerTool(padding: PaddingValues) {
     fun refreshApps() {
         scope.launch {
             loading = true
-            apps = withContext(Dispatchers.Default) { loadManagedApps(context, pm) }
+            apps = try {
+                withContext(Dispatchers.Default) { loadManagedApps(context, pm) }
+            } catch (e: Exception) {
+                emptyList()
+            }
             loading = false
         }
     }
@@ -295,7 +299,11 @@ fun AppManagerTool(padding: PaddingValues) {
     }
 
     LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.Default) { loadManagedApps(context, pm) }
+        apps = try {
+            withContext(Dispatchers.Default) { loadManagedApps(context, pm) }
+        } catch (e: Exception) {
+            emptyList()
+        }
         loading = false
         highStatus = HighPermissionManager.status(context)
     }
