@@ -28,7 +28,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.math.max
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 /**
  * Renders a complete HTML page in an off-screen software WebView and turns it
@@ -176,8 +175,17 @@ object MarkdownImageExporter {
             val heightPx = (pageSize.cssHeight.toDouble() * widthPx / cssWidth)
                 .roundToInt()
                 .coerceAtLeast(1)
-            if (heightPx > MAX_RENDER_HEIGHT_PX) {
-                throw IllegalStateException("内容太长，无法作为单张图片导出，请分段渲染")
+
+            // 软件渲染的 WebView 和导出的位图各占一份内存，按 9 字节 / 像素预算限制高度。
+            val maxPixels = MemoryBudget.maxPixels(context, 9.0)
+            val heightLimit = (maxPixels / widthPx)
+                .toInt()
+                .coerceAtLeast(1)
+                .coerceAtMost(MAX_RENDER_HEIGHT_PX)
+            if (heightPx > heightLimit) {
+                throw IllegalStateException(
+                    "内容太长，单张图片放不下（上限约 $heightLimit px），请精简或分段渲染",
+                )
             }
 
             host.layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
@@ -196,27 +204,11 @@ object MarkdownImageExporter {
             awaitFrame(webView)
             awaitFrame(webView)
 
-            val maxPixels = MemoryBudget.maxPixels(context, 5.5)
-            val total = widthPx.toLong() * heightPx.toLong()
-            val scale = if (total > maxPixels) {
-                sqrt(maxPixels.toDouble() / total.toDouble())
-            } else {
-                1.0
-            }
-            val outWidth = (widthPx * scale).roundToInt().coerceAtLeast(1)
-            val outHeight = (heightPx * scale).roundToInt().coerceAtLeast(1)
-            if (outWidth < 320) {
-                throw IllegalStateException("内容太长，导出的图片会过窄，请分段渲染")
-            }
-
             val bitmap = try {
-                Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888).also { bmp ->
+                Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { bmp ->
                     val canvas = Canvas(bmp)
                     canvas.drawColor(style.background(dark))
-                    canvas.save()
-                    canvas.scale(scale.toFloat(), scale.toFloat())
                     webView.draw(canvas)
-                    canvas.restore()
                 }
             } catch (e: OutOfMemoryError) {
                 throw IllegalStateException("图片过大，内存不足，请分段渲染")

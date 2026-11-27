@@ -131,7 +131,7 @@ fun MarkdownTool(padding: PaddingValues) {
         }
     }
 
-    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             try {
@@ -163,7 +163,16 @@ fun MarkdownTool(padding: PaddingValues) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryButton(
-                onClick = { importPicker.launch("text/*") },
+                onClick = {
+                    importPicker.launch(
+                        arrayOf(
+                            "text/*",
+                            "text/markdown",
+                            "text/x-markdown",
+                            "application/octet-stream",
+                        ),
+                    )
+                },
                 enabled = !exporting,
                 modifier = Modifier.weight(1f),
             ) {
@@ -267,7 +276,7 @@ fun MarkdownTool(padding: PaddingValues) {
             )
             if (preview.html.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(previewBackground.copy(alpha = 0.92f)),
+                    modifier = Modifier.fillMaxSize().background(previewBackground),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (source.isBlank() || preview.error != null) {
