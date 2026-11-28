@@ -181,6 +181,7 @@ private data class PrivilegedResult(val code: Int, val output: String) {
         append("退出码 ").append(code)
         if (output.isNotBlank()) append("\n\n").append(output.trimEnd())
     }
+}
 
 @Composable
 fun AppManagerTool(padding: PaddingValues) {
