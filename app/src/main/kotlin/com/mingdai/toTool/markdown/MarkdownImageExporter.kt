@@ -58,13 +58,16 @@ object MarkdownImageExporter {
         dark: Boolean,
         widthPx: Int,
         onWarning: ((String) -> Unit)? = null,
+        onProgress: ((job: String, detail: String, progress: Float?) -> Unit)? = null,
     ): MarkdownExportResult {
         val width = widthPx.coerceAtLeast(320)
+        onProgress?.invoke("加载页面", "正在创建离屏 WebView…", 0.08f)
         val captured = withContext(Dispatchers.Main) {
-            capture(context, html, style, dark, width, onWarning)
+            capture(context, html, style, dark, width, onWarning, onProgress)
         }
         val bitmap = captured.bitmap
         try {
+            onProgress?.invoke("保存图片", "正在把长图写入相册…", 0.9f)
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
             val saved = try {
                 withContext(Dispatchers.IO) {
@@ -77,6 +80,7 @@ object MarkdownImageExporter {
             } catch (e: OutOfMemoryError) {
                 throw IllegalStateException("图片过大，当前设备内存不足，请降低导出清晰度")
             }
+            onProgress?.invoke("完成", "已保存到 ${saved.first}", 1f)
             return MarkdownExportResult(saved.first, saved.second, captured.warning)
         } finally {
             bitmap.recycle()
@@ -91,6 +95,7 @@ object MarkdownImageExporter {
         dark: Boolean,
         widthPx: Int,
         onWarning: ((String) -> Unit)?,
+        onProgress: ((job: String, detail: String, progress: Float?) -> Unit)?,
     ): CaptureResult {
         val activity = context.findActivity()
             ?: throw IllegalStateException("无法获取当前页面")
@@ -171,6 +176,7 @@ object MarkdownImageExporter {
                 ): android.webkit.WebResourceResponse? = MarkdownAssetServer.intercept(context, request)
             }
             pageUrl = MarkdownAssetServer.registerPage(html)
+            onProgress?.invoke("渲染页面", "正在等待 KaTeX、代码高亮和图片就绪…", 0.2f)
             webView.loadUrl(pageUrl)
 
             // 大文档 / 慢图片 / 公式排版需要更多时间；不能因为固定 20 秒就截断最终高度。
@@ -199,6 +205,7 @@ object MarkdownImageExporter {
             val heightPx = (pageSize.cssHeight.toDouble() * widthPx / cssWidth)
                 .roundToInt()
                 .coerceAtLeast(1)
+            onProgress?.invoke("测量页面", "内容尺寸 ${widthPx}×$heightPx px", 0.45f)
 
             // 不再按高度直接拒绝：内容很长时仍然导出，只给 UI 一个警告横幅。
             // 仍使用内存预算来估算风险，便于提示用户。
@@ -228,6 +235,7 @@ object MarkdownImageExporter {
             webView.scrollTo(0, 0)
             awaitFrame(webView)
             awaitFrame(webView)
+            onProgress?.invoke("绘制图片", "正在按完整高度绘制整篇文档…", 0.62f)
 
             val bitmap = try {
                 Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { bmp ->

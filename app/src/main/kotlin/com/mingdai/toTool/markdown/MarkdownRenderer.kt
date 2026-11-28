@@ -632,9 +632,15 @@ private fun isTableDivider(line: String): Boolean {
         style: MarkdownStyle,
         dark: Boolean,
         embedRemoteImages: Boolean = false,
+        onProgress: ((job: String, detail: String, progress: Float?) -> Unit)? = null,
     ): String {
+        onProgress?.invoke("解析 Markdown", "正在把 Markdown 转成 HTML…", null)
         var body = renderBody(context, markdown)
-        if (embedRemoteImages) body = embedRemoteImagesInHtml(body)
+        if (embedRemoteImages) {
+            onProgress?.invoke("处理远程图片", "正在准备下载图片并转为 Base64…", null)
+            body = embedRemoteImagesInHtml(body, onProgress)
+        }
+        onProgress?.invoke("内联资源", "正在内联 KaTeX 字体、样式和代码高亮…", null)
         body = body
             .replace("\r\n", "\n")
             .replace('\r', '\n')
@@ -661,17 +667,35 @@ private fun isTableDivider(line: String): Boolean {
             append("\"))</script><script>")
             append(SingleFileDecorateJs)
             append("</script></body></html>")
+        }.also {
+            onProgress?.invoke("生成 HTML", "单文件 HTML 已生成…", null)
         }
     }
 
     private const val MAX_EMBEDDED_IMAGE_BYTES = 8 * 1024 * 1024
 
-    private fun embedRemoteImagesInHtml(html: String): String {
+    private fun embedRemoteImagesInHtml(
+        html: String,
+        onProgress: ((job: String, detail: String, progress: Float?) -> Unit)?,
+    ): String {
         val cache = HashMap<String, String?>()
-        return Regex(
+        val imageRegex = Regex(
             """(<img\b[^>]*\bsrc=")(https?://[^"]+)(")""",
             RegexOption.IGNORE_CASE,
-        ).replace(html) { match ->
+        )
+        val urls = imageRegex.findAll(html)
+            .map { it.groupValues[2] }
+            .distinct()
+            .toList()
+        urls.forEachIndexed { index, src ->
+            onProgress?.invoke(
+                "下载远程图片",
+                "第 ${index + 1}/${urls.size} 张：${src.take(100)}",
+                if (urls.isEmpty()) null else index.toFloat() / urls.size,
+            )
+            cache[src] = fetchImageAsDataUri(src)
+        }
+        return imageRegex.replace(html) { match ->
             val src = match.groupValues[2]
             val data = if (cache.containsKey(src)) {
                 cache[src]

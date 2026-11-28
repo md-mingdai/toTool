@@ -63,7 +63,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -100,6 +102,15 @@ fun MarkdownTool(padding: PaddingValues) {
     var htmlExporting by remember { mutableStateOf(false) }
     var embedHtmlImages by rememberSaveable { mutableStateOf(false) }
     var pendingHtmlRequest by remember { mutableStateOf<HtmlExportRequest?>(null) }
+    var exportJob by remember { mutableStateOf<String?>(null) }
+    var exportDetail by remember { mutableStateOf("") }
+    var exportProgress by remember { mutableStateOf<Float?>(null) }
+
+    fun setExportProgress(job: String, detail: String, progress: Float?) {
+        exportJob = job
+        exportDetail = detail
+        exportProgress = progress
+    }
 
     val preview by produceState(MarkdownPreview(), source, style, dark) {
         if (source.isBlank()) {
@@ -195,10 +206,13 @@ fun MarkdownTool(padding: PaddingValues) {
         pendingHtmlRequest = null
         if (uri == null || request == null) {
             htmlExporting = false
+            exportJob = null
+            exportProgress = null
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             try {
+                setExportProgress("生成 HTML", "正在解析 Markdown 并准备内联资源…", null)
                 val html = withContext(Dispatchers.IO) {
                     MarkdownRenderer.renderSingleFile(
                         context.applicationContext,
@@ -206,14 +220,21 @@ fun MarkdownTool(padding: PaddingValues) {
                         request.style,
                         request.dark,
                         embedRemoteImages = request.embedImages,
+                        onProgress = { job, detail, progress ->
+                            scope.launch(Dispatchers.Main) {
+                                setExportProgress(job, detail, progress)
+                            }
+                        },
                     )
                 }
+                setExportProgress("写入 HTML", "正在写入文件…", 0.95f)
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(html.toByteArray(Charsets.UTF_8))
                     } ?: throw IOException("无法写入 HTML 文件")
                 }
                 savedPath = "HTML 文件（${uri.lastPathSegment ?: "markdown.html"}）"
+                setExportProgress("完成", "单文件 HTML 已保存", 1f)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: OutOfMemoryError) {
@@ -437,6 +458,39 @@ fun MarkdownTool(padding: PaddingValues) {
                 MarkdownWarningContent,
             )
         }
+        if (exporting || htmlExporting) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            exportJob ?: "正在导出…",
+                            style = MiuixTheme.textStyles.body2,
+                            modifier = Modifier.weight(1f),
+                        )
+                        exportProgress?.let { progress ->
+                            Text(
+                                "${(progress * 100).toInt().coerceIn(0, 100)}%",
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    Text(
+                        exportDetail.ifBlank { "准备中…" },
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    LinearProgressIndicator(
+                        progress = exportProgress,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
         PrimaryButton(
             onClick = click@{
                 if (exporting || htmlExporting || source.isBlank()) return@click
@@ -445,6 +499,7 @@ fun MarkdownTool(padding: PaddingValues) {
                 val darkAtClick = dark
                 val widthAtClick = effectiveExportWidth
                 exporting = true
+                setExportProgress("准备导出", "正在解析 Markdown 并生成页面…", null)
                 savedPath = null
                 exportWarning = if (sourceAtClick.length > 300_000) {
                     "文档较长，正在导出；图片可能占用较多内存并耗时。"
@@ -471,6 +526,9 @@ fun MarkdownTool(padding: PaddingValues) {
                             dark = darkAtClick,
                             widthPx = widthAtClick,
                             onWarning = { exportWarning = it },
+                            onProgress = { job, detail, progress ->
+                                setExportProgress(job, detail, progress)
+                            },
                         )
                         savedPath = exported.location
                         exportWarning = exported.warning ?: exportWarning
@@ -512,6 +570,7 @@ fun MarkdownTool(padding: PaddingValues) {
                 if (exporting || htmlExporting || source.isBlank()) return@click
                 pendingHtmlRequest = HtmlExportRequest(source, style, dark, embedHtmlImages)
                 htmlExporting = true
+                setExportProgress("准备 HTML", "请选择保存位置…", null)
                 savedPath = null
                 exportWarning = null
                 error = null
