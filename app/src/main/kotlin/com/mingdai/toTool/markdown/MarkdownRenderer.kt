@@ -84,7 +84,9 @@ object MarkdownRenderer {
             val (prepared, tables) = protectRawTables(mathPrepared)
             var rendered = renderer.render(parser.parse(prepared))
             tables.forEachIndexed { index, table ->
-                rendered = rendered.replace("@@TTTABLE$index@@", table)
+                val token = "@@TTTABLE$index@@"
+                rendered = rendered.replace("<p>$token</p>", table)
+                rendered = rendered.replace(token, table)
             }
             restoreMath(rendered, math)
         }
