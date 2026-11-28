@@ -38,12 +38,18 @@ import kotlin.math.roundToInt
  * It is attached just outside the window so Chromium still lays it out and
  * paints images/fonts normally.
  */
+data class MarkdownExportResult(
+    val location: String,
+    val bytes: Long,
+    val warning: String?,
+)
+
 object MarkdownImageExporter {
     private const val BRIDGE_NAME = "ToToolMarkdown"
-    private const val MAX_RENDER_HEIGHT_PX = 40_000
     private const val PAGE_TIMEOUT_MS = 20_000L
 
     private data class PageSize(val cssHeight: Int, val cssWidth: Int)
+    private data class CaptureResult(val bitmap: Bitmap, val warning: String?)
 
     suspend fun export(
         context: Context,
@@ -51,20 +57,22 @@ object MarkdownImageExporter {
         style: MarkdownStyle,
         dark: Boolean,
         widthPx: Int,
-    ): Pair<String, Long> {
+    ): MarkdownExportResult {
         val width = widthPx.coerceAtLeast(320)
-        val bitmap = withContext(Dispatchers.Main) {
+        val captured = withContext(Dispatchers.Main) {
             capture(context, html, style, dark, width)
         }
+        val bitmap = captured.bitmap
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
-            return withContext(Dispatchers.IO) {
+            val saved = withContext(Dispatchers.IO) {
                 saveImageToGallery(context, "markdown_$stamp.png", "image/png") { out ->
                     if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
                         throw IOException("PNG 编码失败")
                     }
                 }
             }
+            return MarkdownExportResult(saved.first, saved.second, captured.warning)
         } finally {
             bitmap.recycle()
         }
@@ -77,7 +85,7 @@ object MarkdownImageExporter {
         style: MarkdownStyle,
         dark: Boolean,
         widthPx: Int,
-    ): Bitmap {
+    ): CaptureResult {
         val activity = context.findActivity()
             ?: throw IllegalStateException("无法获取当前页面")
         val root = activity.window.decorView as? ViewGroup
@@ -182,16 +190,14 @@ object MarkdownImageExporter {
                 .roundToInt()
                 .coerceAtLeast(1)
 
-            // 软件渲染的 WebView 和导出的位图各占一份内存，按 9 字节 / 像素预算限制高度。
+            // 不再按高度直接拒绝：内容很长时仍然导出，只给 UI 一个警告横幅。
+            // 仍使用内存预算来估算风险，便于提示用户。
             val maxPixels = MemoryBudget.maxPixels(context, 9.0)
-            val heightLimit = (maxPixels / widthPx)
-                .toInt()
-                .coerceAtLeast(1)
-                .coerceAtMost(MAX_RENDER_HEIGHT_PX)
-            if (heightPx > heightLimit) {
-                throw IllegalStateException(
-                    "内容太长，单张图片放不下（上限约 $heightLimit px），请精简或分段渲染",
-                )
+            val estimatedPixels = widthPx.toLong() * heightPx.toLong()
+            val warning = if (estimatedPixels > maxPixels) {
+                "文档较长，导出图片约 ${widthPx}×$heightPx 像素，可能占用较多内存并耗时；仍会尝试完整导出。"
+            } else {
+                null
             }
 
             // 不把 WebView 撑到整篇文档那么高：Chromium 的大尺寸软件层会触发 tile
@@ -241,7 +247,7 @@ object MarkdownImageExporter {
                 bitmap.recycle()
                 throw e
             }
-            return bitmap
+            return CaptureResult(bitmap, warning)
         } finally {
             host.removeView(webView)
             webView.stopLoading()

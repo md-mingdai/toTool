@@ -83,10 +83,10 @@ object MarkdownRenderer {
             val (mathPrepared, math) = protectMath(normalized)
             val (prepared, tables) = protectRawTables(mathPrepared)
             var rendered = renderer.render(parser.parse(prepared))
-            tables.forEachIndexed { index, table ->
-                val token = "@@TTTABLE$index@@"
-                rendered = rendered.replace("<p>$token</p>", table)
-                rendered = rendered.replace(token, table)
+            rendered = Regex("(?s)<p>\\s*@@TTTABLE(\\d+)@@\\s*</p>|@@TTTABLE(\\d+)@@").replace(rendered) { match ->
+                val index = (match.groupValues[1].ifBlank { match.groupValues[2] }).toIntOrNull()
+                val table = index?.let(tables::getOrNull)
+                table ?: match.value
             }
             restoreMath(rendered, math)
         }
@@ -166,6 +166,7 @@ object MarkdownRenderer {
 private data class MathSnippet(val tex: String, val display: Boolean)
 
 private const val MATH_TOKEN_PREFIX = "@@TTMATH"
+private val TableDividerCell = Regex(""":?-{3,}:?""")
 
 /**
  * CommonMark 会把数学公式里的 `_`、`*` 当成强调语法，所以先把公式替换成占位符，
@@ -366,15 +367,16 @@ private fun findInlineDollar(text: String, start: Int): Int {
 
 private fun restoreMath(html: String, snippets: List<MathSnippet>): String {
     if (snippets.isEmpty()) return html
-    var result = html
-    snippets.forEachIndexed { index, snippet ->
-        val css = if (snippet.display) "math-display" else "math-inline"
-        result = result.replace(
-            "$MATH_TOKEN_PREFIX$index@@",
-            "<span class=\"$css\" data-tex=\"${escapeAttribute(snippet.tex)}\"></span>",
-        )
+    return Regex("@@TTMATH(\\d+)@@").replace(html) { match ->
+        val index = match.groupValues[1].toIntOrNull()
+        val snippet = index?.let(snippets::getOrNull)
+        if (snippet == null) {
+            match.value
+        } else {
+            val css = if (snippet.display) "math-display" else "math-inline"
+            "<span class=\"$css\" data-tex=\"${escapeAttribute(snippet.tex)}\"></span>"
+        }
     }
-    return result
 }
 
 private fun escapeAttribute(value: String): String = buildString(value.length + 16) {
@@ -422,7 +424,7 @@ private fun isTableDivider(line: String): Boolean {
     if (cells.isEmpty()) return false
     return cells.all { cell ->
         val value = cell.trim()
-        value.matches(Regex(""":?-{3,}:?"""))
+        value.matches(TableDividerCell)
     }
 }
 

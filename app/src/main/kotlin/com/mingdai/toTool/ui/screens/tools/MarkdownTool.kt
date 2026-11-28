@@ -70,8 +70,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private data class MarkdownPreview(val html: String = "", val error: String? = null)
 
-private const val MAX_IMPORT_CHARS = 2_000_000
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MarkdownTool(padding: PaddingValues) {
@@ -82,6 +80,7 @@ fun MarkdownTool(padding: PaddingValues) {
     var dark by rememberSaveable { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var savedPath by remember { mutableStateOf<String?>(null) }
+    var exportWarning by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var previewWidth by remember { mutableIntStateOf(0) }
     var exportScale by rememberSaveable { mutableIntStateOf(2) }
@@ -161,6 +160,7 @@ fun MarkdownTool(padding: PaddingValues) {
             onValueChange = {
                 source = it
                 savedPath = null
+                exportWarning = null
                 error = null
             },
             label = "Markdown 源文本",
@@ -215,6 +215,7 @@ fun MarkdownTool(padding: PaddingValues) {
                     onClick = {
                         style = item
                         savedPath = null
+                        exportWarning = null
                         error = null
                     },
                     label = item.label,
@@ -237,6 +238,7 @@ fun MarkdownTool(padding: PaddingValues) {
                 onCheckedChange = {
                     dark = it
                     savedPath = null
+                    exportWarning = null
                     error = null
                 },
                 enabled = !exporting,
@@ -311,6 +313,15 @@ fun MarkdownTool(padding: PaddingValues) {
             )
         }
 
+        if (source.length > 300_000) {
+            MessageCard(
+                "提示",
+                "文档较长，导出可能耗时并占用较多内存；不会限制 Markdown 长度。",
+                MiuixTheme.colorScheme.secondaryContainer,
+                MiuixTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+
         Text(
             "导出清晰度",
             style = MiuixTheme.textStyles.footnote1,
@@ -339,6 +350,7 @@ fun MarkdownTool(padding: PaddingValues) {
                 val scaleAtClick = exportScale
                 exporting = true
                 savedPath = null
+                exportWarning = null
                 error = null
                 scope.launch {
                     try {
@@ -358,14 +370,15 @@ fun MarkdownTool(padding: PaddingValues) {
                                 viewportWidthCss = previewCssWidth,
                             )
                         }
-                        val (where, _) = MarkdownImageExporter.export(
+                        val exported = MarkdownImageExporter.export(
                             context = context,
                             html = html,
                             style = styleAtClick,
                             dark = darkAtClick,
                             widthPx = previewWidthPx * scaleAtClick,
                         )
-                        savedPath = where
+                        savedPath = exported.location
+                        exportWarning = exported.warning
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -381,6 +394,14 @@ fun MarkdownTool(padding: PaddingValues) {
             Text(if (exporting) "正在导出整篇图片…" else "导出为图片")
         }
 
+        exportWarning?.let {
+            MessageCard(
+                "注意",
+                it,
+                MiuixTheme.colorScheme.secondaryContainer,
+                MiuixTheme.colorScheme.onSecondaryContainer,
+            )
+        }
         savedPath?.let {
             MessageCard(
                 null,
@@ -419,16 +440,6 @@ private fun readMarkdownFile(context: Context, uri: Uri): String {
     val reader = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)
         ?: throw IOException("无法读取这个文件")
     return reader.use {
-        val out = StringBuilder()
-        val buffer = CharArray(8192)
-        while (true) {
-            val count = it.read(buffer)
-            if (count < 0) break
-            out.append(buffer, 0, count)
-            if (out.length > MAX_IMPORT_CHARS) {
-                throw IOException("Markdown 文件超过 2 MB，请精简后再导入")
-            }
-        }
-        out.toString()
+        it.readText()
     }
 }
