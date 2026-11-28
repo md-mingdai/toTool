@@ -116,8 +116,8 @@
 ### Markdown 渲染
 
 - 支持 CommonMark / GFM 常用语法：标题、列表、引用、表格、任务列表、删除线、自动链接、图片和围栏代码块；行内 / 块级 LaTeX 公式用内置 KaTeX 渲染。
-- 内置 GitHub、VitePress 文档和博客三种排版，可切换亮色 / 深色主题；博客样式使用高亮标题、圆角表格和衬线正文。
-- 实时预览整篇 Markdown，可把渲染结果按 1× / 2× / 3× 清晰度导出为一张长图并保存到相册「Pictures/toTool」；输入不设长度上限，超长文档导出时只提示内存/耗时风险，不预先阻止。
+- 内置 GitHub、VitePress 文档和 Sky 三种排版，可切换亮色 / 深色主题；Sky 样式使用高亮标题、圆角表格和衬线正文。
+- 实时预览整篇 Markdown，可自定义导出图片宽度并保存为一张长图到相册「Pictures/toTool」，也可以导出为单个 HTML 文件（样式、字体和脚本全部内联，源码压缩为一行）；输入不设长度上限，超长文档导出时只提示内存/耗时风险，不预先阻止。
 - 原始 HTML 会按普通文本显示，预览和导出使用本地打包的解析器与高亮脚本；远程图片需要联网加载。
 
 ### 内置工具
@@ -157,7 +157,7 @@
 - 倒数日使用 SharedPreferences 保存，主屏幕组件由 AppWidgetProvider + RemoteViews 绘制；日期变化、时区变化和定时刷新都会更新最近一条。
 - 数据库管理使用轻量的 MariaDB Connector/J（约 0.6 MB）连接 MySQL / MariaDB；SQLite 直接使用 Android 自带的 SQLiteDatabase，不额外引入 ORM 或数据库引擎，以控制 APK 体积。
 - Unicode 编解码支持 UTF-16 `\uXXXX`（含代理对）、码点 `U+XXXX`、`\u{...}`、`\UXXXXXXXX` 与 HTML 数字实体；解码自动识别这些写法、处理 `\\` 转义并保留其余原文，默认编码会保护原文里类似转义的字样，保证往返一致。
-- Markdown 渲染使用 commonmark-java 解析 CommonMark / GFM，样式由内置 CSS 控制，代码高亮使用本地 highlight.js，数学公式使用本地 KaTeX；导出时在离屏 WebView 中逐屏绘制并拼接为整篇 PNG，支持 1× / 2× / 3× 分辨率。
+- Markdown 渲染使用 commonmark-java 解析 CommonMark / GFM，样式由内置 CSS 控制，代码高亮使用本地 highlight.js，数学公式使用本地 KaTeX；导出时在离屏 WebView 中按整篇内容高度绘制为 PNG，宽度可自定义，单文件 HTML 则把 KaTeX 字体等资源转成内联 data URI。
 - 应用管理通过 PackageManager 枚举用户与系统应用；冻结、卸载、清除数据和 Dex2oat 等修改通过 Shizuku / Root 执行，提取安装包复用系统下载目录（带拆分包的 AAB 应用合并为 .apks）。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 

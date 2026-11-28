@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mingdai.toTool.markdown.MarkdownAssetServer
@@ -72,6 +73,12 @@ private data class MarkdownPreview(val html: String = "", val error: String? = n
 
 private data class PreviewPage(val html: String, val url: String?)
 
+private data class HtmlExportRequest(
+    val source: String,
+    val style: MarkdownStyle,
+    val dark: Boolean,
+)
+
 private val MarkdownWarningContainer = Color(0xFFFFF3CD)
 private val MarkdownWarningContent = Color(0xFF7A5B00)
 
@@ -88,7 +95,9 @@ fun MarkdownTool(padding: PaddingValues) {
     var exportWarning by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var previewWidth by remember { mutableIntStateOf(0) }
-    var exportScale by rememberSaveable { mutableIntStateOf(2) }
+    var exportWidthText by rememberSaveable { mutableStateOf("") }
+    var htmlExporting by remember { mutableStateOf(false) }
+    var pendingHtmlRequest by remember { mutableStateOf<HtmlExportRequest?>(null) }
 
     val preview by produceState(MarkdownPreview(), source, style, dark) {
         if (source.isBlank()) {
@@ -113,6 +122,17 @@ fun MarkdownTool(padding: PaddingValues) {
             }
         }
     }
+
+    val density = context.resources.displayMetrics.density
+    val fallbackPreviewWidth = (
+        context.resources.displayMetrics.widthPixels -
+            (32 * density).toInt()
+        ).coerceAtLeast(320)
+    val previewWidthPx = previewWidth.takeIf { it > 0 } ?: fallbackPreviewWidth
+    val defaultExportWidth = previewWidthPx * 2
+    val effectiveExportWidth = exportWidthText.trim().toIntOrNull()
+        ?.coerceAtLeast(320)
+        ?: defaultExportWidth
 
     val previewBackground = Color(style.background(dark))
     val previewShape = RoundedCornerShape(16.dp)
@@ -168,7 +188,42 @@ fun MarkdownTool(padding: PaddingValues) {
         }
     }
 
-    KeepScreenOn(exporting)
+    val htmlPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/html")) { uri ->
+        val request = pendingHtmlRequest
+        pendingHtmlRequest = null
+        if (uri == null || request == null) {
+            htmlExporting = false
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            try {
+                val html = withContext(Dispatchers.Default) {
+                    MarkdownRenderer.renderSingleFile(
+                        context.applicationContext,
+                        request.source,
+                        request.style,
+                        request.dark,
+                    )
+                }
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(html.toByteArray(Charsets.UTF_8))
+                    } ?: throw IOException("无法写入 HTML 文件")
+                }
+                savedPath = "HTML 文件（${uri.lastPathSegment ?: "markdown.html"}）"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OutOfMemoryError) {
+                error = "文档或内联资源太大，当前设备内存不足"
+            } catch (e: Exception) {
+                error = e.message ?: "HTML 导出失败"
+            } finally {
+                htmlExporting = false
+            }
+        }
+    }
+
+    KeepScreenOn(exporting || htmlExporting)
 
     ToolBody(padding) {
         TextField(
@@ -328,23 +383,39 @@ fun MarkdownTool(padding: PaddingValues) {
         }
 
         Text(
-            "导出清晰度",
+            "导出图片宽度（px）",
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        TextField(
+            value = exportWidthText,
+            onValueChange = { value ->
+                exportWidthText = value.filter { it.isDigit() }.take(6)
+            },
+            label = "宽度",
+            useLabelAsPlaceholder = true,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
         )
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(1, 2, 3).forEach { scale ->
+            listOf("自动" to "", "1080" to "1080", "1440" to "1440", "2160" to "2160").forEach { (label, value) ->
                 SelectChip(
-                    selected = exportScale == scale,
-                    onClick = { exportScale = scale },
-                    label = "${scale}×",
-                    enabled = !exporting,
+                    selected = exportWidthText == value,
+                    onClick = { exportWidthText = value },
+                    label = label,
+                    enabled = !exporting && !htmlExporting,
                 )
             }
         }
+        Text(
+            "留空使用 ${defaultExportWidth}px（预览宽度的 2×）；当前有效宽度 ${effectiveExportWidth}px。单个 HTML 自适应宽度，不受此项影响。",
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
 
         if (source.length > 300_000 && exportWarning == null) {
             MessageCard(
@@ -365,11 +436,11 @@ fun MarkdownTool(padding: PaddingValues) {
         }
         PrimaryButton(
             onClick = click@{
-                if (exporting || source.isBlank()) return@click
+                if (exporting || htmlExporting || source.isBlank()) return@click
                 val sourceAtClick = source
                 val styleAtClick = style
                 val darkAtClick = dark
-                val scaleAtClick = exportScale
+                val widthAtClick = effectiveExportWidth
                 exporting = true
                 savedPath = null
                 exportWarning = if (sourceAtClick.length > 300_000) {
@@ -380,12 +451,6 @@ fun MarkdownTool(padding: PaddingValues) {
                 error = null
                 scope.launch {
                     try {
-                        val density = context.resources.displayMetrics.density
-                        val fallbackWidth = (
-                            context.resources.displayMetrics.widthPixels -
-                                (32 * density).toInt()
-                            ).coerceAtLeast(320)
-                        val previewWidthPx = previewWidth.takeIf { it > 0 } ?: fallbackWidth
                         val previewCssWidth = (previewWidthPx / density).roundToInt().coerceAtLeast(320)
                         val html = withContext(Dispatchers.Default) {
                             MarkdownRenderer.render(
@@ -401,7 +466,7 @@ fun MarkdownTool(padding: PaddingValues) {
                             html = html,
                             style = styleAtClick,
                             dark = darkAtClick,
-                            widthPx = previewWidthPx * scaleAtClick,
+                            widthPx = widthAtClick,
                             onWarning = { exportWarning = it },
                         )
                         savedPath = exported.location
@@ -409,7 +474,7 @@ fun MarkdownTool(padding: PaddingValues) {
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: OutOfMemoryError) {
-                        error = "图片过大，当前设备内存不足，请降低导出清晰度"
+                        error = "图片过大，当前设备内存不足，请降低导出宽度"
                     } catch (e: Exception) {
                         error = e.message ?: "导出失败"
                     } finally {
@@ -417,10 +482,26 @@ fun MarkdownTool(padding: PaddingValues) {
                     }
                 }
             },
-            enabled = source.isNotBlank() && !exporting,
+            enabled = source.isNotBlank() && !exporting && !htmlExporting,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(if (exporting) "正在导出整篇图片…" else "导出为图片")
+        }
+
+        SecondaryButton(
+            onClick = click@{
+                if (exporting || htmlExporting || source.isBlank()) return@click
+                pendingHtmlRequest = HtmlExportRequest(source, style, dark)
+                htmlExporting = true
+                savedPath = null
+                exportWarning = null
+                error = null
+                htmlPicker.launch("markdown_${System.currentTimeMillis()}.html")
+            },
+            enabled = source.isNotBlank() && !exporting && !htmlExporting,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (htmlExporting) "正在导出单文件 HTML…" else "导出为单个 HTML（压缩为一行）")
         }
 
         savedPath?.let {
@@ -443,7 +524,7 @@ fun MarkdownTool(padding: PaddingValues) {
         HintText(
             "支持 CommonMark / GFM：标题、列表、表格、任务列表、删除线、链接、图片和围栏代码块；行内 / 块级 LaTeX 公式使用本地 KaTeX 渲染。" +
                 "原始 HTML 会按文本显示；代码高亮使用本地打包的 highlight.js。" +
-                "导出可选 1× / 2× / 3× 清晰度，整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；文档很长时高倍数可能受内存限制。远程图片需要联网加载。",
+                "导出宽度可填写像素值（留空为预览宽度的 2×），整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；也可以导出为单个 HTML 文件，样式、字体和脚本全部内联并压缩为一行。远程图片仍需联网加载。",
         )
     }
 }

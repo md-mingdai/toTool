@@ -120,7 +120,7 @@ object ToolRegistry {
         Tool("text_json", "JSON 格式化", "美化或压缩 JSON", ToolCategory.TEXT, Icons.Filled.DataArray),
         Tool("text_url", "URL 编解码", "编码或解码 URL", ToolCategory.TEXT, Icons.Filled.Link),
         Tool("text_unicode", "Unicode 编解码", "文本与 \\uXXXX / U+XXXX / HTML 数字实体互转", ToolCategory.TEXT, Icons.Filled.Translate),
-        Tool("text_markdown", "Markdown 渲染", "GitHub / VitePress / 博客风格渲染并导出图片", ToolCategory.TEXT, Icons.Filled.Description),
+        Tool("text_markdown", "Markdown 渲染", "GitHub / VitePress / Sky 风格渲染并导出图片", ToolCategory.TEXT, Icons.Filled.Description),
         // --- 计算工具 ---
         Tool("calc_unit", "单位换算", "长度/重量/温度/面积/体积/速度/数据", ToolCategory.CALC, Icons.Filled.Straighten),
         Tool("calc_base", "进制转换", "二/八/十/十六进制互转", ToolCategory.CALC, Icons.Filled.DataArray),

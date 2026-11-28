@@ -1,6 +1,7 @@
 package com.mingdai.toTool.markdown
 
 import android.content.Context
+import android.util.Base64
 import org.commonmark.Extension
 import org.commonmark.ext.autolink.AutolinkExtension
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
@@ -37,7 +38,7 @@ enum class MarkdownStyle(
     ),
     BLOG(
         id = "blog",
-        label = "博客",
+        label = "Sky",
         lightBackground = 0xFFEDEDED.toInt(),
         darkBackground = 0xFF19191D.toInt(),
     );
@@ -56,6 +57,8 @@ enum class MarkdownStyle(
  */
 object MarkdownRenderer {
     private val assetCache = HashMap<String, String>()
+    private var inlineKatexCssCache: String? = null
+    private var highlightBase64Cache: String? = null
 
     fun render(
         context: Context,
@@ -64,53 +67,7 @@ object MarkdownRenderer {
         dark: Boolean,
         viewportWidthCss: Int? = null,
     ): String {
-        val body = if (markdown.isBlank()) {
-            ""
-        } else {
-            val extensions: List<Extension> = listOf(
-                TablesExtension.create(),
-                StrikethroughExtension.create(),
-                TaskListItemsExtension.create(),
-                AutolinkExtension.create(),
-            )
-            val parser = Parser.builder().extensions(extensions).build()
-            val renderer = HtmlRenderer.builder()
-                .extensions(extensions)
-                .escapeHtml(true)
-                .sanitizeUrls(true)
-                .build()
-            val normalized = normalizeTables(markdown)
-            val mathMarkers = normalized.indexOf('$') >= 0 ||
-                normalized.contains("\\(") || normalized.contains("\\[")
-            val mathProtection = if (mathMarkers) {
-                protectMath(normalized)
-            } else {
-                MathProtection(normalized, emptyList(), emptyList())
-            }
-            val mathPrepared = mathProtection.text
-            val hasRawTable = mathPrepared.contains("<table", ignoreCase = true)
-            val (tablePrepared, tables) = if (hasRawTable) {
-                protectRawTables(mathPrepared)
-            } else {
-                mathPrepared to emptyList()
-            }
-            val (prepared, escapes) = if ('\\' in tablePrepared) {
-                protectEscapes(tablePrepared)
-            } else {
-                tablePrepared to emptyList()
-            }
-            var rendered = renderer.render(parser.parse(prepared))
-            if (tables.isNotEmpty()) {
-                rendered = RawTableTokenRegex.replace(rendered) { match ->
-                    val index = (match.groupValues[1].ifBlank { match.groupValues[2] }).toIntOrNull()
-                    val table = index?.let(tables::getOrNull)
-                    table ?: match.value
-                }
-            }
-            restoreEscapes(rendered, escapes)
-            restoreLiterals(rendered, mathProtection.literals)
-            restoreMath(rendered, mathProtection.snippets)
-        }
+        val body = renderBody(context, markdown)
         val css = asset(context, "markdown/markdown.css")
         val highlight = asset(context, "markdown/highlight.min.js")
             .replace("</script", "<\\/script")
@@ -660,6 +617,145 @@ private fun isTableDivider(line: String): Boolean {
         value.matches(TableDividerCell)
     }
 }
+
+
+    /**
+     * 单文件 HTML：KaTeX CSS（字体转 data URI）、KaTeX JS、highlight.js 和样式
+     * 全部内联，正文中的换行转成 `&#10;`，最终源码压缩为一行。
+     */
+    fun renderSingleFile(
+        context: Context,
+        markdown: String,
+        style: MarkdownStyle,
+        dark: Boolean,
+    ): String {
+        val body = renderBody(context, markdown)
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replace("\n", "&#10;")
+        val markdownCss = minifyCss(asset(context, "markdown/markdown.css"))
+        val katexCss = katexInlineCss(context)
+        val katexJs = asset(context, "markdown/katex/katex.min.js")
+        val highlight = highlightInlineBase64(context)
+        val bodyClass = "theme-${style.id}" + if (dark) " dark" else ""
+        return buildString {
+            append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
+            append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
+            append("<title>Markdown</title><style>")
+            append(katexCss)
+            append(markdownCss)
+            append("</style></head><body class=\"")
+            append(bodyClass)
+            append("\"><article class=\"markdown-body\">")
+            append(body)
+            append("</article><script>")
+            append(katexJs)
+            append("</script><script>eval(atob(\"")
+            append(highlight)
+            append("\"))</script><script>")
+            append(SingleFileDecorateJs)
+            append("</script></body></html>")
+        }
+    }
+
+    private val SingleFileDecorateJs: String =
+        "(function(){" +
+            "document.querySelectorAll('[data-tex]').forEach(function(n){var t=n.getAttribute('data-tex')||'';" +
+            "try{if(window.katex){katex.render(t,n,{displayMode:n.classList.contains('math-display'),throwOnError:false,strict:false})}else{n.textContent=t}}" +
+            "catch(e){n.textContent=t}});" +
+            "try{if(window.hljs)hljs.highlightAll()}catch(e){}" +
+            "try{document.querySelectorAll('li > input[type=\"checkbox\"]').forEach(function(b){if(b.parentElement){b.parentElement.classList.add('task-list-item');" +
+            "if(b.parentElement.parentElement)b.parentElement.parentElement.classList.add('task-list')}})}catch(e){}" +
+            "})();"
+
+    private fun minifyCss(css: String): String = css
+        .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    private fun katexInlineCss(context: Context): String {
+        synchronized(assetCache) {
+            inlineKatexCssCache?.let { return it }
+        }
+        var css = asset(context, "markdown/katex/katex.min.css")
+        css = Regex("""url\(fonts/(KaTeX_[^)]+\.woff2)\)""").replace(css) { match ->
+            val name = match.groupValues[1]
+            val bytes = context.assets.open("markdown/katex/fonts/$name").readBytes()
+            "url(\"data:font/woff2;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}\")"
+        }
+        css = css.replace(
+            Regex(""",url\(fonts/KaTeX_[^)]+\.(?:woff|ttf)\)\s*format\(["'](?:woff|truetype)["']\)"""),
+            "",
+        )
+        synchronized(assetCache) {
+            inlineKatexCssCache = css
+        }
+        return css
+    }
+
+    private fun highlightInlineBase64(context: Context): String {
+        synchronized(assetCache) {
+            highlightBase64Cache?.let { return it }
+        }
+        val encoded = Base64.encodeToString(
+            asset(context, "markdown/highlight.min.js").toByteArray(Charsets.UTF_8),
+            Base64.NO_WRAP,
+        )
+        synchronized(assetCache) {
+            highlightBase64Cache = encoded
+        }
+        return encoded
+    }
+
+    private fun renderBody(context: Context, markdown: String): String {
+        return if (markdown.isBlank()) {
+            ""
+        } else {
+            val extensions: List<Extension> = listOf(
+                TablesExtension.create(),
+                StrikethroughExtension.create(),
+                TaskListItemsExtension.create(),
+                AutolinkExtension.create(),
+            )
+            val parser = Parser.builder().extensions(extensions).build()
+            val renderer = HtmlRenderer.builder()
+                .extensions(extensions)
+                .escapeHtml(true)
+                .sanitizeUrls(true)
+                .build()
+            val normalized = normalizeTables(markdown)
+            val mathMarkers = normalized.indexOf('$') >= 0 ||
+                normalized.contains("\\(") || normalized.contains("\\[")
+            val mathProtection = if (mathMarkers) {
+                protectMath(normalized)
+            } else {
+                MathProtection(normalized, emptyList(), emptyList())
+            }
+            val mathPrepared = mathProtection.text
+            val hasRawTable = mathPrepared.contains("<table", ignoreCase = true)
+            val (tablePrepared, tables) = if (hasRawTable) {
+                protectRawTables(mathPrepared)
+            } else {
+                mathPrepared to emptyList()
+            }
+            val (prepared, escapes) = if ('\\' in tablePrepared) {
+                protectEscapes(tablePrepared)
+            } else {
+                tablePrepared to emptyList()
+            }
+            var rendered = renderer.render(parser.parse(prepared))
+            if (tables.isNotEmpty()) {
+                rendered = RawTableTokenRegex.replace(rendered) { match ->
+                    val index = (match.groupValues[1].ifBlank { match.groupValues[2] }).toIntOrNull()
+                    val table = index?.let(tables::getOrNull)
+                    table ?: match.value
+                }
+            }
+            restoreEscapes(rendered, escapes)
+            restoreLiterals(rendered, mathProtection.literals)
+            restoreMath(rendered, mathProtection.snippets)
+        }
+    }
 
     private fun asset(context: Context, name: String): String {
         synchronized(assetCache) {
