@@ -141,7 +141,7 @@ object ToolRegistry {
         Tool("dev_sensor", "传感器列表", "列出设备可用传感器", ToolCategory.DEVICE, Icons.Filled.Sensors),
         Tool("dev_level", "水平仪", "气泡水平仪与倾角", ToolCategory.DEVICE, Icons.Filled.LinearScale),
         Tool("dev_metal", "金属探测器", "用磁力计检测附近金属与磁场变化", ToolCategory.DEVICE, Icons.Filled.TrackChanges),
-        Tool("dev_apps", "应用管理", "用户 / 系统应用管理、冻结、卸载、Dex2oat 与提取安装包", ToolCategory.ADVANCED, Icons.Filled.Apps),
+        Tool("dev_apps", "应用管理", "用户 / 系统应用管理、冻结、卸载、Dex2oat 与提取安装包", ToolCategory.DEVICE, Icons.Filled.Apps),
         Tool("dev_vibrate", "振动器", "预设模式循环振动，可调强度，手动停止", ToolCategory.DEVICE, Icons.Filled.Vibration),
         Tool("dev_installer", "安装特殊应用", "安装 APKS / XAPK / APKM 等拆分安装包", ToolCategory.ADVANCED, Icons.Filled.Apps),
         Tool("dev_fake_call", "模拟来电", "用系统电话界面模拟来电，支持定时、隐藏号码与接听语音", ToolCategory.ADVANCED, Icons.Filled.PhoneInTalk),

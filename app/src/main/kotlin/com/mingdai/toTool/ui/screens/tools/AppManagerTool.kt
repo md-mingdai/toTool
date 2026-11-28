@@ -14,6 +14,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -178,7 +181,6 @@ private data class PrivilegedResult(val code: Int, val output: String) {
         append("退出码 ").append(code)
         if (output.isNotBlank()) append("\n\n").append(output.trimEnd())
     }
-}
 
 @Composable
 fun AppManagerTool(padding: PaddingValues) {
@@ -452,11 +454,18 @@ fun AppManagerTool(padding: PaddingValues) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState())
+                    .animateContentSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                when (page) {
+                Crossfade(
+                    targetState = page,
+                    animationSpec = tween(durationMillis = 180),
+                    label = "appManagerPage",
+                ) { currentPage ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        when (currentPage) {
                     AppPage.DETAIL -> {
                         AppHeader(app)
                         AppInfoCard(app, onCopy = { copyText(context, it, "内容") })
@@ -681,7 +690,8 @@ fun AppManagerTool(padding: PaddingValues) {
                             ) { Text("刷新列表") }
                         }
                     }
-                }
+                        }
+                    }
 
                 if (busy) {
                     Row(
@@ -700,6 +710,7 @@ fun AppManagerTool(padding: PaddingValues) {
                         MiuixTheme.colorScheme.secondaryContainer,
                         MiuixTheme.colorScheme.onSecondaryContainer,
                     )
+                }
                 }
             }
         }
@@ -733,8 +744,8 @@ private fun AppInfoCard(app: ManagedApp, onCopy: (String) -> Unit) {
     val colors = MiuixTheme.colorScheme
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             InfoLine("应用包名", app.packageName, onCopy)
             InfoLine(
@@ -773,12 +784,12 @@ private fun InfoLine(label: String, value: String, onCopy: (String) -> Unit) {
                 color = colors.onSurface,
             )
         }
-        IconButton(onClick = { onCopy(value) }, modifier = Modifier.size(32.dp)) {
+        IconButton(onClick = { onCopy(value) }, modifier = Modifier.size(28.dp)) {
             Icon(
                 imageVector = Icons.Filled.ContentCopy,
                 contentDescription = "复制$label",
                 tint = colors.primary,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(15.dp),
             )
         }
     }
@@ -830,18 +841,18 @@ private fun AppActionRow(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(color),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MiuixTheme.textStyles.body2)
@@ -897,12 +908,12 @@ private fun AppIcon(bitmap: Bitmap?, label: String) {
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = label,
-            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)),
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)),
         )
     } else {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(40.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MiuixTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
