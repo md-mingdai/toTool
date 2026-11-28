@@ -687,6 +687,7 @@ private fun isTableDivider(line: String): Boolean {
             Regex(""",url\(fonts/KaTeX_[^)]+\.(?:woff|ttf)\)\s*format\(["'](?:woff|truetype)["']\)"""),
             "",
         )
+        css = css.trim()
         synchronized(assetCache) {
             inlineKatexCssCache = css
         }

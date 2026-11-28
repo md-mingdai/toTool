@@ -392,7 +392,7 @@ fun MarkdownTool(padding: PaddingValues) {
             onValueChange = { value ->
                 exportWidthText = value.filter { it.isDigit() }.take(6)
             },
-            label = "宽度",
+            label = "宽度（px）",
             useLabelAsPlaceholder = true,
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
