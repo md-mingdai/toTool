@@ -327,23 +327,6 @@ fun MarkdownTool(padding: PaddingValues) {
             )
         }
 
-        if (source.length > 300_000 && exportWarning == null) {
-            MessageCard(
-                "提示",
-                "文档较长，导出可能耗时并占用较多内存；不会限制 Markdown 长度。",
-                MarkdownWarningContainer,
-                MarkdownWarningContent,
-            )
-        }
-
-        exportWarning?.let {
-            MessageCard(
-                "注意",
-                it,
-                MarkdownWarningContainer,
-                MarkdownWarningContent,
-            )
-        }
         Text(
             "导出清晰度",
             style = MiuixTheme.textStyles.footnote1,
@@ -363,6 +346,23 @@ fun MarkdownTool(padding: PaddingValues) {
             }
         }
 
+        if (source.length > 300_000 && exportWarning == null) {
+            MessageCard(
+                "提示",
+                "文档较长，导出可能耗时并占用较多内存；不会限制 Markdown 长度。",
+                MarkdownWarningContainer,
+                MarkdownWarningContent,
+            )
+        }
+
+        exportWarning?.let {
+            MessageCard(
+                "注意",
+                it,
+                MarkdownWarningContainer,
+                MarkdownWarningContent,
+            )
+        }
         PrimaryButton(
             onClick = click@{
                 if (exporting || source.isBlank()) return@click
