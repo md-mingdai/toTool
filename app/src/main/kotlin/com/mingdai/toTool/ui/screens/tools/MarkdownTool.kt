@@ -70,6 +70,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private data class MarkdownPreview(val html: String = "", val error: String? = null)
 
+private data class PreviewPage(val html: String, val url: String?)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MarkdownTool(padding: PaddingValues) {
@@ -90,14 +92,22 @@ fun MarkdownTool(padding: PaddingValues) {
             value = MarkdownPreview()
             return@produceState
         }
-        delay(if (source.length > 4_000) 250 else 90)
+        val debounceMs = if (source.length > 4_000) {
+            (source.length / 4_000).coerceIn(1, 30) * 90L
+        } else {
+            90L
+        }
+        delay(debounceMs)
         value = withContext(Dispatchers.Default) {
-            runCatching {
-                MarkdownRenderer.render(context.applicationContext, source, style, dark)
-            }.fold(
-                onSuccess = { MarkdownPreview(it) },
-                onFailure = { MarkdownPreview(error = it.message ?: "Markdown 渲染失败") },
-            )
+            try {
+                MarkdownPreview(
+                    MarkdownRenderer.render(context.applicationContext, source, style, dark),
+                )
+            } catch (e: OutOfMemoryError) {
+                MarkdownPreview(error = "文档太大，当前设备内存不足，预览无法完成")
+            } catch (e: Exception) {
+                MarkdownPreview(error = e.message ?: "Markdown 渲染失败")
+            }
         }
     }
 
@@ -133,6 +143,7 @@ fun MarkdownTool(padding: PaddingValues) {
 
     DisposableEffect(previewWebView) {
         onDispose {
+            (previewWebView.tag as? PreviewPage)?.url?.let(MarkdownAssetServer::unregisterPage)
             previewWebView.stopLoading()
             runCatching { previewWebView.loadUrl("about:blank") }
             previewWebView.destroy()
@@ -146,6 +157,8 @@ fun MarkdownTool(padding: PaddingValues) {
                 source = withContext(Dispatchers.IO) { readMarkdownFile(context, uri) }
                 savedPath = null
                 error = null
+            } catch (e: OutOfMemoryError) {
+                error = "文档太大，当前设备内存不足，无法读取"
             } catch (e: Exception) {
                 error = e.message ?: "读取 Markdown 文件失败"
             }
@@ -269,18 +282,16 @@ fun MarkdownTool(padding: PaddingValues) {
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
                     view.setBackgroundColor(previewBackground.toArgb())
-                    if (view.tag !== preview.html) {
-                        view.tag = preview.html
+                    val loaded = view.tag as? PreviewPage
+                    if (loaded?.html !== preview.html) {
+                        loaded?.url?.let(MarkdownAssetServer::unregisterPage)
                         if (preview.html.isEmpty()) {
+                            view.tag = PreviewPage("", null)
                             view.loadUrl("about:blank")
                         } else {
-                            view.loadDataWithBaseURL(
-                                MarkdownAssetServer.BASE_URL,
-                                preview.html,
-                                "text/html",
-                                "UTF-8",
-                                null,
-                            )
+                            val url = MarkdownAssetServer.registerPage(preview.html)
+                            view.tag = PreviewPage(preview.html, url)
+                            view.loadUrl(url)
                         }
                     }
                 },
@@ -381,6 +392,8 @@ fun MarkdownTool(padding: PaddingValues) {
                         exportWarning = exported.warning
                     } catch (e: CancellationException) {
                         throw e
+                    } catch (e: OutOfMemoryError) {
+                        error = "图片过大，当前设备内存不足，请降低导出清晰度"
                     } catch (e: Exception) {
                         error = e.message ?: "导出失败"
                     } finally {
@@ -429,6 +442,7 @@ fun MarkdownTool(padding: PaddingValues) {
 
 private fun openPreviewLink(context: Context, uri: Uri): Boolean {
     val scheme = uri.scheme?.lowercase() ?: return false
+    if (uri.host == "totool.local") return false
     if (scheme !in setOf("http", "https", "mailto", "tel")) return false
     return runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, uri))

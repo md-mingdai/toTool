@@ -65,12 +65,16 @@ object MarkdownImageExporter {
         val bitmap = captured.bitmap
         try {
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
-            val saved = withContext(Dispatchers.IO) {
-                saveImageToGallery(context, "markdown_$stamp.png", "image/png") { out ->
-                    if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
-                        throw IOException("PNG 编码失败")
+            val saved = try {
+                withContext(Dispatchers.IO) {
+                    saveImageToGallery(context, "markdown_$stamp.png", "image/png") { out ->
+                        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                            throw IOException("PNG 编码失败")
+                        }
                     }
                 }
+            } catch (e: OutOfMemoryError) {
+                throw IllegalStateException("图片过大，当前设备内存不足，请降低导出清晰度")
             }
             return MarkdownExportResult(saved.first, saved.second, captured.warning)
         } finally {
@@ -140,6 +144,7 @@ object MarkdownImageExporter {
         )
 
         var added = false
+        var pageUrl: String? = null
         try {
             host.layoutParams = FrameLayout.LayoutParams(widthPx, 1)
             root.addView(host)
@@ -156,17 +161,20 @@ object MarkdownImageExporter {
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: android.webkit.WebResourceRequest,
-                ): Boolean = true
+                ): Boolean = request.url.host != "totool.local"
 
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: android.webkit.WebResourceRequest,
                 ): android.webkit.WebResourceResponse? = MarkdownAssetServer.intercept(context, request)
             }
-            webView.loadDataWithBaseURL(MarkdownAssetServer.BASE_URL, html, "text/html", "UTF-8", null)
+            pageUrl = MarkdownAssetServer.registerPage(html)
+            webView.loadUrl(pageUrl)
 
+            // 大文档 / 慢图片 / 公式排版需要更多时间；不能因为固定 20 秒就截断最终高度。
+            val pageTimeout = (PAGE_TIMEOUT_MS + html.length / 10L).coerceAtMost(300_000L)
             val pageSize = try {
-                withTimeout(PAGE_TIMEOUT_MS) { ready.await() }
+                withTimeout(pageTimeout) { ready.await() }
             } catch (e: TimeoutCancellationException) {
                 // 少部分 WebView 在页面加载完时钟表 API 不稳定；contentHeight 仍能给出
                 // 一个可用的 CSS 高度，宁可导出也不要直接失败。
@@ -203,7 +211,7 @@ object MarkdownImageExporter {
             // 不把 WebView 撑到整篇文档那么高：Chromium 的大尺寸软件层会触发 tile
             // 内存上限，页面下半部分可能画不出来。这里让 WebView 保持一个适中的
             // 视口高度，逐屏滚动并拼接到最终的整篇位图里。
-            val viewportHeight = minOf(heightPx, 2200)
+            val viewportHeight = minOf(heightPx, 3600)
             host.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
             webView.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
             host.measure(
@@ -249,6 +257,7 @@ object MarkdownImageExporter {
             }
             return CaptureResult(bitmap, warning)
         } finally {
+            MarkdownAssetServer.unregisterPage(pageUrl)
             host.removeView(webView)
             webView.stopLoading()
             runCatching { webView.loadUrl("about:blank") }

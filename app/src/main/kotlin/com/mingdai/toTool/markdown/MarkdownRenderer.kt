@@ -80,13 +80,26 @@ object MarkdownRenderer {
                 .sanitizeUrls(true)
                 .build()
             val normalized = normalizeTables(markdown)
-            val (mathPrepared, math) = protectMath(normalized)
-            val (prepared, tables) = protectRawTables(mathPrepared)
+            val mathMarkers = normalized.indexOf('$') >= 0 ||
+                normalized.contains("\\(") || normalized.contains("\\[")
+            val (mathPrepared, math) = if (mathMarkers) {
+                protectMath(normalized)
+            } else {
+                normalized to emptyList()
+            }
+            val hasRawTable = mathPrepared.contains("<table", ignoreCase = true)
+            val (prepared, tables) = if (hasRawTable) {
+                protectRawTables(mathPrepared)
+            } else {
+                mathPrepared to emptyList()
+            }
             var rendered = renderer.render(parser.parse(prepared))
-            rendered = Regex("(?s)<p>\\s*@@TTTABLE(\\d+)@@\\s*</p>|@@TTTABLE(\\d+)@@").replace(rendered) { match ->
-                val index = (match.groupValues[1].ifBlank { match.groupValues[2] }).toIntOrNull()
-                val table = index?.let(tables::getOrNull)
-                table ?: match.value
+            if (tables.isNotEmpty()) {
+                rendered = RawTableTokenRegex.replace(rendered) { match ->
+                    val index = (match.groupValues[1].ifBlank { match.groupValues[2] }).toIntOrNull()
+                    val table = index?.let(tables::getOrNull)
+                    table ?: match.value
+                }
             }
             restoreMath(rendered, math)
         }
@@ -106,6 +119,7 @@ object MarkdownRenderer {
             <html lang="zh-CN">
             <head>
             <meta charset="utf-8">
+            <base href="${MarkdownAssetServer.BASE_URL}">
             <meta name="viewport" content="$viewport">
             <meta name="color-scheme" content="$colorScheme">
             <link rel="stylesheet" href="markdown/katex/katex.min.css">
@@ -167,6 +181,13 @@ private data class MathSnippet(val tex: String, val display: Boolean)
 
 private const val MATH_TOKEN_PREFIX = "@@TTMATH"
 private val TableDividerCell = Regex(""":?-{3,}:?""")
+private val RawTableTokenRegex = Regex("(?s)<p>\\s*@@TTTABLE(\\d+)@@\\s*</p>|@@TTTABLE(\\d+)@@")
+private const val ALLOWED_TABLE_TAGS = "table|thead|tbody|tfoot|tr|th|td|caption|br|strong|em|b|i|code"
+private val RawTableScriptRegex = Regex("(?is)<script\\b.*?</script>")
+private val RawTableStyleRegex = Regex("(?is)<style\\b.*?</style>")
+private val RawTableCommentRegex = Regex("(?s)<!--.*?-->")
+private val RawTableAllowedTagRegex = Regex("(?i)<(/?)\\s*($ALLOWED_TABLE_TAGS)\\b[^>]*>")
+private val RawTableUnknownTagRegex = Regex("(?is)<(?!/?(?:$ALLOWED_TABLE_TAGS)\\b)[^>]*>")
 
 /**
  * CommonMark 会把数学公式里的 `_`、`*` 当成强调语法，所以先把公式替换成占位符，
@@ -178,6 +199,10 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
     var i = 0
     var inFence = false
     var fenceMarker = ""
+    var missingDisplayCloser = false
+    var missingParenCloser = false
+    var missingBracketCloser = false
+    val failedTickLengths = HashSet<Int>()
     while (i < markdown.length) {
         if (i == 0 || markdown[i - 1] == '\n') {
             val lineEnd = markdown.indexOf('\n', i).let { if (it < 0) markdown.length else it }
@@ -208,12 +233,19 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
         if (ch == '`') {
             var runEnd = i
             while (runEnd < markdown.length && markdown[runEnd] == '`') runEnd++
-            val ticks = "`".repeat(runEnd - i)
+            val tickLength = runEnd - i
+            if (tickLength in failedTickLengths) {
+                out.append(markdown, i, runEnd)
+                i = runEnd
+                continue
+            }
+            val ticks = "`".repeat(tickLength)
             val close = markdown.indexOf(ticks, runEnd)
             if (close >= 0) {
                 out.append(markdown, i, close + ticks.length)
                 i = close + ticks.length
             } else {
+                failedTickLengths += tickLength
                 out.append(markdown, i, runEnd)
                 i = runEnd
             }
@@ -222,13 +254,17 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
         if (ch == '\\' && i + 1 < markdown.length) {
             val next = markdown[i + 1]
             if (next == '(' || next == '[') {
-                val closeToken = if (next == '(') "\\)" else "\\]"
-                val end = findUnescaped(markdown, closeToken, i + 2)
-                if (end > i + 2) {
-                    snippets += MathSnippet(markdown.substring(i + 2, end), next == '[')
-                    out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
-                    i = end + 2
-                    continue
+                val missing = if (next == '(') missingParenCloser else missingBracketCloser
+                if (!missing) {
+                    val closeToken = if (next == '(') "\\)" else "\\]"
+                    val end = findUnescaped(markdown, closeToken, i + 2)
+                    if (end > i + 2) {
+                        snippets += MathSnippet(markdown.substring(i + 2, end), next == '[')
+                        out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
+                        i = end + 2
+                        continue
+                    }
+                    if (next == '(') missingParenCloser = true else missingBracketCloser = true
                 }
             }
             out.append(ch).append(next)
@@ -237,12 +273,15 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
         }
         if (ch == '$' && i + 1 < markdown.length) {
             if (markdown[i + 1] == '$') {
-                val end = findUnescaped(markdown, "$$", i + 2)
-                if (end > i + 2) {
-                    snippets += MathSnippet(markdown.substring(i + 2, end), true)
-                    out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
-                    i = end + 2
-                    continue
+                if (!missingDisplayCloser) {
+                    val end = findUnescaped(markdown, "$$", i + 2)
+                    if (end > i + 2) {
+                        snippets += MathSnippet(markdown.substring(i + 2, end), true)
+                        out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
+                        i = end + 2
+                        continue
+                    }
+                    missingDisplayCloser = true
                 }
             } else {
                 val end = findInlineDollar(markdown, i + 1)
@@ -267,6 +306,8 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
     var i = 0
     var inFence = false
     var fenceMarker = ""
+    val failedTickLengths = HashSet<Int>()
+    var missingTableCloser = false
     while (i < markdown.length) {
         if (i == 0 || markdown[i - 1] == '\n') {
             val lineEnd = markdown.indexOf('\n', i).let { if (it < 0) markdown.length else it }
@@ -296,12 +337,19 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
         if (markdown[i] == '`') {
             var runEnd = i
             while (runEnd < markdown.length && markdown[runEnd] == '`') runEnd++
-            val ticks = "`".repeat(runEnd - i)
+            val tickLength = runEnd - i
+            if (tickLength in failedTickLengths) {
+                out.append(markdown, i, runEnd)
+                i = runEnd
+                continue
+            }
+            val ticks = "`".repeat(tickLength)
             val close = markdown.indexOf(ticks, runEnd)
             if (close >= 0) {
                 out.append(markdown, i, close + ticks.length)
                 i = close + ticks.length
             } else {
+                failedTickLengths += tickLength
                 out.append(markdown, i, runEnd)
                 i = runEnd
             }
@@ -309,7 +357,7 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
         }
         val open = markdown.regionMatches(i, "<table", 0, 6, ignoreCase = true)
         val boundary = i + 6 >= markdown.length || markdown[i + 6].isWhitespace() || markdown[i + 6] == '>'
-        if (open && boundary) {
+        if (open && boundary && !missingTableCloser) {
             val end = markdown.indexOf("</table>", i, ignoreCase = true)
             if (end >= 0) {
                 val raw = markdown.substring(i, end + 8)
@@ -318,6 +366,7 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
                 i = end + 8
                 continue
             }
+            missingTableCloser = true
         }
         out.append(markdown[i])
         i++
@@ -328,14 +377,13 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
 /** 只保留表格相关标签并去掉所有属性，避免把原始 HTML 直接注入 WebView。 */
 private fun sanitizeRawTable(raw: String): String {
     var value = raw
-        .replace(Regex("(?is)<script\\b.*?</script>"), "")
-        .replace(Regex("(?is)<style\\b.*?</style>"), "")
-        .replace(Regex("(?s)<!--.*?-->"), "")
-    val allowed = "table|thead|tbody|tfoot|tr|th|td|caption|br|strong|em|b|i|code"
-    value = value.replace(Regex("(?i)<(/?)\\s*($allowed)\\b[^>]*>")) { match ->
+        .replace(RawTableScriptRegex, "")
+        .replace(RawTableStyleRegex, "")
+        .replace(RawTableCommentRegex, "")
+    value = RawTableAllowedTagRegex.replace(value) { match ->
         "<${match.groupValues[1]}${match.groupValues[2].lowercase()}>"
     }
-    value = value.replace(Regex("(?is)<(?!/?(?:$allowed)\\b)[^>]*>"), "")
+    value = RawTableUnknownTagRegex.replace(value, "")
     return value
 }
 
@@ -395,6 +443,7 @@ private fun escapeAttribute(value: String): String = buildString(value.length + 
 
 /** GFM 表格要求前面有空行；用户直接接在段落后面时补一个空行。 */
 private fun normalizeTables(markdown: String): String {
+    if ('|' !in markdown) return markdown
     val lines = markdown.split('\n')
     if (lines.size < 3) return markdown
     val out = mutableListOf<String>()
