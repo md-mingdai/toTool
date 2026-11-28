@@ -110,7 +110,6 @@ object MarkdownImageExporter {
                 setSupportZoom(false)
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                setInitialScale(100)
             }
         }
 
