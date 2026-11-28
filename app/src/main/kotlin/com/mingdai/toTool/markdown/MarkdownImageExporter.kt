@@ -89,6 +89,8 @@ object MarkdownImageExporter {
         val webView = WebView(activity).apply {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             setBackgroundColor(style.background(dark))
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = false
@@ -132,7 +134,7 @@ object MarkdownImageExporter {
 
         var added = false
         try {
-            host.layoutParams = ViewGroup.LayoutParams(widthPx, 1)
+            host.layoutParams = FrameLayout.LayoutParams(widthPx, 1)
             root.addView(host)
             added = true
             host.addView(
@@ -188,30 +190,52 @@ object MarkdownImageExporter {
                 )
             }
 
-            host.layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
-            webView.layoutParams = FrameLayout.LayoutParams(widthPx, heightPx)
+            // 不把 WebView 撑到整篇文档那么高：Chromium 的大尺寸软件层会触发 tile
+            // 内存上限，页面下半部分可能画不出来。这里让 WebView 保持一个适中的
+            // 视口高度，逐屏滚动并拼接到最终的整篇位图里。
+            val viewportHeight = minOf(heightPx, 2200)
+            host.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
+            webView.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
             host.measure(
                 View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
             )
-            host.layout(0, 0, widthPx, heightPx)
+            host.layout(0, 0, widthPx, viewportHeight)
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
             )
-            webView.layout(0, 0, widthPx, heightPx)
+            webView.layout(0, 0, widthPx, viewportHeight)
             webView.scrollTo(0, 0)
             awaitFrame(webView)
             awaitFrame(webView)
 
             val bitmap = try {
-                Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { bmp ->
-                    val canvas = Canvas(bmp)
-                    canvas.drawColor(style.background(dark))
-                    webView.draw(canvas)
-                }
+                Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
             } catch (e: OutOfMemoryError) {
                 throw IllegalStateException("图片过大，内存不足，请分段渲染")
+            }
+            try {
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(style.background(dark))
+                val maxScroll = (heightPx - viewportHeight).coerceAtLeast(0)
+                var top = 0
+                while (top < heightPx) {
+                    val scrollY = minOf(top, maxScroll)
+                    webView.scrollTo(0, scrollY)
+                    awaitFrame(webView)
+                    awaitFrame(webView)
+                    val bottom = minOf(top + viewportHeight, heightPx)
+                    canvas.save()
+                    canvas.clipRect(0, top, widthPx, bottom)
+                    canvas.translate(0f, scrollY.toFloat())
+                    webView.draw(canvas)
+                    canvas.restore()
+                    top = bottom
+                }
+            } catch (e: Throwable) {
+                bitmap.recycle()
+                throw e
             }
             return bitmap
         } finally {
