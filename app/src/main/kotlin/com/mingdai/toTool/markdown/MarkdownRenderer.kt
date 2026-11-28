@@ -88,10 +88,15 @@ object MarkdownRenderer {
                 normalized to emptyList()
             }
             val hasRawTable = mathPrepared.contains("<table", ignoreCase = true)
-            val (prepared, tables) = if (hasRawTable) {
+            val (tablePrepared, tables) = if (hasRawTable) {
                 protectRawTables(mathPrepared)
             } else {
                 mathPrepared to emptyList()
+            }
+            val (prepared, escapes) = if ('\\' in tablePrepared) {
+                protectEscapes(tablePrepared)
+            } else {
+                tablePrepared to emptyList()
             }
             var rendered = renderer.render(parser.parse(prepared))
             if (tables.isNotEmpty()) {
@@ -101,6 +106,7 @@ object MarkdownRenderer {
                     table ?: match.value
                 }
             }
+            restoreEscapes(rendered, escapes)
             restoreMath(rendered, math)
         }
         val css = asset(context, "markdown/markdown.css")
@@ -239,11 +245,10 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
                 i = runEnd
                 continue
             }
-            val ticks = "`".repeat(tickLength)
-            val close = markdown.indexOf(ticks, runEnd)
+            val close = findClosingBacktickRun(markdown, runEnd, tickLength)
             if (close >= 0) {
-                out.append(markdown, i, close + ticks.length)
-                i = close + ticks.length
+                out.append(markdown, i, close)
+                i = close
             } else {
                 failedTickLengths += tickLength
                 out.append(markdown, i, runEnd)
@@ -276,21 +281,35 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
                 if (!missingDisplayCloser) {
                     val end = findUnescaped(markdown, "$$", i + 2)
                     if (end > i + 2) {
-                        snippets += MathSnippet(markdown.substring(i + 2, end), true)
-                        out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
+                        val tex = markdown.substring(i + 2, end)
+                        if (looksLikeMath(tex)) {
+                            snippets += MathSnippet(tex, true)
+                            out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
+                            i = end + 2
+                            continue
+                        }
+                        out.append(markdown, i, end + 2)
                         i = end + 2
                         continue
                     }
                     missingDisplayCloser = true
                 }
-            } else {
-                val end = findInlineDollar(markdown, i + 1)
-                if (end > i + 1) {
-                    snippets += MathSnippet(markdown.substring(i + 1, end), false)
+                out.append("$$")
+                i += 2
+                continue
+            }
+            val end = findInlineDollar(markdown, i + 1)
+            if (end > i + 1) {
+                val tex = markdown.substring(i + 1, end)
+                if (looksLikeMath(tex)) {
+                    snippets += MathSnippet(tex, false)
                     out.append(MATH_TOKEN_PREFIX).append(snippets.lastIndex).append("@@")
                     i = end + 1
                     continue
                 }
+                out.append(markdown, i, end + 1)
+                i = end + 1
+                continue
             }
         }
         out.append(ch)
@@ -343,11 +362,10 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
                 i = runEnd
                 continue
             }
-            val ticks = "`".repeat(tickLength)
-            val close = markdown.indexOf(ticks, runEnd)
+            val close = findClosingBacktickRun(markdown, runEnd, tickLength)
             if (close >= 0) {
-                out.append(markdown, i, close + ticks.length)
-                i = close + ticks.length
+                out.append(markdown, i, close)
+                i = close
             } else {
                 failedTickLengths += tickLength
                 out.append(markdown, i, runEnd)
@@ -374,6 +392,108 @@ private fun protectRawTables(markdown: String): Pair<String, List<String>> {
     return out.toString() to tables
 }
 
+/** 保护反斜杠转义，避免 `\\**粗体\\**` 这类写法被 CommonMark 拆成强调。 */
+private fun protectEscapes(markdown: String): Pair<String, List<Char>> {
+    val escapes = mutableListOf<Char>()
+    val out = StringBuilder(markdown.length)
+    var i = 0
+    var inFence = false
+    var fenceMarker = ""
+    val failedTickLengths = HashSet<Int>()
+    while (i < markdown.length) {
+        if (i == 0 || markdown[i - 1] == '\n') {
+            val lineEnd = markdown.indexOf('\n', i).let { if (it < 0) markdown.length else it }
+            val line = markdown.substring(i, lineEnd)
+            val trimmed = line.trimStart()
+            val marker = when {
+                trimmed.startsWith("```") -> "```"
+                trimmed.startsWith("~~~") -> "~~~"
+                else -> null
+            }
+            if (inFence) {
+                out.append(line)
+                if (lineEnd < markdown.length) out.append('\n')
+                if (marker == fenceMarker) inFence = false
+                i = if (lineEnd < markdown.length) lineEnd + 1 else markdown.length
+                continue
+            }
+            if (marker != null) {
+                inFence = true
+                fenceMarker = marker
+                out.append(line)
+                if (lineEnd < markdown.length) out.append('\n')
+                i = if (lineEnd < markdown.length) lineEnd + 1 else markdown.length
+                continue
+            }
+        }
+        val ch = markdown[i]
+        if (ch == '`') {
+            var runEnd = i
+            while (runEnd < markdown.length && markdown[runEnd] == '`') runEnd++
+            val tickLength = runEnd - i
+            if (tickLength in failedTickLengths) {
+                out.append(markdown, i, runEnd)
+                i = runEnd
+                continue
+            }
+            val close = findClosingBacktickRun(markdown, runEnd, tickLength)
+            if (close >= 0) {
+                out.append(markdown, i, close)
+                i = close
+            } else {
+                failedTickLengths += tickLength
+                out.append(markdown, i, runEnd)
+                i = runEnd
+            }
+            continue
+        }
+        if (ch == '\\' && i + 1 < markdown.length && isEscapablePunctuation(markdown[i + 1])) {
+            val escaped = markdown[i + 1]
+            // `\\**粗体\\**` 里反斜杠只转义第一个星号，第二个星号仍会开启强调；
+            // 对 * / _ / ~ 这类格式字符的连续串一并按字面处理。反斜杠本身不能这样
+            // 扩展，否则 `\\` 会从“一个反斜杠”变成两个。
+            val protectRun = escaped == '*' || escaped == '_' || escaped == '~'
+            var cursor = i + 1
+            if (protectRun) {
+                while (cursor < markdown.length && markdown[cursor] == escaped) {
+                    escapes += escaped
+                    out.append("@@TTESC").append(escapes.lastIndex).append("@@")
+                    cursor++
+                }
+            } else {
+                escapes += escaped
+                out.append("@@TTESC").append(escapes.lastIndex).append("@@")
+                cursor = i + 2
+            }
+            i = cursor
+            continue
+        }
+        out.append(ch)
+        i++
+    }
+    return out.toString() to escapes
+}
+
+private fun isEscapablePunctuation(ch: Char): Boolean =
+    ch in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
+private fun restoreEscapes(html: String, escapes: List<Char>): String {
+    if (escapes.isEmpty()) return html
+    return Regex("@@TTESC(\\d+)@@").replace(html) { match ->
+        val index = match.groupValues[1].toIntOrNull()
+        val ch = index?.let(escapes::getOrNull)
+        if (ch == null) match.value else escapeHtmlChar(ch)
+    }
+}
+
+private fun escapeHtmlChar(ch: Char): String = when (ch) {
+    '&' -> "&amp;"
+    '<' -> "&lt;"
+    '>' -> "&gt;"
+    '"' -> "&quot;"
+    else -> ch.toString()
+}
+
 /** 只保留表格相关标签并去掉所有属性，避免把原始 HTML 直接注入 WebView。 */
 private fun sanitizeRawTable(raw: String): String {
     var value = raw
@@ -385,6 +505,38 @@ private fun sanitizeRawTable(raw: String): String {
     }
     value = RawTableUnknownTagRegex.replace(value, "")
     return value
+}
+
+/** CommonMark 代码段必须由相同长度的反引号串闭合；不能把更长串的一部分当闭合。 */
+/**
+ * 避免把 `$$不是链接$$`、`$https://...$` 这样的普通美元文本当成公式。
+ * 真正的公式通常含反斜杠、上下标、等号或括号等结构。
+ */
+private fun looksLikeMath(tex: String): Boolean {
+    if (tex.isBlank()) return false
+    if (tex.length == 1 && tex[0].isLetter()) return true
+    return tex.any { it == '\\' || it in "^_{}=+-*<>|&()[]" }
+}
+
+private fun findClosingBacktickRun(text: String, start: Int, runLength: Int): Int {
+    var index = start
+    while (index < text.length) {
+        if (text[index] == '\n' &&
+            index + 1 < text.length &&
+            text[index + 1] == '\n'
+        ) {
+            // 不把跨空行的反引号当成代码段，避免一个未闭合的 ` 吞掉后面的整篇内容。
+            return -1
+        }
+        if (text[index] != '`') {
+            index++
+            continue
+        }
+        val runStart = index
+        while (index < text.length && text[index] == '`') index++
+        if (index - runStart == runLength) return index
+    }
+    return -1
 }
 
 private fun findUnescaped(text: String, token: String, start: Int): Int {
