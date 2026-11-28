@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.mingdai.toTool.markdown.MarkdownAssetServer
 import com.mingdai.toTool.markdown.MarkdownImageExporter
 import com.mingdai.toTool.markdown.MarkdownRenderer
 import com.mingdai.toTool.markdown.MarkdownStyle
@@ -54,6 +56,7 @@ import com.mingdai.toTool.ui.components.SecondaryButton
 import com.mingdai.toTool.ui.components.SelectChip
 import com.mingdai.toTool.ui.components.ToolBody
 import java.io.IOException
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -81,6 +84,7 @@ fun MarkdownTool(padding: PaddingValues) {
     var savedPath by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var previewWidth by remember { mutableIntStateOf(0) }
+    var exportScale by rememberSaveable { mutableIntStateOf(2) }
 
     val preview by produceState(MarkdownPreview(), source, style, dark) {
         if (source.isBlank()) {
@@ -119,6 +123,11 @@ fun MarkdownTool(padding: PaddingValues) {
                     view: WebView,
                     request: WebResourceRequest,
                 ): Boolean = openPreviewLink(context, request.url)
+
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? = MarkdownAssetServer.intercept(context, request)
             }
         }
     }
@@ -264,7 +273,7 @@ fun MarkdownTool(padding: PaddingValues) {
                             view.loadUrl("about:blank")
                         } else {
                             view.loadDataWithBaseURL(
-                                null,
+                                MarkdownAssetServer.BASE_URL,
                                 preview.html,
                                 "text/html",
                                 "UTF-8",
@@ -302,31 +311,59 @@ fun MarkdownTool(padding: PaddingValues) {
             )
         }
 
+        Text(
+            "导出清晰度",
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(1, 2, 3).forEach { scale ->
+                SelectChip(
+                    selected = exportScale == scale,
+                    onClick = { exportScale = scale },
+                    label = "${scale}×",
+                    enabled = !exporting,
+                )
+            }
+        }
+
         PrimaryButton(
             onClick = click@{
                 if (exporting || source.isBlank()) return@click
                 val sourceAtClick = source
                 val styleAtClick = style
                 val darkAtClick = dark
+                val scaleAtClick = exportScale
                 exporting = true
                 savedPath = null
                 error = null
                 scope.launch {
                     try {
-                        val html = withContext(Dispatchers.Default) {
-                            MarkdownRenderer.render(context.applicationContext, sourceAtClick, styleAtClick, darkAtClick)
-                        }
+                        val density = context.resources.displayMetrics.density
                         val fallbackWidth = (
                             context.resources.displayMetrics.widthPixels -
-                                (32 * context.resources.displayMetrics.density).toInt()
+                                (32 * density).toInt()
                             ).coerceAtLeast(320)
-                        val width = previewWidth.takeIf { it > 0 } ?: fallbackWidth
+                        val previewWidthPx = previewWidth.takeIf { it > 0 } ?: fallbackWidth
+                        val previewCssWidth = (previewWidthPx / density).roundToInt().coerceAtLeast(320)
+                        val html = withContext(Dispatchers.Default) {
+                            MarkdownRenderer.render(
+                                context.applicationContext,
+                                sourceAtClick,
+                                styleAtClick,
+                                darkAtClick,
+                                viewportWidthCss = previewCssWidth,
+                            )
+                        }
                         val (where, _) = MarkdownImageExporter.export(
                             context = context,
                             html = html,
                             style = styleAtClick,
                             dark = darkAtClick,
-                            widthPx = width,
+                            widthPx = previewWidthPx * scaleAtClick,
                         )
                         savedPath = where
                     } catch (e: CancellationException) {
@@ -364,7 +401,7 @@ fun MarkdownTool(padding: PaddingValues) {
         HintText(
             "支持 CommonMark / GFM：标题、列表、表格、任务列表、删除线、链接、图片和围栏代码块。" +
                 "原始 HTML 会按文本显示；代码高亮使用本地打包的 highlight.js。" +
-                "导出会把整篇文档渲染成一张长图并保存到相册 Pictures/toTool，远程图片需要联网加载。",
+                "导出可选 1× / 2× / 3× 清晰度，整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；文档很长时高倍数可能受内存限制。远程图片需要联网加载。",
         )
     }
 }

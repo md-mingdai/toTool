@@ -115,9 +115,9 @@
 
 ### Markdown 渲染
 
-- 支持 CommonMark / GFM 常用语法：标题、列表、引用、表格、任务列表、删除线、自动链接、图片和围栏代码块。
+- 支持 CommonMark / GFM 常用语法：标题、列表、引用、表格、任务列表、删除线、自动链接、图片和围栏代码块；行内 / 块级 LaTeX 公式用内置 KaTeX 渲染。
 - 内置 GitHub、VitePress 文档和博客三种排版，可切换亮色 / 深色主题；博客样式使用高亮标题、圆角表格和衬线正文。
-- 实时预览整篇 Markdown，也可以把渲染结果导出为一张长图并保存到相册「Pictures/toTool」。
+- 实时预览整篇 Markdown，可把渲染结果按 1× / 2× / 3× 清晰度导出为一张长图并保存到相册「Pictures/toTool」。
 - 原始 HTML 会按普通文本显示，预览和导出使用本地打包的解析器与高亮脚本；远程图片需要联网加载。
 
 ### 内置工具
@@ -127,10 +127,10 @@
 | 日常工具 | 条码处理、颜色选择器、秒表、手电筒 / SOS、分贝仪、尺子、指南针、量角器、简易画板、时间屏幕、比赛记分牌、倒数日 |
 | 文本工具 | 字符统计、大小写转换、密码生成（传感器 / 绘制熵源）、UUID、Base64、Unicode 编解码、Markdown 渲染、哈希、JSON 格式化、URL 编解码 |
 | 计算工具 | 单位换算、进制转换、百分比、日期计算、贷款计算、方程求解、函数绘图、LaTeX 渲染 |
-| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、振动器、自定义快捷方式、Shizuku Shell、视频壁纸、屏幕坏点检测、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
+| 设备工具 | 设备信息、电池、网络、传感器、水平仪、金属探测器、振动器、自定义快捷方式、Shizuku Shell、应用管理、视频壁纸、屏幕坏点检测、电量伪装、DPI 修改、高级重启、系统界面调节工具、全局方向调节 |
 | 图片工具 | 图片压缩、黑白滤镜、像素化、文字水印、毛玻璃、圆角矩形、图片唱片、纯色图制作、九宫格切图、图片文字化、图片转素描、图片取色、图片 Base64 互转 |
 | 媒体工具 | 视频倒放、音频倒放、画中画、字幕烧录、视频裁剪、视频添加水印、视频压缩、视频旋转、视频变速、视频链接解析 |
-| 高级功能 | 隔空闪传、弱网助手、通知管理、米游记录获取、应用管理、安装 APKS / XAPK / APKM、模拟来电、提取当前壁纸、数据库管理 |
+| 高级功能 | 隔空闪传、弱网助手、通知管理、米游记录获取、安装 APKS / XAPK / APKM、模拟来电、提取当前壁纸、数据库管理 |
 
 - 安装特殊应用支持 APKS / XAPK / APKM / 多 APK,可选在安装成功后删除所选安装包文件(默认关闭,文件提供方不允许删除时会提示)。
 - 倒数日支持每年重复，并可作为主屏幕小组件添加，组件显示最近的一条倒数日，点按直接打开工具。
@@ -157,7 +157,7 @@
 - 倒数日使用 SharedPreferences 保存，主屏幕组件由 AppWidgetProvider + RemoteViews 绘制；日期变化、时区变化和定时刷新都会更新最近一条。
 - 数据库管理使用轻量的 MariaDB Connector/J（约 0.6 MB）连接 MySQL / MariaDB；SQLite 直接使用 Android 自带的 SQLiteDatabase，不额外引入 ORM 或数据库引擎，以控制 APK 体积。
 - Unicode 编解码支持 UTF-16 `\uXXXX`（含代理对）、码点 `U+XXXX`、`\u{...}`、`\UXXXXXXXX` 与 HTML 数字实体；解码自动识别这些写法、处理 `\\` 转义并保留其余原文，默认编码会保护原文里类似转义的字样，保证往返一致。
-- Markdown 渲染使用 commonmark-java 解析 CommonMark / GFM，样式由内置 CSS 控制，代码高亮使用本地打包的 highlight.js；导出时在离屏 WebView 中按整篇内容高度绘制为 PNG，不依赖截图预览区域。
+- Markdown 渲染使用 commonmark-java 解析 CommonMark / GFM，样式由内置 CSS 控制，代码高亮使用本地 highlight.js，数学公式使用本地 KaTeX；导出时在离屏 WebView 中逐屏绘制并拼接为整篇 PNG，支持 1× / 2× / 3× 分辨率。
 - 应用管理通过 PackageManager 枚举用户与系统应用；冻结、卸载、清除数据和 Dex2oat 等修改通过 Shizuku / Root 执行，提取安装包复用系统下载目录（带拆分包的 AAB 应用合并为 .apks）。
 - 配对码由手机端校验并限速；加密密钥由配对码和随机 salt 派生。网页优先使用 WebSocket 长连接，不支持或断开时回退到 HTTP 探活。
 
@@ -197,6 +197,7 @@
 - [MariaDB Connector/J](https://github.com/mariadb-corporation/mariadb-connector-j)：MySQL / MariaDB JDBC 驱动（LGPL-2.1-or-later）。
 - [commonmark-java](https://github.com/commonmark/commonmark-java)：Markdown / GFM 解析（BSD-2-Clause）。
 - [highlight.js](https://github.com/highlightjs/highlight.js)：代码语法高亮（BSD-3-Clause）。
+- [KaTeX](https://github.com/KaTeX/KaTeX)：Markdown 中的 LaTeX 公式渲染（MIT）。
 
 ## 许可证
 

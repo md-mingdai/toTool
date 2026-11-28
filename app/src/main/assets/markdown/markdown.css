@@ -307,6 +307,25 @@ body.dark {
     font-weight: 700;
 }
 
+/* ---- Math ------------------------------------------------------------- */
+
+.markdown-body .math-inline {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.markdown-body .math-display {
+    display: block;
+    margin: 1.15em 0;
+    text-align: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.markdown-body .math-display .katex-display {
+    margin: 0;
+}
+
 /* ---- Tables ----------------------------------------------------------- */
 
 .markdown-body table {

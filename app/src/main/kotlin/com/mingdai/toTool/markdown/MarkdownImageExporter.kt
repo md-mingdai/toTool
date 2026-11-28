@@ -108,8 +108,8 @@ object MarkdownImageExporter {
                 builtInZoomControls = false
                 displayZoomControls = false
                 setSupportZoom(false)
-                useWideViewPort = false
-                loadWithOverviewMode = false
+                useWideViewPort = true
+                loadWithOverviewMode = true
                 setInitialScale(100)
             }
         }
@@ -150,8 +150,13 @@ object MarkdownImageExporter {
                     view: WebView,
                     request: android.webkit.WebResourceRequest,
                 ): Boolean = true
+
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: android.webkit.WebResourceRequest,
+                ): android.webkit.WebResourceResponse? = MarkdownAssetServer.intercept(context, request)
             }
-            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL(MarkdownAssetServer.BASE_URL, html, "text/html", "UTF-8", null)
 
             val pageSize = try {
                 withTimeout(PAGE_TIMEOUT_MS) { ready.await() }
