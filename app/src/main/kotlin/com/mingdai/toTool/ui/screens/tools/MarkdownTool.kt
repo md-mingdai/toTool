@@ -77,6 +77,7 @@ private data class HtmlExportRequest(
     val source: String,
     val style: MarkdownStyle,
     val dark: Boolean,
+    val embedImages: Boolean,
 )
 
 private val MarkdownWarningContainer = Color(0xFFFFF3CD)
@@ -97,6 +98,7 @@ fun MarkdownTool(padding: PaddingValues) {
     var previewWidth by remember { mutableIntStateOf(0) }
     var exportWidthText by rememberSaveable { mutableStateOf("") }
     var htmlExporting by remember { mutableStateOf(false) }
+    var embedHtmlImages by rememberSaveable { mutableStateOf(false) }
     var pendingHtmlRequest by remember { mutableStateOf<HtmlExportRequest?>(null) }
 
     val preview by produceState(MarkdownPreview(), source, style, dark) {
@@ -197,12 +199,13 @@ fun MarkdownTool(padding: PaddingValues) {
         }
         scope.launch {
             try {
-                val html = withContext(Dispatchers.Default) {
+                val html = withContext(Dispatchers.IO) {
                     MarkdownRenderer.renderSingleFile(
                         context.applicationContext,
                         request.source,
                         request.style,
                         request.dark,
+                        embedRemoteImages = request.embedImages,
                     )
                 }
                 withContext(Dispatchers.IO) {
@@ -488,10 +491,26 @@ fun MarkdownTool(padding: PaddingValues) {
             Text(if (exporting) "正在导出整篇图片…" else "导出为图片")
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("HTML 内嵌远程图片", style = MiuixTheme.textStyles.body2)
+                Text(
+                    "下载 Markdown 中的远程图片并转成 Base64；文件会更大，导出也更慢。关闭时保留原始 URL。",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Switch(
+                checked = embedHtmlImages,
+                onCheckedChange = { embedHtmlImages = it },
+                enabled = !exporting && !htmlExporting,
+            )
+        }
+
         SecondaryButton(
             onClick = click@{
                 if (exporting || htmlExporting || source.isBlank()) return@click
-                pendingHtmlRequest = HtmlExportRequest(source, style, dark)
+                pendingHtmlRequest = HtmlExportRequest(source, style, dark, embedHtmlImages)
                 htmlExporting = true
                 savedPath = null
                 exportWarning = null
@@ -524,7 +543,7 @@ fun MarkdownTool(padding: PaddingValues) {
         HintText(
             "支持 CommonMark / GFM：标题、列表、表格、任务列表、删除线、链接、图片和围栏代码块；行内 / 块级 LaTeX 公式使用本地 KaTeX 渲染。" +
                 "原始 HTML 会按文本显示；代码高亮使用本地打包的 highlight.js。" +
-                "导出宽度可填写像素值（留空为预览宽度的 2×），整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；也可以导出为单个 HTML 文件，样式、字体和脚本全部内联并压缩为一行。远程图片仍需联网加载。",
+                "导出宽度可填写像素值（留空为预览宽度的 2×），整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；也可以导出为单个 HTML 文件，样式、字体和脚本全部内联并压缩为一行；可选择远程图片保留原始 URL 或下载后转成 Base64。",
         )
     }
 }

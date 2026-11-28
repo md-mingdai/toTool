@@ -2,6 +2,9 @@ package com.mingdai.toTool.markdown
 
 import android.content.Context
 import android.util.Base64
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import org.commonmark.Extension
 import org.commonmark.ext.autolink.AutolinkExtension
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
@@ -628,8 +631,11 @@ private fun isTableDivider(line: String): Boolean {
         markdown: String,
         style: MarkdownStyle,
         dark: Boolean,
+        embedRemoteImages: Boolean = false,
     ): String {
-        val body = renderBody(context, markdown)
+        var body = renderBody(context, markdown)
+        if (embedRemoteImages) body = embedRemoteImagesInHtml(body)
+        body = body
             .replace("\r\n", "\n")
             .replace('\r', '\n')
             .replace("\n", "&#10;")
@@ -657,6 +663,86 @@ private fun isTableDivider(line: String): Boolean {
             append("</script></body></html>")
         }
     }
+
+    private const val MAX_EMBEDDED_IMAGE_BYTES = 8 * 1024 * 1024
+
+    private fun embedRemoteImagesInHtml(html: String): String {
+        val cache = HashMap<String, String?>()
+        return Regex(
+            """(<img\b[^>]*\bsrc=")(https?://[^"]+)(")""",
+            RegexOption.IGNORE_CASE,
+        ).replace(html) { match ->
+            val src = match.groupValues[2]
+            val data = if (cache.containsKey(src)) {
+                cache[src]
+            } else {
+                fetchImageAsDataUri(src).also { cache[src] = it }
+            }
+            if (data == null) {
+                match.value
+            } else {
+                match.groupValues[1] + data + match.groupValues[3]
+            }
+        }
+    }
+
+    private fun fetchImageAsDataUri(src: String): String? {
+        val url = try {
+            URL(src.replace("&amp;", "&"))
+        } catch (e: Exception) {
+            return null
+        }
+        if (url.protocol != "http" && url.protocol != "https") return null
+        var connection: HttpURLConnection? = null
+        return try {
+            val conn = url.openConnection() as? HttpURLConnection ?: return null
+            connection = conn
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 20_000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", "toTool Markdown export")
+            val code = conn.responseCode
+            if (code !in 200..299) return null
+            val contentType = conn.contentType
+                ?.substringBefore(';')
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf { it.startsWith("image/") }
+            val mime = contentType ?: imageMimeFromPath(url.path) ?: return null
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            var total = 0
+            val input = conn.inputStream
+            input.use { stream ->
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_EMBEDDED_IMAGE_BYTES) return null
+                    output.write(buffer, 0, count)
+                }
+            }
+            val base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+            "data:$mime;base64,$base64"
+        } catch (e: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun imageMimeFromPath(path: String): String? =
+        when (path.substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "bmp" -> "image/bmp"
+            "svg" -> "image/svg+xml"
+            "avif" -> "image/avif"
+            "ico" -> "image/x-icon"
+            else -> null
+        }
 
     private val SingleFileDecorateJs: String =
         "(function(){" +
