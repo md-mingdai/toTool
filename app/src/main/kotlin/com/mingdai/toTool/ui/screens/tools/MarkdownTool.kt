@@ -495,7 +495,7 @@ fun MarkdownTool(padding: PaddingValues) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("HTML 内嵌远程图片", style = MiuixTheme.textStyles.body2)
                 Text(
-                    "下载 Markdown 中的远程图片并转成 Base64；文件会更大，导出也更慢。关闭时保留原始 URL。",
+                    "下载 Markdown 中的远程图片并转成 Base64；文件会更大，导出也更慢。关闭时保留原始 URL，下载失败或超过 8 MB 的图片也会回退为原始 URL。",
                     style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

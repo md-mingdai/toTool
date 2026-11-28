@@ -703,12 +703,15 @@ private fun isTableDivider(line: String): Boolean {
             conn.setRequestProperty("User-Agent", "toTool Markdown export")
             val code = conn.responseCode
             if (code !in 200..299) return null
-            val contentType = conn.contentType
+            val rawContentType = conn.contentType
                 ?.substringBefore(';')
                 ?.trim()
                 ?.lowercase()
-                ?.takeIf { it.startsWith("image/") }
-            val mime = contentType ?: imageMimeFromPath(url.path) ?: return null
+            val mime = when {
+                rawContentType == null -> imageMimeFromPath(url.path)
+                rawContentType.startsWith("image/") -> rawContentType
+                else -> null
+            } ?: return null
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             var total = 0
