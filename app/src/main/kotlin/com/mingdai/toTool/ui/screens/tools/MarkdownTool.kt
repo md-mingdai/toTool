@@ -399,7 +399,7 @@ fun MarkdownTool(padding: PaddingValues) {
         }
 
         HintText(
-            "支持 CommonMark / GFM：标题、列表、表格、任务列表、删除线、链接、图片和围栏代码块。" +
+            "支持 CommonMark / GFM：标题、列表、表格、任务列表、删除线、链接、图片和围栏代码块；行内 / 块级 LaTeX 公式使用本地 KaTeX 渲染。" +
                 "原始 HTML 会按文本显示；代码高亮使用本地打包的 highlight.js。" +
                 "导出可选 1× / 2× / 3× 清晰度，整篇文档会渲染成一张长图并保存到相册 Pictures/toTool；文档很长时高倍数可能受内存限制。远程图片需要联网加载。",
         )
