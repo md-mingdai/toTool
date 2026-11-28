@@ -82,11 +82,12 @@ object MarkdownRenderer {
             val normalized = normalizeTables(markdown)
             val mathMarkers = normalized.indexOf('$') >= 0 ||
                 normalized.contains("\\(") || normalized.contains("\\[")
-            val (mathPrepared, math) = if (mathMarkers) {
+            val mathProtection = if (mathMarkers) {
                 protectMath(normalized)
             } else {
-                normalized to emptyList()
+                MathProtection(normalized, emptyList(), emptyList())
             }
+            val mathPrepared = mathProtection.text
             val hasRawTable = mathPrepared.contains("<table", ignoreCase = true)
             val (tablePrepared, tables) = if (hasRawTable) {
                 protectRawTables(mathPrepared)
@@ -107,7 +108,8 @@ object MarkdownRenderer {
                 }
             }
             restoreEscapes(rendered, escapes)
-            restoreMath(rendered, math)
+            restoreLiterals(rendered, mathProtection.literals)
+            restoreMath(rendered, mathProtection.snippets)
         }
         val css = asset(context, "markdown/markdown.css")
         val highlight = asset(context, "markdown/highlight.min.js")
@@ -185,6 +187,12 @@ object MarkdownRenderer {
 
 private data class MathSnippet(val tex: String, val display: Boolean)
 
+private data class MathProtection(
+    val text: String,
+    val snippets: List<MathSnippet>,
+    val literals: List<String>,
+)
+
 private const val MATH_TOKEN_PREFIX = "@@TTMATH"
 private val TableDividerCell = Regex(""":?-{3,}:?""")
 private val RawTableTokenRegex = Regex("(?s)<p>\\s*@@TTTABLE(\\d+)@@\\s*</p>|@@TTTABLE(\\d+)@@")
@@ -199,8 +207,9 @@ private val RawTableUnknownTagRegex = Regex("(?is)<(?!/?(?:$ALLOWED_TABLE_TAGS)\
  * CommonMark 会把数学公式里的 `_`、`*` 当成强调语法，所以先把公式替换成占位符，
  * 渲染完成后再换回 KaTeX 的 data-tex 节点。扫描时跳过围栏代码和行内代码。
  */
-private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
+private fun protectMath(markdown: String): MathProtection {
     val snippets = mutableListOf<MathSnippet>()
+    val literals = mutableListOf<String>()
     val out = StringBuilder(markdown.length)
     var i = 0
     var inFence = false
@@ -288,7 +297,8 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
                             i = end + 2
                             continue
                         }
-                        out.append(markdown, i, end + 2)
+                        literals += markdown.substring(i, end + 2)
+                        out.append("@@TTLIT").append(literals.lastIndex).append("@@")
                         i = end + 2
                         continue
                     }
@@ -307,7 +317,8 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
                     i = end + 1
                     continue
                 }
-                out.append(markdown, i, end + 1)
+                literals += markdown.substring(i, end + 1)
+                out.append("@@TTLIT").append(literals.lastIndex).append("@@")
                 i = end + 1
                 continue
             }
@@ -315,7 +326,7 @@ private fun protectMath(markdown: String): Pair<String, List<MathSnippet>> {
         out.append(ch)
         i++
     }
-    return out.toString() to snippets
+    return MathProtection(out.toString(), snippets, literals)
 }
 
 
@@ -483,6 +494,27 @@ private fun restoreEscapes(html: String, escapes: List<Char>): String {
         val index = match.groupValues[1].toIntOrNull()
         val ch = index?.let(escapes::getOrNull)
         if (ch == null) match.value else escapeHtmlChar(ch)
+    }
+}
+
+private fun restoreLiterals(html: String, literals: List<String>): String {
+    if (literals.isEmpty()) return html
+    return Regex("@@TTLIT(\\d+)@@").replace(html) { match ->
+        val index = match.groupValues[1].toIntOrNull()
+        val value = index?.let(literals::getOrNull)
+        if (value == null) match.value else escapeHtmlText(value)
+    }
+}
+
+private fun escapeHtmlText(value: String): String = buildString(value.length + 8) {
+    value.forEach { ch ->
+        when (ch) {
+            '&' -> append("&amp;")
+            '<' -> append("&lt;")
+            '>' -> append("&gt;")
+            '\n' -> append("<br>\n")
+            else -> append(ch)
+        }
     }
 }
 
