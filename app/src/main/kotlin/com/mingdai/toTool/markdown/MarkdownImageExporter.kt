@@ -57,10 +57,11 @@ object MarkdownImageExporter {
         style: MarkdownStyle,
         dark: Boolean,
         widthPx: Int,
+        onWarning: ((String) -> Unit)? = null,
     ): MarkdownExportResult {
         val width = widthPx.coerceAtLeast(320)
         val captured = withContext(Dispatchers.Main) {
-            capture(context, html, style, dark, width)
+            capture(context, html, style, dark, width, onWarning)
         }
         val bitmap = captured.bitmap
         try {
@@ -89,6 +90,7 @@ object MarkdownImageExporter {
         style: MarkdownStyle,
         dark: Boolean,
         widthPx: Int,
+        onWarning: ((String) -> Unit)?,
     ): CaptureResult {
         val activity = context.findActivity()
             ?: throw IllegalStateException("无法获取当前页面")
@@ -207,53 +209,33 @@ object MarkdownImageExporter {
             } else {
                 null
             }
+            if (warning != null) onWarning?.invoke(warning)
 
-            // 不把 WebView 撑到整篇文档那么高：Chromium 的大尺寸软件层会触发 tile
-            // 内存上限，页面下半部分可能画不出来。这里让 WebView 保持一个适中的
-            // 视口高度，逐屏滚动并拼接到最终的整篇位图里。
-            val viewportHeight = minOf(heightPx, 3600)
-            host.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
-            webView.layoutParams = FrameLayout.LayoutParams(widthPx, viewportHeight)
+            // 让 WebView 按完整内容高度排版后一次性绘制。滚动后分段绘制在部分
+            // Chromium/WebView 版本上只画可见视口，正是长图底部空白的来源。
+            host.layoutParams = FrameLayout.LayoutParams(widthPx, heightPx)
+            webView.layoutParams = FrameLayout.LayoutParams(widthPx, heightPx)
             host.measure(
                 View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
             )
-            host.layout(0, 0, widthPx, viewportHeight)
+            host.layout(0, 0, widthPx, heightPx)
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
             )
-            webView.layout(0, 0, widthPx, viewportHeight)
+            webView.layout(0, 0, widthPx, heightPx)
             webView.scrollTo(0, 0)
             awaitFrame(webView)
             awaitFrame(webView)
 
             val bitmap = try {
-                Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-            } catch (e: OutOfMemoryError) {
-                throw IllegalStateException("图片过大，内存不足，请分段渲染")
-            }
-            try {
-                val canvas = Canvas(bitmap)
-                canvas.drawColor(style.background(dark))
-                val maxScroll = (heightPx - viewportHeight).coerceAtLeast(0)
-                var top = 0
-                while (top < heightPx) {
-                    val scrollY = minOf(top, maxScroll)
-                    webView.scrollTo(0, scrollY)
-                    awaitFrame(webView)
-                    awaitFrame(webView)
-                    val bottom = minOf(top + viewportHeight, heightPx)
-                    canvas.save()
-                    canvas.clipRect(0, top, widthPx, bottom)
-                    canvas.translate(0f, scrollY.toFloat())
-                    webView.draw(canvas)
-                    canvas.restore()
-                    top = bottom
+                Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888).also { bmp ->
+                    bmp.eraseColor(style.background(dark))
+                    webView.draw(Canvas(bmp))
                 }
-            } catch (e: Throwable) {
-                bitmap.recycle()
-                throw e
+            } catch (e: OutOfMemoryError) {
+                throw IllegalStateException("图片过大，当前设备内存不足，请降低导出清晰度")
             }
             return CaptureResult(bitmap, warning)
         } finally {

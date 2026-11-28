@@ -72,6 +72,9 @@ private data class MarkdownPreview(val html: String = "", val error: String? = n
 
 private data class PreviewPage(val html: String, val url: String?)
 
+private val MarkdownWarningContainer = Color(0xFFFFF3CD)
+private val MarkdownWarningContent = Color(0xFF7A5B00)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MarkdownTool(padding: PaddingValues) {
@@ -324,15 +327,23 @@ fun MarkdownTool(padding: PaddingValues) {
             )
         }
 
-        if (source.length > 300_000) {
+        if (source.length > 300_000 && exportWarning == null) {
             MessageCard(
                 "提示",
                 "文档较长，导出可能耗时并占用较多内存；不会限制 Markdown 长度。",
-                MiuixTheme.colorScheme.secondaryContainer,
-                MiuixTheme.colorScheme.onSecondaryContainer,
+                MarkdownWarningContainer,
+                MarkdownWarningContent,
             )
         }
 
+        exportWarning?.let {
+            MessageCard(
+                "注意",
+                it,
+                MarkdownWarningContainer,
+                MarkdownWarningContent,
+            )
+        }
         Text(
             "导出清晰度",
             style = MiuixTheme.textStyles.footnote1,
@@ -361,7 +372,11 @@ fun MarkdownTool(padding: PaddingValues) {
                 val scaleAtClick = exportScale
                 exporting = true
                 savedPath = null
-                exportWarning = null
+                exportWarning = if (sourceAtClick.length > 300_000) {
+                    "文档较长，正在导出；图片可能占用较多内存并耗时。"
+                } else {
+                    null
+                }
                 error = null
                 scope.launch {
                     try {
@@ -387,9 +402,10 @@ fun MarkdownTool(padding: PaddingValues) {
                             style = styleAtClick,
                             dark = darkAtClick,
                             widthPx = previewWidthPx * scaleAtClick,
+                            onWarning = { exportWarning = it },
                         )
                         savedPath = exported.location
-                        exportWarning = exported.warning
+                        exportWarning = exported.warning ?: exportWarning
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: OutOfMemoryError) {
@@ -407,14 +423,6 @@ fun MarkdownTool(padding: PaddingValues) {
             Text(if (exporting) "正在导出整篇图片…" else "导出为图片")
         }
 
-        exportWarning?.let {
-            MessageCard(
-                "注意",
-                it,
-                MiuixTheme.colorScheme.secondaryContainer,
-                MiuixTheme.colorScheme.onSecondaryContainer,
-            )
-        }
         savedPath?.let {
             MessageCard(
                 null,
